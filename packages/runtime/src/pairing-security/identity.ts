@@ -110,7 +110,7 @@ export function saveTrustedPeer(peer: TrustedPeer): void {
   owner.mutate(revision, randomUUID(), {type: "grant", peer});
 }
 
-/** Reconnect validates membership only; lastSeen persists at grant time. */
+/** Reconnect validates membership, then best-effort updates display-only lastSeen. */
 export function refreshTrustedPeer(publicKey: string, lastSeen: string): void {
   pairingTrustOwner().refresh(publicKey, lastSeen);
 }

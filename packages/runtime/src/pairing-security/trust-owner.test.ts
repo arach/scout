@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PairingTrustOwner, pairingTrustOwner, type PairingTrustAdapter, type PairingRootIdentity, type PairingTrustContext } from "./trust-owner.ts";
@@ -84,16 +84,85 @@ describe("pairing canonical owner", () => {
     expect(gen.mutation.outcome.publicKey).toBe(keyA);
     expect(o.read().peers).toEqual([peer(collision)]);
   });
-  test("reconnect storm writes zero generations or projection bytes; lastSeen stays at grant time", () => {
+  test("reconnect storm writes zero generations or projection bytes; advisory lastSeen stays current", () => {
     for (const managed of [false, true]) {
-      const o = owner(); o.mutate(0,"grant",{type:"grant",peer:{...peer(),lastSeen:"grant-time"}});
+      const o = owner(); o.mutate(0,"grant",{type:"grant",peer:{...peer(),lastSeen:peer().pairedAt}});
       if (managed) manage(o);
       const revision = o.read().revision;
-      const before = readdirSync(o.path).sort().map(name => [name,readFileSync(join(o.path,name),"utf8")]);
-      for (let i=0;i<1000;i++) { o.refresh(keyA,`reconnect-${i}`); if (i === 0) expect(o.read().revision).toBe(revision); }
-      expect(o.read().revision).toBe(revision); expect(o.read().peers[0]!.lastSeen).toBe("grant-time");
-      expect(readdirSync(o.path).sort().map(name=>[name,readFileSync(join(o.path,name),"utf8")])).toEqual(before);
+      const authority = () => readdirSync(o.path).filter(name => name !== "trusted-peers.last-seen.json").sort().map(name => [name,readFileSync(join(o.path,name),"utf8")]);
+      const before = authority(); let newest = "";
+      for (let i=0;i<1000;i++) { newest = new Date(Date.UTC(2026,1,1)+i*1000).toISOString(); o.refresh(keyA,newest); if (i === 0) expect(o.read().revision).toBe(revision); }
+      expect(o.read().revision).toBe(revision); expect(o.read().peers[0]!.lastSeen).toBe(newest);
+      expect(authority()).toEqual(before);
+      const advisory = join(o.path,"trusted-peers.last-seen.json");
+      expect(lstatSync(advisory).mode & 0o777).toBe(0o600);
+      expect(lstatSync(advisory).uid).toBe(process.getuid!());
+      expect(JSON.parse(readFileSync(advisory,"utf8")).entries).toEqual([{publicKey:keyA,lastSeen:newest}]);
     }
+  });
+  test("advisory merge takes the later projection or reconnect time with grant time as floor", () => {
+    const o = owner(), projection = join(o.path,"trusted-peers.json");
+    o.mutate(0,"grant",{type:"grant",peer:peer()});
+    o.refresh(keyA,"2025-01-01T00:00:00Z"); expect(o.read().peers[0]!.lastSeen).toBe(peer().pairedAt);
+    o.refresh(keyA,"2026-02-01T00:00:00Z"); expect(o.read().peers[0]!.lastSeen).toBe("2026-02-01T00:00:00Z");
+    o.refresh(keyA,"2026-01-02T00:00:00Z"); expect(o.read().peers[0]!.lastSeen).toBe("2026-02-01T00:00:00Z");
+    writeFileSync(projection,JSON.stringify([{...peer(),lastSeen:"2026-03-01T00:00:00Z"}]));
+    expect(o.read().peers[0]!.lastSeen).toBe("2026-03-01T00:00:00Z");
+    o.refresh(keyA,"2026-02-02T00:00:00Z"); expect(o.read().peers[0]!.lastSeen).toBe("2026-03-01T00:00:00Z");
+    // Merged display metadata must never leak into later authority publications.
+    o.mutate(1,"grant-b",{type:"grant",peer:peer(keyB)});
+    expect(JSON.parse(readFileSync(projection,"utf8"))[0].lastSeen).toBe("2026-03-01T00:00:00Z");
+    o.refresh(keyA,"2026-04-01T00:00:00Z"); o.mutate(2,"revoke-b",{type:"revoke",publicKey:keyB});
+    expect(JSON.parse(readFileSync(projection,"utf8"))[0].lastSeen).toBe("2026-03-01T00:00:00Z");
+    expect(o.read().peers[0]!.lastSeen).toBe("2026-04-01T00:00:00Z");
+  });
+  test("revoked and non-member advisory entries never grant membership and are pruned on refresh", () => {
+    const o = owner(), file = join(o.path,"trusted-peers.last-seen.json");
+    o.mutate(0,"grant-a",{type:"grant",peer:peer()}); o.mutate(1,"grant-b",{type:"grant",peer:peer(keyB)});
+    o.refresh(keyA,"2026-02-01T00:00:00Z"); o.mutate(2,"revoke-a",{type:"revoke",publicKey:keyA});
+    expect(()=>o.refresh(keyA,"2026-03-01T00:00:00Z")).toThrow("peer_revoked");
+    expect(o.read().peers).toEqual([peer(keyB)]);
+    o.refresh(keyB,"2026-03-01T00:00:00Z");
+    expect(JSON.parse(readFileSync(file,"utf8")).entries).toEqual([{publicKey:keyB,lastSeen:"2026-03-01T00:00:00Z"}]);
+  });
+  test("broken or unsafe advisory files are ignored and replaced without following links", () => {
+    for (const kind of ["json","mode","symlink","hardlink","oversize","duplicate","timestamp","non-member"]) {
+      const o = owner(); o.mutate(0,"grant",{type:"grant",peer:peer()});
+      const file=join(o.path,"trusted-peers.last-seen.json"), outside=join(root(),"outside");
+      const entry={publicKey:kind === "non-member" ? keyB : keyA,lastSeen:"2026-02-01T00:00:00Z"};
+      const content=JSON.stringify({schema:"scout.pairing-last-seen/v1",entries:[entry]});
+      writeFileSync(outside,content,{mode:0o600});
+      if (kind === "symlink") symlinkSync(outside,file);
+      else if (kind === "hardlink") linkSync(outside,file);
+      else writeFileSync(file, kind === "json" ? "{bad" : kind === "oversize" ? " ".repeat(1024*1024+1) : kind === "duplicate" ? JSON.stringify({schema:"scout.pairing-last-seen/v1",entries:[entry,entry]}) : kind === "timestamp" ? JSON.stringify({schema:"scout.pairing-last-seen/v1",entries:[{...entry,lastSeen:"bad"}]}) : content,{mode:kind === "mode" ? 0o644 : 0o600});
+      expect(o.read().peers).toEqual([peer()]);
+      expect(()=>o.refresh(keyA,"2026-03-01T00:00:00Z")).not.toThrow();
+      expect(o.read().peers).toEqual([{...peer(),lastSeen:"2026-03-01T00:00:00Z"}]);
+      expect(lstatSync(file).isSymbolicLink()).toBe(false); expect(lstatSync(file).nlink).toBe(1);
+      expect(lstatSync(file).mode & 0o777).toBe(0o600);
+      expect(readFileSync(outside,"utf8")).toBe(content);
+      expect(JSON.parse(readFileSync(file,"utf8")).entries).toEqual([{publicKey:keyA,lastSeen:"2026-03-01T00:00:00Z"}]);
+    }
+  });
+  test("advisory write failure never fails refresh or changes authority", () => {
+    for (const managed of [false,true]) {
+      const o=owner(); o.mutate(0,"grant",{type:"grant",peer:peer()}); if (managed) manage(o);
+      mkdirSync(join(o.path,"trusted-peers.last-seen.json"),{mode:0o700});
+      const revision=o.read().revision, projection=readFileSync(join(o.path,"trusted-peers.json"));
+      expect(()=>o.refresh(keyA,"2026-02-01T00:00:00Z")).not.toThrow();
+      expect(o.read().peers).toEqual([peer()]); expect(o.read().revision).toBe(revision);
+      expect(readFileSync(join(o.path,"trusted-peers.json"))).toEqual(projection);
+      expect(readdirSync(o.path).filter(n=>n.endsWith(".tmp"))).toEqual([]);
+    }
+  });
+  test("advisory entries are bounded to authoritative peers and the file limit", () => {
+    const o=owner(), peers=Array.from({length:4096},(_,i)=>peer(i.toString(16).padStart(64,"0")));
+    writeFileSync(join(o.path,"trusted-peers.json"),JSON.stringify(peers),{mode:0o600});
+    writeFileSync(join(o.path,"trusted-peers.last-seen.json"),JSON.stringify({schema:"scout.pairing-last-seen/v1",entries:peers.map(p=>({publicKey:p.publicKey,lastSeen:"2026-02-01T00:00:00Z"}))}),{mode:0o600});
+    o.refresh(peers[0]!.publicKey,"2026-03-01T00:00:00Z");
+    const file=join(o.path,"trusted-peers.last-seen.json");
+    expect(JSON.parse(readFileSync(file,"utf8")).entries.length).toBe(4096); expect(lstatSync(file).size).toBeLessThanOrEqual(1024*1024);
+    expect(o.read().revision).toBe(0);
   });
   test("unmanaged old-binary writes are adopted without replaying or rewriting the owner ledger", () => {
     const o = owner(), grant = {type:"grant" as const,peer:peer()};

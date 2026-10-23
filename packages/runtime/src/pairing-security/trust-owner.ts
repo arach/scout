@@ -52,6 +52,8 @@ const adapters = new Map<string, PairingTrustAdapter>();
 const owners = new Map<string, PairingTrustOwner>();
 const PEERS = "trusted-peers.json", MARKER = "trusted-peers.managed.json";
 const PREFIX = "trusted-peers.owner.";
+const LAST_SEEN = "trusted-peers.last-seen.json";
+type LastSeenEntry = { publicKey: string; lastSeen: string };
 const FILE_LIMIT = 1024 * 1024, TOTAL_LIMIT = 128 * 1024 * 1024, REVISION_LIMIT = 65_536;
 const hash = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
 const encodePeers = (peers: readonly TrustedPeer[]) => JSON.stringify(peers, null, 2);
@@ -158,15 +160,69 @@ export class PairingTrustOwner {
     try { if (id(fstatSync(fd)) !== root.id) refuse("root_replaced"); fsyncSync(fd); this.check(root); }
     finally { closeSync(fd); }
   }
-  private stage(root: PairingRootIdentity, bytes: string): string {
+  private stage(root: PairingRootIdentity, bytes: string, prefix = ".pairing-owner"): string {
     this.check(root);
     if (Buffer.byteLength(bytes) > FILE_LIMIT) refuse("capacity");
-    const name = `.pairing-owner-${randomUUID()}.tmp`, path = join(root.path, name);
+    const name = `${prefix}-${randomUUID()}.tmp`, path = join(root.path, name);
     const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { owned(fstatSync(fd)); writeFileSync(fd, bytes); fsyncSync(fd); this.check(root); }
     catch (e) { try { unlinkSync(path); } catch {} throw e; }
     finally { closeSync(fd); }
     return path;
+  }
+  /** Display-only data. Broken/unsafe advisory files never affect authority.
+   * O_NONBLOCK also prevents a raced-in FIFO from blocking an advisory read. */
+  private lastSeen(root: PairingRootIdentity): Map<string, string> {
+    let fd: number | undefined;
+    try {
+      this.check(root);
+      const path = join(root.path, LAST_SEEN);
+      owned(lstatSync(path));
+      fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const stat = fstatSync(fd); owned(stat);
+      if (stat.size > FILE_LIMIT || id(lstatSync(path)) !== id(stat)) return new Map();
+      const bytes = readFileSync(fd);
+      if (bytes.length > FILE_LIMIT || id(lstatSync(path)) !== id(stat)) return new Map();
+      this.check(root);
+      const value = JSON.parse(bytes.toString());
+      if (!record(value) || value.schema !== "scout.pairing-last-seen/v1"
+        || !Array.isArray(value.entries) || value.entries.length > 4096) return new Map();
+      const entries = new Map<string, string>();
+      for (const entry of value.entries) {
+        if (!record(entry) || typeof entry.publicKey !== "string" || !/^[a-f0-9]{64}$/.test(entry.publicKey)
+          || typeof entry.lastSeen !== "string" || entry.lastSeen.length > 128
+          || !Number.isFinite(Date.parse(entry.lastSeen)) || entries.has(entry.publicKey)) return new Map();
+        entries.set(entry.publicKey, entry.lastSeen);
+      }
+      return entries;
+    } catch { return new Map(); }
+    finally { if (fd !== undefined) { try { closeSync(fd); } catch {} } }
+  }
+  private laterSeen(peer: TrustedPeer, advisory: string): string {
+    // Grant time is the floor; an old binary's newer projection value wins too.
+    let latest = advisory;
+    for (const value of [peer.pairedAt, peer.lastSeen]) {
+      if (value !== undefined && Date.parse(value) > Date.parse(latest)) latest = value;
+    }
+    return latest;
+  }
+  private recordLastSeen(root: PairingRootIdentity, peers: readonly TrustedPeer[], publicKey: string, lastSeen: string) {
+    let staged: string | null = null;
+    try {
+      if (!Number.isFinite(Date.parse(lastSeen))) return;
+      const previous = this.lastSeen(root), entries: LastSeenEntry[] = [];
+      for (const peer of peers) {
+        const existing = previous.get(peer.publicKey);
+        const candidate = peer.publicKey === publicKey && (!existing || Date.parse(lastSeen) > Date.parse(existing)) ? lastSeen : existing;
+        if (candidate) entries.push({publicKey: peer.publicKey, lastSeen: this.laterSeen(peer, candidate)});
+      }
+      // Only current members survive. No advisory value enters state()/mutate().
+      const bytes = JSON.stringify({schema: "scout.pairing-last-seen/v1", entries});
+      staged = this.stage(root, bytes, ".pairing-last-seen");
+      this.check(root); renameSync(staged, join(root.path, LAST_SEEN));
+      // No directory durability barrier: advisory updates can be lost.
+    } catch { /* Best effort: metadata failure must not fail a handshake. */ }
+    finally { if (staged) { try { unlinkSync(staged); } catch {} } }
   }
   private marker(root: PairingRootIdentity): Marker | null {
     const bytes = this.readFile(root, MARKER); if (!bytes) return null;
@@ -275,18 +331,30 @@ export class PairingTrustOwner {
     return body(root);
   }
   read(context?: PairingTrustContext): TrustSnapshot {
-    return this.operation(context, root => {
-      if (!root) return {revision: 0, peers: []};
+    const snapshot = this.operation(context, root => {
+      if (!root) return {revision: 0, peers: [] as TrustedPeer[]};
       const state = this.state(root); return {revision: state.revision, peers: structuredClone(state.peers)};
     });
+    try {
+      const root = this.root(), advisory = root ? this.lastSeen(root) : new Map<string, string>();
+      for (const peer of snapshot.peers) {
+        const seen = advisory.get(peer.publicKey);
+        if (seen) peer.lastSeen = this.laterSeen(peer, seen);
+      }
+    } catch { /* An unavailable advisory file never hides an authority snapshot. */ }
+    return snapshot;
   }
-  /** Grant-time-only lastSeen. Reconnect checks current membership but writes
-   * no metadata, projection, generation or deduplication record. */
+  /** Membership is authoritative; the subsequent display-only write is best
+   * effort, needs no gate and never changes projection/generations/outcomes. */
   refresh(publicKey: string, lastSeen: string, context?: PairingTrustContext): void {
     fullKey(publicKey);
     if (typeof lastSeen !== "string" || lastSeen.length > 128) refuse("invalid_mutation");
     const snapshot = this.read(context);
     if (!snapshot.peers.some(peer => peer.publicKey === publicKey)) refuse("peer_revoked");
+    try {
+      const root = this.root();
+      if (root) this.recordLastSeen(root, snapshot.peers, publicKey, lastSeen);
+    } catch { /* Authority succeeded; advisory metadata is optional. */ }
   }
   mutate(expectedRevision: number, mutationId: string, raw: TrustMutation, context?: PairingTrustContext): TrustOutcome {
     // Snapshot untrusted caller-owned objects before adapter callbacks or I/O.

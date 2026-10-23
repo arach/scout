@@ -116,8 +116,19 @@ describe("pairing owner real cross-process and I/O paths", () => {
     const {data,coordination}=fixture(), output=await result(launch("managed-paths",data,coordination));
     expect(output.code,output.stderr).toBe(0); expect(output.value).toEqual({ok:true,removed:true,revision:4,peers:1,reconnectGenerations:0});
     const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(line=>JSON.parse(line));
-    const publications=events.filter(e=>e.event === "link" || e.event === "rename");
+    const advisory=events.filter(e=>e.event === "rename" && e.target.endsWith("trusted-peers.last-seen.json"));
+    expect(advisory.length).toBe(200); expect(advisory.every(e=>e.held === false)).toBe(true);
+    const publications=events.filter(e=>(e.event === "link" || e.event === "rename") && !e.target.endsWith("trusted-peers.last-seen.json"));
     expect(publications.length).toBe(9); expect(publications.every(e=>e.held === true)).toBe(true);
+  });
+  test("real runtime and desktop handshakes survive advisory sync and rename failures", async () => {
+    for (const fault of ["advisory-sync-fail","advisory-rename-fail"]) {
+      const {data,coordination}=fixture(), output=await result(launch("managed-paths",data,coordination,fault));
+      expect(output.code,output.stderr).toBe(0); expect(output.value).toEqual({ok:true,removed:true,revision:4,peers:1,reconnectGenerations:0});
+      const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(line=>JSON.parse(line));
+      expect(events.filter(e=>e.event === "rename" && e.target.endsWith("trusted-peers.last-seen.json"))).toEqual([]);
+      expect(readdirSync(data).filter(n=>n.endsWith(".tmp"))).toEqual([]);
+    }
   });
   test("actual web DELETE returns ambiguous 409, full-key 200, missing 404 and managed unavailable 503", async () => {
     const {data,coordination}=fixture(), output=await result(launch("routes",data,coordination));

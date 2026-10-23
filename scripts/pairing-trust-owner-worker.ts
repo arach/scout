@@ -22,6 +22,7 @@ if (mode === "instrument" || mode === "managed-paths") {
   fs.openSync = ((path: any, ...args: any[]) => { const fd = (original.openSync as any)(path, ...args); fdPaths.set(fd, String(path)); return fd; }) as any;
   fs.fsyncSync = ((fd: number) => {
     syncs++; trace({event: "sync", number: syncs, path: fdPaths.get(fd)});
+    if (detail === "advisory-sync-fail" && fdPaths.get(fd)?.includes(".pairing-last-seen-")) throw Object.assign(Error("injected advisory sync failure"), {code:"EIO"});
     if (detail === `sync-${syncs}`) throw Object.assign(Error("injected sync failure"), {code: "EIO"});
     original.fsyncSync(fd); trace({event: "sync_success", number: syncs, directory: original.fstatSync(fd).isDirectory()});
   }) as any;
@@ -58,6 +59,7 @@ try {
       let holder: object | null = null;
       const remove = owner.register({id:"test.adapter", withGate(_r,body) {holder={};held=true;try{return body(holder);}finally{held=false;holder=null;}},currentHolder(){return holder;}});
       owner.withInvocation(c=>owner.mutate(0,"adopt",{type:"manage"},c));
+      if (detail === "advisory-rename-fail") original.mkdirSync(join(root,"trusted-peers.last-seen.json"),{mode:0o700});
       const runtime = await import("../packages/runtime/src/pairing-security/index.ts");
       const desktop = await import("../apps/desktop/src/core/pairing/runtime/security/index.ts");
       function exchange(Transport: typeof runtime.SecureTransport, identity: ReturnType<typeof runtime.generateKeyPair>, phone: ReturnType<typeof runtime.generateKeyPair>, trustOnComplete: boolean) {

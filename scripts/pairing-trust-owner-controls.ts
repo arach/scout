@@ -24,6 +24,7 @@ const controls = [
   {id:"gate-holder", expected:"context is checked against actual current gate holder", edits:[['|| invocation.adapter.currentHolder(root) !== invocation.holder','']]},
   {id:"generation-checksum", expected:"generation checksum detects", edits:[['if (!record(value) || envelope.sha256 !== hash(JSON.stringify(value))) refuse("generation_checksum");','']]},
   {id:"refresh-growth", expected:"reconnect storm writes zero generations", edits:[['const snapshot = this.read(context);','const snapshot = this.read(context); if (snapshot.peers.length) this.mutate(snapshot.revision, randomUUID(), {type:"grant",peer:snapshot.peers[0]!}, context);']]},
+  {id:"advisory-merge", expected:"advisory merge takes the later projection or reconnect time", edits:[['Date.parse(value) > Date.parse(latest)','Date.parse(value) < Date.parse(latest)']]},
   {id:"unmanaged-adoption", expected:"unmanaged old-binary writes are adopted", edits:[['if ((marker || current.pendingStage) && changedProjection)', 'if (changedProjection)']]},
   {id:"pending-publication", expected:"pending CAS witness survives until projection rename", edits:[
     ['reserved = true;','reserved = true; unlinkSync(stagedGeneration);'],

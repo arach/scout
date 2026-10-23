@@ -12,19 +12,21 @@ registry, authorization endpoint or automatic adapter installation.
 `@openscout/runtime/pairing-security/trust-owner` exports `pairingTrustOwner`,
 `PairingTrustOwner`, `PairingTrustError` and the transaction types.
 
-- `read(context?)` returns an owned snapshot of peers and the owner revision.
+- `read(context?)` returns an owned snapshot of authoritative peers and the owner
+  revision, with display-only advisory `lastSeen` values merged in memory.
 - `mutate(expectedRevision, mutationId, mutation, context?)` publishes one grant,
   full-key revoke, or explicit managed adoption. A conflicting revision
   refuses. There is no automatic retry of a relative change.
 - An exact mutation-ID/request retry returns the persisted original outcome,
   including after a later revision or a lost ACK. Reusing an ID with another
   request refuses. Keep the original expected revision when retrying an ID.
-- `refresh(publicKey, lastSeen, context?)` validates current membership only.
-  It refuses a missing/revoked key and writes nothing. Handshake completion uses
-  this check for existing peers, including `trustOnComplete:false` paths.
-  `lastSeen` is persisted **at grant time only** and can be stale thereafter.
-  It is advisory, never an admission input or proof of current presence. A
-  reconnect never changes the digest-covered projection or creates a generation.
+- `refresh(publicKey, lastSeen, context?)` validates current membership, then
+  best-effort records display-only metadata in `trusted-peers.last-seen.json`.
+  It refuses a missing/revoked key. Advisory I/O failure never fails the
+  handshake. Handshake completion uses this check for existing peers, including
+  `trustOnComplete:false` paths. A reconnect never changes the digest-covered
+  projection or creates a generation. `lastSeen` is never an admission input
+  or proof of current presence.
 - `revokePrefix` resolves either the existing 16-character display prefix or a
   full 64-character key against the current snapshot. The persisted operation
   and outcome always name the full key.
@@ -43,6 +45,39 @@ parent creation is synchronized. New files have mode 0600. Legacy peer files can
 be readable by group/others, but must be owner-controlled, non-writable by them,
 regular, single-link and non-symlink. Owner metadata and marker files require
 0600 discipline. Invalid or unsupported state refuses instead of granting trust.
+
+## Advisory last-seen file
+
+`trusted-peers.last-seen.json` is separate from the authority chain and projection
+digest. Its shape is `{schema: "scout.pairing-last-seen/v1", entries: [...]}`,
+where each entry has a full `publicKey` and a parseable timestamp `lastSeen`.
+It affects display and sorting only. The owner never uses this file for
+admission, membership, grant or revoke, and never copies merged metadata into
+an authority publication.
+
+Reads merge entries only for current authoritative members. The later timestamp
+wins between the projection and advisory file, with `pairedAt` as the grant-time
+floor. Thus an old binary's newer projection timestamp still counts. A missing,
+malformed, oversized or unsafe advisory file is ignored, never quarantined.
+Non-member entries cannot restore a revoked key and are pruned on the next
+successful refresh write. Writes contain at most one entry per authoritative
+peer (4096 maximum), within the existing 1 MiB per-file limit.
+
+The owner stages a new owned mode-0600 regular file, synchronizes the file and
+replaces the advisory path by rename without following a destination symlink.
+Reads reject symlinks, hard links, wrong ownership or group/other permissions;
+they use nonblocking, no-follow opens. Broken or unsafe files can be replaced by
+the next successful refresh. If staging, synchronization or rename fails, the
+owner ignores that failure and cleans up its temporary file. No directory sync
+is required for this file. A non-file obstruction can prevent replacement but
+cannot make authority unavailable or fail a handshake.
+
+Updates need no managed gate and remain **outside managed guarantees**. The
+membership check still obeys the authority contract. Concurrent refreshes in
+two processes can lose one advisory update. Crash or I/O failure can also lose
+an update, so `lastSeen` can lag; the projection/grant timestamp remains the
+floor. A concurrent revocation can leave a stale advisory entry, but reads
+ignore it because it is no longer an authoritative member.
 
 ## Named on-disk delta: `scout.pairing-trust-owner/v1`
 
@@ -195,8 +230,11 @@ bun run check:presentation
 ```
 
 The process suite coordinates two real processes without sleeps as an ordering
-proof, tests reconnect storms (zero generations), unmanaged old-binary adoption
-and managed refusal, ACK loss and publication interruption, and instruments the actual
+proof, tests reconnect storms (zero generations and unchanged projections),
+current advisory timestamps, unsafe-file replacement, old-binary timestamp
+merging, unmanaged adoption and managed refusal, ACK loss and publication
+interruption. Real runtime and desktop Noise handshakes also complete through
+injected advisory sync/rename failures. The suite instruments actual
 file/directory barrier calls. Its instrumentation must observe operations; no-op
 instrumentation fails. The negative controls use disposable mutated source
 copies, not production switches or edits to the checkout. The source census
