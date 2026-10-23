@@ -1,19 +1,26 @@
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { readinessWarmupExit, warmReadinessFixture } from "../test-fixtures/warm-readiness-fixture.ts";
 
 // Separate processes keep module mocks out of the other command tests. The
 // setup service is synthetic; actual command output and process exit are not.
+// Stage each script in its own hook and warm imports only. The early exit is
+// before runSetupCommand: every assertion below sees the FIRST real invocation.
+// Keep the existing synchronous guard unchanged pending the fence-accounted follow-up.
 for (const mode of ["plain", "json"] as const) {
   for (const status of ["error", "missing", "skipped", "ready", "installed"]) {
-    test(`setup process ${mode}: local edge ${status}`, () => {
-      const home = mkdtempSync(join(tmpdir(), "scout-setup-process-"));
-      try {
+    describe(`setup process ${mode}: local edge ${status}`, () => {
+      let home: string;
+      let child: string;
+      let env: NodeJS.ProcessEnv;
+      beforeAll(async () => {
+        home = mkdtempSync(join(tmpdir(), "scout-setup-process-"));
         const service = resolve(import.meta.dir, "../../lib/core/setup/service.ts");
         const command = resolve(import.meta.dir, "setup.ts");
         const context = resolve(import.meta.dir, "../context.ts");
-        const child = join(home, "child.ts");
+        child = join(home, "child.ts");
         writeFileSync(child, `
 import { mock } from "bun:test";
 import { healthyCoreReport } from ${JSON.stringify(resolve(import.meta.dir, "../test-fixtures/core-report.ts"))};
@@ -37,12 +44,17 @@ const report = {
 mock.module(${JSON.stringify(service)}, () => ({ runScoutSetup: async () => report }));
 const { runSetupCommand } = await import(${JSON.stringify(command)});
 const { createScoutCommandContext } = await import(${JSON.stringify(context)});
+${readinessWarmupExit()}
 await runSetupCommand(createScoutCommandContext({ cwd: ${JSON.stringify(home)}, outputMode: ${JSON.stringify(mode)}, isTty: false }), ["--source-root", ${JSON.stringify(home)}]);
 `);
-        const env = { ...process.env, HOME: home, OPENSCOUT_HOME: join(home, ".openscout"),
+        env = { ...process.env, HOME: home, OPENSCOUT_HOME: join(home, ".openscout"),
           OPENSCOUT_SUPPORT_DIRECTORY: join(home, "support"), OPENSCOUT_CONTROL_HOME: join(home, "control"),
           OPENSCOUT_RELAY_HUB: join(home, "relay"), OPENSCOUT_BROKER_URL: "http://127.0.0.1:1",
           OPENSCOUT_BROKER_SOCKET_PATH: join(home, "absent.sock") };
+        await warmReadinessFixture(child, { env });
+      });
+      afterAll(() => { if (home) rmSync(home, { recursive: true, force: true }); });
+      test(`setup process ${mode}: local edge ${status}`, () => {
         const result = Bun.spawnSync([process.execPath, child], { env, timeout: 20_000 });
         const stdout = result.stdout.toString();
         expect(result.stderr.toString()).toBe("");
@@ -59,7 +71,7 @@ await runSetupCommand(createScoutCommandContext({ cwd: ${JSON.stringify(home)}, 
           expect(stdout).toContain(headline);
           expect(stdout).not.toContain("Browser:");
         }
-      } finally { rmSync(home, { recursive: true, force: true }); }
+      });
     });
   }
 }
@@ -77,13 +89,16 @@ const HANDOFF_CASES = {
 
 for (const mode of ["plain", "json"] as const) {
   for (const [name, { fails }] of Object.entries(HANDOFF_CASES)) {
-    test(`setup process ${mode}: headless broker ${name}`, () => {
-      const home = mkdtempSync(join(tmpdir(), "scout-setup-handoff-"));
-      try {
+    describe(`setup process ${mode}: headless broker ${name}`, () => {
+      let home: string;
+      let child: string;
+      let env: NodeJS.ProcessEnv;
+      beforeAll(async () => {
+        home = mkdtempSync(join(tmpdir(), "scout-setup-handoff-"));
         const command = resolve(import.meta.dir, "setup.ts");
         const context = resolve(import.meta.dir, "../context.ts");
         const onboardingModule = Bun.resolveSync("@openscout/runtime/onboarding", import.meta.dir);
-        const child = join(home, "child.ts");
+        child = join(home, "child.ts");
         writeFileSync(child, `
 import { mock } from "bun:test";
 const onboarding = { ...(await import(${JSON.stringify(onboardingModule)})) };
@@ -109,12 +124,17 @@ mock.module(${JSON.stringify(onboardingModule)}, () => ({
 }));
 const { runSetupCommand } = await import(${JSON.stringify(command)});
 const { createScoutCommandContext } = await import(${JSON.stringify(context)});
+${readinessWarmupExit()}
 await runSetupCommand(createScoutCommandContext({ cwd: ${JSON.stringify(home)}, outputMode: ${JSON.stringify(mode)}, isTty: false }), ["--source-root", ${JSON.stringify(home)}]);
 `);
-        const env = { ...process.env, HOME: home, OPENSCOUT_HOME: join(home, ".openscout"),
+        env = { ...process.env, HOME: home, OPENSCOUT_HOME: join(home, ".openscout"),
           OPENSCOUT_SUPPORT_DIRECTORY: join(home, "support"), OPENSCOUT_CONTROL_HOME: join(home, "control"),
           OPENSCOUT_RELAY_HUB: join(home, "relay"), OPENSCOUT_BROKER_URL: "http://127.0.0.1:1",
           OPENSCOUT_BROKER_SOCKET_PATH: join(home, "absent.sock") };
+        await warmReadinessFixture(child, { env });
+      });
+      afterAll(() => { if (home) rmSync(home, { recursive: true, force: true }); });
+      test(`setup process ${mode}: headless broker ${name}`, () => {
         const result = Bun.spawnSync([process.execPath, child], { env, timeout: 20_000 });
         const stdout = result.stdout.toString();
         expect(result.stderr.toString()).toBe("");
@@ -140,7 +160,7 @@ await runSetupCommand(createScoutCommandContext({ cwd: ${JSON.stringify(home)}, 
             expect(stdout).not.toContain("Error:");
           }
         }
-      } finally { rmSync(home, { recursive: true, force: true }); }
+      });
     });
   }
 }

@@ -34,7 +34,39 @@ The independent macOS/Linux jobs retain the cold no-DFG read-timeout process,
 the warm full-JIT matrix, pure/pressure tests, context companion/sentinel,
 artifact tests and fences. Positive skips refuse qualification. The existing
 manual/callable CI model is unchanged. The per-key cc allowance must keep its
-exact fixed-source restriction and the fence inventory must stay at least 174.
+exact fixed-source restriction. The fence must pass over the full source inventory,
+and every per-key policy must match the expected inventory in
+`scripts/extension-channel-fence-inventory.json`. The b90c69fd baseline has 174
+named symbol/file pairs and a fixed digest. Later changes must append accounting
+records that name each retired/added pair, its policy digest, the reason and
+the exact before/after counts. Recounting disk does not grant approval. A missing
+pair, an unrelated same-count replacement or an unaccounted policy widening
+refuses, as does a missing/partial/vacuous fence report. The fixed-source native
+compile checks remain mandatory independently of this ledger.
+
+PR #100 adds `packages/cli/src/cli/core-readiness.test.ts / Bun.spawnSync` for
+bounded isolated core setup/doctor fixtures. Its named record identifies reviewed
+input `66b524514cab1bfacd251bbde728f5b8175e315c` and merge
+`6092bf44004abe29a862d0f6974279e4795cf6c5`, taking the expected inventory from
+174 to 175. The pinned baseline and its digest remain unchanged.
+
+PR #95's rebase must append the named 175-to-174 transition: retire `spawnSync`
+in `packages/cli/src/cli/commands/web.ts` (async tar extraction) and
+`packages/cli/src/cli/commands/web.test.ts` (async tar fixture helpers); add
+`Bun.spawnSync` in `packages/cli/src/cli/commands/fixtures/web-stdio.ts`
+(child-only legacy synchronous-call regression control). Its unaccounted
+174-entry tree must refuse against the accounted 175-entry inventory.
+Do not edit or regenerate the pinned baseline.
+
+CLI source units run reuse-sensitive suites in separate processes; Bun
+JS-realm isolation alone does not isolate the descriptor table. No witness
+assertion, bound or sensitivity control is relaxed.
+
+Process separation addresses shared descriptor-table activity, not collection
+timing. A positive collection miss still refuses the checkpoint after 64 GC
+rounds. The added positive-refusal diagnostic logs collection observations,
+reuse and identity losses. It does not retry, take a heap snapshot or turn a
+refusal into a pass; the existing opt-in witness snapshot remains separate.
 
 The credential reader still lacks the 4-KiB partial-frame/idle distinction
 required by the input protocol. This facade does not implement credential
