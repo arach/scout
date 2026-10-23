@@ -50,7 +50,7 @@ const controls = [
   ]},
   {id: "cached-migrated-positive", unit: true, test: "migrated reads remain exhaustive", edits: [
     ['const completing = new Set<string>();', 'const completing = new Set<string>(); const cached = new Map<string, State>();'],
-    ['return this.capsuleState(root, allowPending, inventory);', '{if (!cached.has(root.id)) cached.set(root.id, this.capsuleState(root, allowPending, inventory)); return cached.get(root.id)!;}'],
+    ['return this.capsuleState(root, allowPending, inventory, materialize);', '{if (!cached.has(root.id)) cached.set(root.id, this.capsuleState(root, allowPending, inventory, materialize)); return cached.get(root.id)!;}'],
   ]},
 ];
 const url = (path: string) => pathToFileURL(join(project, path)).href;

@@ -474,3 +474,25 @@ of the known persistence routes, not confinement of arbitrary filesystem code.
 New relay grants use a single-use, root/room/baseline-bound local opportunity.
 See [relay pairing opportunities](./relay-pairing-opportunities.md) for opening,
 expiry, cancellation, reconnect behavior and the limits of pairing revocation.
+
+## Exhaustive authority views
+
+`owner.readAuthority(context?)` returns `{revision, peers, stamp}` from one
+verified owner operation. `peers` is a detached authority snapshot, without the
+advisory last-seen merge. `stamp` is byte-identical to `pairingAuthorityStamp()`
+on the same completed authority. Like that stamp method, a missing root is
+created before the operation. This local API installs no listener, migrates no
+store and registers no transport session.
+
+The capsule view and full read use the same structure, row, digest, policy,
+capacity, inventory and holder validation. Only materialization is a parameter.
+Every call rereads, hashes and validates all retained authority. The view keeps
+only the duplicate-ID set and last row instead of the saved-outcome lookup,
+all parsed rows and all chunk buffers. No result survives between calls.
+Legacy reads retain their full validation and materialization.
+
+A pending publication completes or refuses before the view returns. Completion
+uses a full state, then a fresh exhaustive view. Mutation, exact retry and
+recovery still use the full build by default. `read()` retains its advisory
+metadata behavior; consumers must not combine independent reads and stamps to
+pretend they have one coherent authority view.
