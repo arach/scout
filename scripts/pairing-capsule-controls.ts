@@ -41,7 +41,8 @@ for(const control of controls){
   const scratch=mkdtempSync(join(tmpdir(),"pairing-capsule-control-"));
   try{
     const source=(text:string)=>text.replace('"../support-paths.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/support-paths.ts")).href))
-      .replace('"./trust-capsule.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-capsule.ts")).href));
+      .replace('"./trust-capsule.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-capsule.ts")).href))
+      .replace('"./trust-cutover.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-cutover.ts")).href));
     let mutated=original;
     for(const [needle,replacement] of control.edits){if(!mutated.includes(needle!))throw Error(`missing anchor ${control.id}`);mutated=mutated.replaceAll(needle!,replacement!);}
     const hashes:any={};
@@ -63,7 +64,7 @@ test("v2 required actual fsync barriers",()=>{
 const root=original.mkdtempSync(join(tmpdir(),"pairing-capsule-sync-"));
 try{const f=capsuleFixture(root,{factory:pairingTrustOwner});syncs=0;
 f.owner.mutate(1,"two",{type:"grant",peer:{publicKey:"b".repeat(64),pairedAt:"date"}});
-expect(syncs).toBe(15);
+expect(syncs).toBe(16);
 }finally{original.rmSync(root,{recursive:true,force:true});}
 });`;
       writeFileSync(testFile,tests);

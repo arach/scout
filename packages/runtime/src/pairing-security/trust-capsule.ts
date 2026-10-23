@@ -17,6 +17,7 @@ export type CapsuleBarrier = {
   schema:"scout.pairing-cut/v2"; rootId:string; revision:number; logicalHead:string;
   logicalPeersHash:string; checkpointPeersHash:string; projectionHash:string;
   outcomesDigest:string; chargedBytes:number; policy:ManagedPolicy|null; parts:CapsulePart[];
+  migration?: {migrationId:string; token:string; identity:string; planHash:string};
 };
 export type CapsuleHead = {
   schema:"scout.pairing-capsule/v2"; rootId:string; cutHash:string; serial:number;

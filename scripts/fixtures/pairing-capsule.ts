@@ -8,7 +8,7 @@ import {pairingTrustOwner, type PairingTrustOwner, type TrustedPeer} from "../..
 import {pack,digest,CUTOVER,commitName,doneName,dataName,CHUNK_TARGET,
   type CapsuleRow,type CapsuleBarrier,type CapsuleHead,type ManagedPolicy} from "../../packages/runtime/src/pairing-security/trust-capsule.ts";
 
-export function capsuleFixture(path:string, options:{generations?:number;keys?:number;factory?:typeof pairingTrustOwner;
+export function legacyFixture(path:string, options:{generations?:number;keys?:number;factory?:typeof pairingTrustOwner;
   prepare?:(owner:PairingTrustOwner)=>void;projection?:string|null}={}) {
   const root=realpathSync(path), temp=realpathSync(tmpdir());
   if(!root.startsWith(temp+"/") || !root.split("/").at(-1)!.startsWith("pairing-capsule-") || readdirSync(root).length)throw Error("empty temporary capsule fixture required");
@@ -34,6 +34,11 @@ export function capsuleFixture(path:string, options:{generations?:number;keys?:n
   options.prepare?.(owner);
   if(options.projection===null){try{unlinkSync(join(root,"trusted-peers.json"));}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}}
   else if(options.projection!==undefined)writeFileSync(join(root,"trusted-peers.json"),options.projection,{mode:0o600});
+  return {root,rootId,owner,keys};
+}
+
+export function capsuleFixture(path:string, options:Parameters<typeof legacyFixture>[1]&{migrate?:boolean}={}) {
+  const {root,rootId,owner,keys}=legacyFixture(path,options);
   // Test-only access to the real owner's coherent state. Never merge advisory
   // display fields or authorize from a pair of unrelated read/stamp calls.
   const internals=owner as any;
@@ -47,6 +52,14 @@ export function capsuleFixture(path:string, options:{generations?:number;keys?:n
     const marker=o.type==="manage"?g.managed:null;
     rows.push([o.mutationId,o.revision,o.type,o.publicKey,o.changed,request,bytes.length,marker]);charge+=bytes.length;
     if(marker)policy={revision,marker};
+  }
+  if(options.migrate){
+    owner.migrateToCapsule("fixture-cutover");
+    const barrierName=`trusted-peers.owner.${state.revision+1}.json`;
+    const barrier=JSON.parse(readFileSync(join(root,barrierName),"utf8")).barrier as CapsuleBarrier;
+    const bytes=readFileSync(join(root,commitName(1))),head=JSON.parse(bytes.toString()).capsule as CapsuleHead;
+    if(barrier.migration?.migrationId!=="fixture-cutover")throw Error("real cutover receipt required");
+    return {root,rootId,owner,keys,rows,barrier,barrierName,head,stamp,physicalHash:digest(bytes),legacyBytes:charge};
   }
   const parts:CapsuleBarrier["parts"]=[];let group:string[]=[],size=2;
   const flush=()=>{if(!group.length)return;const bytes=`[${group.join(",")}]`, name=dataName(randomUUID());

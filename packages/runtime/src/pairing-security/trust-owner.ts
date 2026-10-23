@@ -1,11 +1,11 @@
 /** Canonical pairing trust persistence. No I/O or adapter installation on import.
  * See docs/pairing-trust-owner.md for the on-disk and interruption contract. */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, randomFillSync } from "node:crypto";
 import {
   closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, lstatSync,
   mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync,
-  unlinkSync, writeFileSync, rmdirSync, type Stats,
+  unlinkSync, writeFileSync, rmdirSync, ftruncateSync, type Stats,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { resolveOpenScoutPairingHome } from "../support-paths.js";
@@ -13,6 +13,8 @@ import { CAPSULE_PREFIX, CUTOVER, CHUNK_TARGET, SLOT_LIMIT, commitName, doneName
   pack, unpack, hex, integer, token, same, policyValid, partValid, rowValid, outcome,
   logicalHead, legacyCharge, type CapsuleBarrier, type CapsuleHead, type CapsuleDecoded,
   type CapsuleSlot, type CapsuleRow, type CapsulePart, type ManagedPolicy, type RetiredFile } from "./trust-capsule.js";
+import { CUT_DIRECTORY, RESERVATION_FILES, RESERVATION_BYTES, reserveName, cutChild, cutName, cutBodies,
+  type CutClaim, type CutPlan, type CutFile, type CutRetired, type CutResult } from "./trust-cutover.js";
 
 export type TrustedPeer = { publicKey: string; name?: string; pairedAt: string; lastSeen?: string };
 export type PairingRootIdentity = Readonly<{ path: string; id: string }>;
@@ -61,6 +63,7 @@ type State = { revision: number; peers: TrustedPeer[]; hash: string; peersHash: 
 type Invocation = { owner: PairingTrustOwner; root: PairingRootIdentity; adapter: PairingTrustAdapter;
   holder: object; active: boolean; used: boolean };
 const invocations = new AsyncLocalStorage<Invocation>();
+const liveInvocations = new Set<Invocation>();
 const contexts = new WeakMap<object, Invocation>();
 const adapters = new Map<string, PairingTrustAdapter>();
 const owners = new Map<string, PairingTrustOwner>();
@@ -186,9 +189,12 @@ export class PairingTrustOwner {
     this.writeNew(root, name, bytes);
     return path;
   }
-  private writeNew(root: PairingRootIdentity, name: string, bytes: string) {
+  private writeNew(root: PairingRootIdentity, name: string, bytes: string | Buffer) {
     this.check(root);
-    if ((name.includes("/") && !/^\.pairing-v2-slot-[0-7]\/[a-f0-9-]{36}\.json$/.test(name)) || name === "." || name === "..") refuse("unsafe_path");
+    if ((name.includes("/") && !/^\.pairing-v2-slot-[0-7]\/[a-f0-9-]{36}\.json$/.test(name)
+      && !/^\.pairing-claim-[a-f0-9-]{36}\/[a-f0-9-]{36}\.json$/.test(name)
+      && !(name.startsWith(`${CUT_DIRECTORY}/`) && cutName(name.slice(CUT_DIRECTORY.length + 1))))
+      || name === "." || name === "..") refuse("unsafe_path");
     if (Buffer.byteLength(bytes) > FILE_LIMIT) refuse("capacity");
     const path = join(root.path, name);
     const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
@@ -384,6 +390,7 @@ export class PairingTrustOwner {
     } finally { completing.delete(root.id); }
   }
   private readyState(root: PairingRootIdentity): State {
+    this.finishPendingCutover(root);
     const state = this.state(root, true);
     if (state.capsule) {
       if (state.capsule.needsRecovery) this.completeCapsule(root, state);
@@ -391,6 +398,335 @@ export class PairingTrustOwner {
     }
     if (state.pendingStage) this.completePublication(root, state);
     return state.pendingStage ? this.state(root) : state;
+  }
+  private cutDirectory(root: PairingRootIdentity, claim: CutClaim) {
+    this.check(root);
+    const stat = lstatSync(join(root.path, CUT_DIRECTORY));
+    owned(stat, true);
+    if (claim.rootId !== root.id || id(stat) !== claim.identity) refuse("migration_claim_changed");
+  }
+  private syncCutDirectory(root: PairingRootIdentity, claim: CutClaim) {
+    this.cutDirectory(root, claim);
+    const fd = openSync(join(root.path, CUT_DIRECTORY), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try {
+      if (id(fstatSync(fd)) !== claim.identity) refuse("migration_claim_changed");
+      fsyncSync(fd);
+    } finally { closeSync(fd); }
+    this.cutDirectory(root, claim);
+  }
+  private cutSource(root: PairingRootIdentity, claim: CutClaim, name: string) {
+    if (!cutName(name)) refuse("migration_plan_invalid");
+    this.cutDirectory(root, claim);
+    const bytes = this.retainedStage(root, cutChild(name), name === "barrier.json");
+    this.cutDirectory(root, claim);
+    return bytes;
+  }
+  private cutReceipt(root: PairingRootIdentity, barrier: CapsuleBarrier, cutHash: string) {
+    const bytes = this.readFile(root, CUTOVER, false);
+    if (!bytes) return false;
+    const receipt = unpack<Record<string, unknown>>(bytes, "receipt", refuse);
+    if (receipt.schema !== "scout.pairing-cutover-done/v2" || receipt.rootId !== root.id
+      || receipt.cutHash !== cutHash || receipt.migrationId !== barrier.migration?.migrationId) refuse("migration_receipt_invalid");
+    return true;
+  }
+  /** Only the creator before CAS, or a barrier/receipt-authorized helper after
+   * CAS, owns this exact directory inode. No recursive or age-based cleanup. */
+  private removeCutFiles(root: PairingRootIdentity, claim: CutClaim) {
+    let stat;
+    try { stat = lstatSync(join(root.path, CUT_DIRECTORY)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+    owned(stat, true);
+    if (id(stat) !== claim.identity) refuse("migration_claim_changed");
+    const names = readdirSync(join(root.path, CUT_DIRECTORY));
+    if (names.length > RESERVATION_FILES || names.some(name => !cutName(name))) refuse("migration_claim_changed");
+    // Keep the claim until all payloads are gone, including when helpers race.
+    names.sort((a, b) => Number(a === "claim.json") - Number(b === "claim.json") || a.localeCompare(b));
+    for (const name of names) {
+      this.cutDirectory(root, claim);
+      const bytes = this.cutSource(root, claim, name);
+      if (bytes) {
+        try { unlinkSync(join(root.path, cutChild(name))); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      }
+    }
+    this.syncCutDirectory(root, claim);
+    try { rmdirSync(join(root.path, CUT_DIRECTORY)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    this.syncDirectory(root);
+  }
+  /** Materialize 320 MiB, not a sparse truncate or free-space observation.
+   * Later sources reuse these allocated files; no second bulk allocation. */
+  private reserveCutover(root: PairingRootIdentity, claim: CutClaim) {
+    const buffer = Buffer.alloc(FILE_LIMIT);
+    let allocated = 0;
+    for (let index = 0; index < RESERVATION_FILES; index++) {
+      this.cutDirectory(root, claim);
+      randomFillSync(buffer);
+      const name = cutChild(reserveName(index));
+      this.writeNew(root, name, buffer);
+      const stat = lstatSync(join(root.path, name)); owned(stat);
+      if (stat.size !== FILE_LIMIT || stat.blocks * 512 < FILE_LIMIT) refuse("migration_reservation_unavailable");
+      allocated += stat.size;
+    }
+    if (allocated !== RESERVATION_BYTES) refuse("migration_reservation_unavailable");
+    this.syncCutDirectory(root, claim);
+    this.syncDirectory(root);
+  }
+  private fillCutReservation(root: PairingRootIdentity, claim: CutClaim, index: number, name: string, bytes: string) {
+    if (index >= RESERVATION_FILES || !cutName(name) || Buffer.byteLength(bytes) > FILE_LIMIT) refuse("capacity");
+    this.cutDirectory(root, claim);
+    const source = join(root.path, cutChild(reserveName(index))), target = join(root.path, cutChild(name));
+    if (existsSync(target)) refuse("migration_claim_changed");
+    const fd = openSync(source, constants.O_WRONLY | constants.O_NOFOLLOW);
+    try {
+      const stat = fstatSync(fd); owned(stat);
+      if (stat.size !== FILE_LIMIT || stat.blocks * 512 < FILE_LIMIT || id(lstatSync(source)) !== id(stat)) refuse("migration_reservation_unavailable");
+      writeFileSync(fd, bytes);
+      ftruncateSync(fd, Buffer.byteLength(bytes));
+      fsyncSync(fd);
+      this.cutDirectory(root, claim);
+      if (id(lstatSync(source)) !== id(stat)) refuse("migration_claim_changed");
+      renameSync(source, target);
+    } finally { closeSync(fd); }
+  }
+  private finishPendingCutover(root: PairingRootIdentity) {
+    if (!existsSync(join(root.path, CUT_DIRECTORY))) return;
+    // Private pre-CAS staging is deliberately invisible to v1 authority.
+    const names = readdirSync(root.path).filter(name => /^trusted-peers\.owner\.[1-9][0-9]*\.json$/.test(name));
+    if (!names.length) return;
+    const name = names.sort((a, b) => Number(a.split(".")[2]) - Number(b.split(".")[2])).at(-1)!;
+    const bytes = this.readFile(root, name, true);
+    if (!bytes) refuse("revision_conflict");
+    if (!record(JSON.parse(bytes.toString()).barrier)) return;
+    const barrier = unpack<CapsuleBarrier>(bytes, "barrier", refuse);
+    const m = barrier.migration;
+    if (barrier.schema !== "scout.pairing-cut/v2" || barrier.rootId !== root.id
+      || !integer(barrier.revision, 0, REVISION_LIMIT) || name !== `${PREFIX}${barrier.revision + 1}.json`
+      || !m || !token(m.token) || !/^[a-zA-Z0-9._:-]{1,128}$/.test(m.migrationId)
+      || !/^\d+:\d+$/.test(m.identity) || !hex(m.planHash)
+      || !hex(barrier.logicalHead) || !hex(barrier.logicalPeersHash) || !hex(barrier.checkpointPeersHash)
+      || !hex(barrier.projectionHash) || !hex(barrier.outcomesDigest) || !integer(barrier.chargedBytes, 0, TOTAL_LIMIT)
+      || !policyValid(barrier.policy, root.id, barrier.revision)) refuse("migration_barrier_invalid");
+    this.completeCutover(root, barrier, bytes);
+  }
+  private completeCutover(root: PairingRootIdentity, barrier: CapsuleBarrier, barrierBytes: Buffer) {
+    const m = barrier.migration!, claim: CutClaim = {rootId: root.id, token: m.token, identity: m.identity, migrationId: m.migrationId};
+    const cutHash = hash(barrierBytes);
+    if ([...liveInvocations].some(active => active.active && active.root.id === root.id
+      && active !== invocations.getStore())) refuse("migration_holder_active");
+    this.capsulePolicy(root, barrier.policy);
+    if (!same(this.marker(root), barrier.policy?.marker ?? null)) refuse("managed_marker_mismatch");
+    try {
+      if (!this.cutReceipt(root, barrier, cutHash)) {
+        const barrierPath = join(root.path, `${PREFIX}${barrier.revision + 1}.json`);
+        const target = lstatSync(barrierPath), witness = lstatSync(join(root.path, cutChild("barrier.json")));
+        owned(target, false, false, true); owned(witness, false, false, true);
+        if (target.nlink !== 2 || id(target) !== id(witness)) refuse("migration_witness_invalid");
+        const planBytes = this.cutSource(root, claim, "plan.json");
+        if (!planBytes || hash(planBytes) !== m.planHash) refuse("migration_plan_invalid");
+        const plan = unpack<CutPlan>(planBytes, "plan", refuse);
+        if (plan.schema !== "scout.pairing-cutover-plan/v2" || !same({rootId: plan.rootId, token: plan.token,
+          identity: plan.identity, migrationId: plan.migrationId}, claim)
+          || !Array.isArray(plan.parts) || plan.parts.length > 256 || !plan.parts.every(partValid)
+          || !Array.isArray(plan.inventories) || plan.inventories.length > 64) refuse("migration_plan_invalid");
+        const bodies = cutBodies(plan, m.planHash);
+        if (bodies.barrierBytes !== barrierBytes.toString() || hash(encodePeers(peersOf(plan.peers))) !== plan.checkpointPeersHash) refuse("migration_plan_invalid");
+        if (plan.adoption !== null && (!record(plan.adoption) || !hex(plan.adoption.fromProjectionHash)
+          || !hex(plan.adoption.toProjectionHash))) refuse("migration_plan_invalid");
+        const authorityBytes = plan.parts.reduce((sum, part) => sum + part.bytes, 0) + barrierBytes.length
+          + bodies.files.reduce((sum, [, bytes]) => sum + Buffer.byteLength(bytes), 0);
+        if (authorityBytes > TOTAL_LIMIT || plan.parts.length + plan.inventories.length + 6 > RESERVATION_FILES
+          || bodies.files.some(([, bytes]) => Buffer.byteLength(bytes) > FILE_LIMIT)) refuse("capacity");
+        const savedClaim = this.cutSource(root, claim, "claim.json");
+        if (!savedClaim || !same(unpack<CutClaim>(savedClaim, "claim", refuse), claim)) refuse("migration_claim_changed");
+        // Validate ALL retained rows and retirement evidence before publication
+        // or deletion. Neither a partial old prefix nor membership is a shortcut.
+        const rows: CapsuleRow[] = [], ids = new Set<string>();
+        let charge = 0, policy: ManagedPolicy | null = null;
+        for (const part of plan.parts) {
+          const bytes = this.cutSource(root, claim, part.name) ?? this.readFile(root, part.name, false);
+          if (!bytes || bytes.length !== part.bytes || hash(bytes) !== part.sha256) refuse("migration_chunk_invalid");
+          const values = JSON.parse(bytes.toString());
+          if (!Array.isArray(values) || values.length !== part.count) refuse("migration_chunk_invalid");
+          for (const row of values) {
+            if (!rowValid(row, rows.length + 1, root.id) || ids.has(row[0])) refuse("migration_outcome_invalid");
+            ids.add(row[0]); rows.push(row); charge += row[6];
+            if (row[2] === "manage") {
+              if (policy) refuse("managed_downgrade");
+              policy = {revision: row[1], marker: row[7]!};
+            }
+          }
+        }
+        if (rows.length !== plan.revision || hash(JSON.stringify(rows)) !== plan.outcomesDigest
+          || charge !== plan.chargedBytes || charge > TOTAL_LIMIT || !same(policy, plan.policy)) refuse("migration_outcome_invalid");
+        this.capsulePolicy(root, policy);
+        const retired: CutRetired[] = [];
+        let retiredBytes = 0;
+        for (const part of plan.inventories) {
+          if (!/^retire\.[a-f0-9-]{36}\.json$/.test(part.name) || !hex(part.sha256)
+            || !integer(part.bytes, 2, FILE_LIMIT) || !integer(part.count, 1, REVISION_LIMIT)) refuse("migration_inventory_invalid");
+          const bytes = this.cutSource(root, claim, part.name);
+          if (!bytes || bytes.length !== part.bytes || hash(bytes) !== part.sha256) refuse("migration_inventory_invalid");
+          const values = JSON.parse(bytes.toString());
+          if (!Array.isArray(values) || values.length !== part.count) refuse("migration_inventory_invalid");
+          for (const item of values) {
+            if (!record(item) || item.name !== `${PREFIX}${retired.length + 1}.json` || !hex(item.sha256)
+              || !integer(item.bytes, 1, FILE_LIMIT) || typeof item.identity !== "string"
+              || !/^\d+:\d+$/.test(item.identity)) refuse("migration_inventory_invalid");
+            retired.push(item as CutRetired); retiredBytes += item.bytes;
+          }
+        }
+        if (retired.length !== plan.revision || retiredBytes !== plan.chargedBytes) refuse("migration_inventory_invalid");
+        // Establish the barrier before any root publication or retirement.
+        this.syncDirectory(root);
+        const publish = (name: string, expectedHash: string) => {
+          this.capsulePolicy(root, plan.policy);
+          if (this.cutReceipt(root, barrier, cutHash)) return;
+          const source = this.cutSource(root, claim, name);
+          if (source) {
+            if (hash(source) !== expectedHash) refuse("migration_candidate_invalid");
+            try { renameSync(join(root.path, cutChild(name)), join(root.path, name)); }
+            catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+          }
+          if (this.cutReceipt(root, barrier, cutHash)) return;
+          const target = this.readFile(root, name, false);
+          if (!target || hash(target) !== expectedHash) refuse("migration_candidate_invalid");
+        };
+        for (const part of plan.parts) publish(part.name, part.sha256);
+        for (const [name, bytes] of bodies.files.filter(([name]) => name !== CUTOVER)) publish(name, hash(bytes));
+        this.syncDirectory(root);
+        for (const item of retired) {
+          this.capsulePolicy(root, plan.policy);
+          if (this.cutReceipt(root, barrier, cutHash)) break;
+          const bytes = this.readFile(root, item.name, false);
+          if (!bytes) continue;
+          const stat = lstatSync(join(root.path, item.name)); owned(stat);
+          if (id(stat) !== item.identity || bytes.length !== item.bytes || hash(bytes) !== item.sha256) refuse("migration_retirement_changed");
+          this.check(root);
+          try { unlinkSync(join(root.path, item.name)); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        }
+        this.syncDirectory(root);
+        // One prewritten, consumable receipt. Never reconstruct it after ENOENT.
+        const receipt = bodies.files.find(([name]) => name === CUTOVER)![1];
+        publish(CUTOVER, hash(receipt));
+        this.syncDirectory(root);
+      }
+      if (!this.cutReceipt(root, barrier, cutHash)) refuse("migration_incomplete");
+      // The durable receipt authorizes deleting transition evidence, not vice versa.
+      this.syncDirectory(root);
+      this.removeCutFiles(root, claim);
+      this.state(root); // Full current capsule verification, including later heads.
+    } catch (error) {
+      // A helper may have completed AND a later writer collected serial 1.
+      // Return only after verifying the receipt and current authority afresh.
+      if (!existsSync(join(root.path, CUT_DIRECTORY)) && this.cutReceipt(root, barrier, cutHash)) {
+        try { this.syncDirectory(root); this.state(root); return; } catch { /* unavailable, not an old positive */ }
+      }
+      if (error instanceof PairingTrustError) throw error;
+      refuse("migration_incomplete");
+    }
+  }
+  /** Trusted local maintenance only. Drain all store users before calling.
+   * No remote route, automatic startup upgrade or environment selector. */
+  migrateToCapsule(migrationId: string, context?: PairingTrustContext): CutResult {
+    if (!/^[a-zA-Z0-9._:-]{1,128}$/.test(migrationId)) refuse("invalid_mutation");
+    // Refuse a visible older holder BEFORE attempting a potentially blocking
+    // acquisition. This cannot discover an unobservable foreign process.
+    const observed = this.root(), adapter = observed ? adapters.get(observed.id) : undefined;
+    const held = observed && adapter?.currentHolder(observed);
+    const captured = context === undefined ? undefined : contexts.get(context as object);
+    if (held && (!captured || captured !== invocations.getStore() || !captured.active
+      || captured.owner !== this || captured.root.id !== observed!.id || captured.holder !== held)) refuse("migration_holder_active");
+    return this.operation(context, (root, invocation) => {
+      if (!root) refuse("migration_missing_root");
+      if ([...liveInvocations].some(active => active.active && active.root.id === root.id && active !== invocation)) refuse("migration_holder_active");
+      const state = this.readyState(root);
+      if (state.capsule) {
+        const b = state.capsule.barrier;
+        if (b.migration?.migrationId !== migrationId || !this.cutReceipt(root, b, state.capsule.cutHash)) refuse("migration_id_reused");
+        this.syncDirectory(root);
+        const verified = this.state(root);
+        if (verified.capsule?.cutHash !== state.capsule.cutHash) refuse("migration_receipt_invalid");
+        if (invocation) this.validateInvocation(invocation, root);
+        return {migrationId, revision: b.revision, logicalHead: b.logicalHead};
+      }
+      if (invocation?.used) refuse("context_already_used");
+      let stat;
+      try { mkdirSync(join(root.path, CUT_DIRECTORY), {mode: 0o700}); stat = lstatSync(join(root.path, CUT_DIRECTORY)); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") refuse("migration_busy"); throw error; }
+      owned(stat, true);
+      const claim: CutClaim = {rootId: root.id, token: randomUUID(), identity: id(stat), migrationId};
+      let reserved = false, uncertain = false;
+      try {
+        this.syncCutDirectory(root, claim); this.syncDirectory(root);
+        this.reserveCutover(root, claim);
+        const rows: CapsuleRow[] = [], retired: CutRetired[] = [];
+        let policy: ManagedPolicy | null = null;
+        for (let revision = 1; revision <= state.revision; revision++) {
+          const name = `${PREFIX}${revision}.json`, bytes = this.readFile(root, name, false);
+          if (!bytes) refuse("revision_conflict");
+          const generation = JSON.parse(bytes.toString()).generation as Generation;
+          const saved = generation.mutation, o = saved.outcome;
+          if (!same(saved, state.outcomes[o.mutationId])) refuse("revision_conflict");
+          rows.push([o.mutationId, o.revision, o.type, o.publicKey, o.changed, saved.request, bytes.length,
+            o.type === "manage" ? generation.managed : null]);
+          if (o.type === "manage") policy = {revision, marker: generation.managed!};
+          retired.push({name, sha256: hash(bytes), bytes: bytes.length, identity: id(lstatSync(join(root.path, name)))});
+        }
+        if (rows.length !== state.revision || !rows.every((row, index) => rowValid(row, index + 1, root.id))
+          || rows.reduce((sum, row) => sum + row[6], 0) !== state.bytes
+          || !same(policy?.marker ?? null, state.managed)) refuse("migration_outcome_invalid");
+        const payloads: [string, string][] = [];
+        const group = <T>(values: T[], name: () => string): CutFile[] => {
+          const parts: CutFile[] = []; let batch: string[] = [], size = 2;
+          const flush = () => {
+            if (!batch.length) return;
+            const bytes = `[${batch.join(",")}]`, filename = name();
+            if (Buffer.byteLength(bytes) > FILE_LIMIT) refuse("capacity");
+            parts.push({name: filename, sha256: hash(bytes), bytes: Buffer.byteLength(bytes), count: batch.length});
+            payloads.push([filename, bytes]); batch = []; size = 2;
+          };
+          for (const value of values) {
+            const row = JSON.stringify(value);
+            if (size + Buffer.byteLength(row) + 1 > CHUNK_TARGET) flush();
+            batch.push(row); size += Buffer.byteLength(row) + 1;
+          }
+          flush(); return parts;
+        };
+        const parts = group(rows, () => dataName(randomUUID()));
+        const inventories = group(retired, () => `retire.${randomUUID()}.json`);
+        const plan: CutPlan = {...claim, schema: "scout.pairing-cutover-plan/v2", revision: state.revision,
+          logicalHead: state.hash, logicalPeersHash: state.peersHash, checkpointPeersHash: hash(encodePeers(state.peers)),
+          projectionHash: state.projectionHash, peers: state.peers, outcomesDigest: hash(JSON.stringify(rows)),
+          chargedBytes: state.bytes, policy, parts, inventories, adoption: state.adoption};
+        const planBytes = pack("plan", plan), planHash = hash(planBytes), bodies = cutBodies(plan, planHash);
+        payloads.push(["claim.json", pack("claim", claim)], ["plan.json", planBytes], ["barrier.json", bodies.barrierBytes], ...bodies.files);
+        const authorityBytes = parts.reduce((n, part) => n + part.bytes, 0) + Buffer.byteLength(bodies.barrierBytes)
+          + bodies.files.reduce((n, [, bytes]) => n + Buffer.byteLength(bytes), 0);
+        if (parts.length > 256 || inventories.length > 64 || payloads.length > RESERVATION_FILES || authorityBytes > TOTAL_LIMIT
+          || payloads.some(([, bytes]) => Buffer.byteLength(bytes) > FILE_LIMIT)) refuse("capacity");
+        payloads.forEach(([name, bytes], index) => this.fillCutReservation(root, claim, index, name, bytes));
+        this.syncCutDirectory(root, claim); this.syncDirectory(root);
+        for (const [name, bytes] of payloads) {
+          if (!this.cutSource(root, claim, name)?.equals(Buffer.from(bytes))) refuse("migration_candidate_invalid");
+        }
+        const before = this.state(root);
+        if (before.revision !== state.revision || before.hash !== state.hash || before.projectionHash !== state.projectionHash
+          || !same(before.outcomes, state.outcomes) || before.bytes !== state.bytes) refuse("revision_conflict");
+        if (invocation) { this.validateInvocation(invocation, root); invocation.used = true; }
+        uncertain = true;
+        try { linkSync(join(root.path, cutChild("barrier.json")), join(root.path, bodies.barrierName)); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") { uncertain = false; refuse("revision_conflict"); } throw error; }
+        reserved = true; uncertain = false;
+        this.syncDirectory(root);
+        this.completeCutover(root, bodies.barrier, Buffer.from(bodies.barrierBytes));
+        if (invocation) this.validateInvocation(invocation, root);
+        return {migrationId, revision: state.revision, logicalHead: state.hash};
+      } finally {
+        if (!reserved && !uncertain) this.removeCutFiles(root, claim);
+      }
+    });
   }
   private capsulePolicy(root: PairingRootIdentity, policy: ManagedPolicy | null) {
     if (!policy) return;
@@ -400,10 +736,11 @@ export class PairingTrustOwner {
     if (!active || active.owner !== this) refuse("managed_context_required");
     this.validateInvocation(active, root);
   }
-  /** mkdir reserves one of eight slots, including empty interrupted claims.
+  /** Atomic rename reserves one of eight nonempty token-bearing slots.
+   * Empty canonical directories are abandoned, never live pre-token claims.
    * Tokens identify claims across time. dev:ino alone is only meaningful while
    * an open directory descriptor pins that object; freed inodes can be reused.
-   * Empty/crashed slots remain occupied; no PID, timestamp or age takeover. */
+   * Nonempty claims stay occupied; no PID, timestamp or age takeover. */
   private capsuleSlots(root: PairingRootIdentity, inventory: string[]) {
     const claims = new Map<string,CapsuleSlot>(), allowed = new Set<string>();
     for (const name of inventory.filter(n => n.startsWith(".pairing-v2-slot-"))) {
@@ -589,20 +926,51 @@ export class PairingTrustOwner {
       if(!this.slotMatches(root,slot,fd))refuse("capsule_slot_invalid");
     } finally {closeSync(fd);}this.check(root);
   }
+  /** A candidate carries only its small claim file, never staged payloads.
+   * It is outside the authority inventory until its atomic directory rename.
+   * Only an empty canonical slot can be replaced; live claims stay nonempty. */
   private claimCapsuleSlot(root: PairingRootIdentity): CapsuleSlot {
     for(let index=0;index<8;index++){
-      const path=join(root.path,slotName(index));
       this.check(root);
-      try{mkdirSync(path,{mode:0o700});}catch(e){if((e as NodeJS.ErrnoException).code==="EEXIST")continue;throw e;}
-      const fd=openSync(path,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
+      const candidate=`.pairing-claim-${randomUUID()}`,source=join(root.path,candidate);
+      mkdirSync(source,{mode:0o700});
+      const fd=openSync(source,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
       try {
-        const stat=fstatSync(fd);owned(stat,true);
-        const slot={index,token:randomUUID(),identity:id(stat)};
+        const stat=fstatSync(fd);
+        owned(stat,true);
+        const slot={index,token:randomUUID(),identity:id(stat)},child=`${slot.token}.json`;
+        let renamed=false;
         try {
-          this.writeNew(root,`${slotName(index)}/${slot.token}.json`,pack("claim",{rootId:root.id,...slot}));
-          if(!this.slotMatches(root,slot,fd) || !same(readdirSync(path),[`${slot.token}.json`]))refuse("capsule_slot_invalid");
-          this.syncSlot(root,slot);this.syncDirectory(root);return slot;
-        } catch(e){this.releaseCapsuleSlot(root,slot);throw e;}
+          this.writeNew(root,`${candidate}/${child}`,pack("claim",{rootId:root.id,...slot}));
+          if(id(lstatSync(source))!==id(stat) || !same(readdirSync(source),[child]))refuse("capsule_slot_invalid");
+          const bytes=this.readFile(root,`${candidate}/${child}`,false);
+          if(!bytes || !same(unpack(bytes,"claim",refuse),{rootId:root.id,...slot}))refuse("capsule_slot_invalid");
+          // Persist the complete claim BEFORE exposing it at a reusable index.
+          fsyncSync(fd);this.syncDirectory(root);
+          try {renameSync(source,join(root.path,slotName(index)));}
+          catch(e){
+            if(["ENOTEMPTY","EEXIST"].includes((e as NodeJS.ErrnoException).code??""))continue;
+            throw e;
+          }
+          renamed=true;
+          if(!this.slotMatches(root,slot,fd))refuse("capsule_slot_invalid");
+          this.syncDirectory(root);
+          return slot;
+        } catch(e){
+          if(renamed)this.releaseCapsuleSlot(root,slot);
+          throw e;
+        } finally {
+          if(!renamed){
+            // The descriptor pins THIS unique candidate across cleanup.
+            // Crashed candidates are metadata, not canonical resource claims.
+            if(id(lstatSync(source))!==id(fstatSync(fd)))refuse("capsule_slot_invalid");
+            const names=readdirSync(source);
+            if(names.some(name=>name!==child))refuse("capsule_slot_invalid");
+            if(names.length)unlinkSync(join(source,child));
+            rmdirSync(source);
+            this.syncDirectory(root);
+          }
+        }
       } finally {closeSync(fd);}
     }
     return refuse("capsule_staging_capacity");
@@ -801,15 +1169,16 @@ export class PairingTrustOwner {
       const invocation: Invocation = {owner: this, root, adapter, holder, active: true, used: false};
       const context = Object.freeze({ toJSON(): never { return refuse("context_not_serializable"); } }) as unknown as PairingTrustContext;
       contexts.set(context, invocation);
+      liveInvocations.add(invocation);
       return invocations.run(invocation, () => {
         try {
           this.validateInvocation(invocation, root);
           const result = body(context);
           if (result && typeof (result as {then?: unknown}).then === "function") {
-            return Promise.resolve(result).finally(() => { invocation.active = false; }) as T;
+            return Promise.resolve(result).finally(() => { invocation.active = false; liveInvocations.delete(invocation); }) as T;
           }
-          invocation.active = false; return result;
-        } catch (e) { invocation.active = false; throw e; }
+          invocation.active = false; liveInvocations.delete(invocation); return result;
+        } catch (e) { invocation.active = false; liveInvocations.delete(invocation); throw e; }
       });
     });
   }

@@ -30,6 +30,10 @@ registry, authorization endpoint or automatic adapter installation.
 - `revokePrefix` resolves either the existing 16-character display prefix or a
   full 64-character key against the current snapshot. The persisted operation
   and outcome always name the full key.
+- `migrateToCapsule(migrationId, context?)` is explicit trusted local maintenance.
+  It preserves logical authority and exact retries while changing the retained
+  representation. Follow the [cutover runbook](./pairing-capsule-cutover.md)
+  before activation; no remote permission or automatic upgrade is provided.
 
 **API behavior change:** `DELETE /api/pairing/peers/:fingerprint` returns **409**
 for an ambiguous prefix instead of deleting all matching keys. Use the full
@@ -193,21 +197,21 @@ for a host's combined authority-and-journal hold is a separate prerequisite;
 this additive seam does not certify it. A JavaScript timeout cannot release a
 host gate while an uninterruptible native operation continues.
 
-## Dormant completed-v2 store
+## Completed-v2 store and explicit cutover
 
 The same runtime owner can read, mutate and recover a **completed**
 `scout.pairing-capsule/v2` store. New stores and existing v1 stores still write
-v1. There is no migration API, environment flag, listener hook, automatic
-upgrade or production fixture constructor in this change. The completed-store
-builder in `scripts/fixtures` accepts only empty temporary test directories.
-It is not a crash-safe migration implementation.
+v1 until trusted local maintenance explicitly calls
+`owner.migrateToCapsule(migrationId, context?)`. There is no environment activation
+flag, remote route, listener hook or automatic startup upgrade. Ordinary reads
+can complete an already committed cutover; they never initiate one.
 
-This is R1 of a two-PR storage change. R2 must implement and qualify explicit
-trusted local cutover, its reservation and old-writer races, recovery and the
-drain/restart runbook. **No upstream milestone may carry R1 without R2.** The
-remedy is not complete until both are reviewed and shipped together. The
-live-session registry remains a separate, blocked follow-up. This change adds
-no transport close code or credential behavior.
+The completed-store engine and cutover ship together. **No upstream milestone
+may carry the engine without the cutover.** See the
+[cutover runbook](./pairing-capsule-cutover.md) for the one-time drain, actual
+320 MiB reservation, recovery and same-release verification for desktop, CLI and
+web runtime. The live-session registry is a separate follow-up. Storage cutover
+does not add transport close codes or credential behavior.
 
 ### Retained authority and logical identity
 
@@ -216,8 +220,8 @@ A completed v2 store retains these root-bound files:
 - One permanent `trusted-peers.owner.<cut-revision+1>.json` barrier. It commits
   to the last v1 logical head, initial outcome digest, policy, legacy byte
   charge and initial chunk inventory. A missing completion receipt in
-  `trusted-peers.v2.cutover.json` refuses; R1 does not attempt an interrupted
-  migration.
+  `trusted-peers.v2.cutover.json` refuses unless the committed barrier and its
+  retained transition evidence permit verified roll-forward.
 - One current `trusted-peers.v2.commit.<serial>.json` capsule. It contains
   current peers, logical revision and head, exact projection digest, complete
   outcome-chunk inventory, permanent managed policy, charge, candidate claim
@@ -245,7 +249,7 @@ physical capsule checksum in the pairing authority stamp. Later mutations
 advance the logical head from the previous logical head, current peer digest,
 policy, exact request/outcome, adoption and complete outcome digest. Physical
 serials identify publications, not logical authority. Fixture tests prove stamp
-continuity; proof across a real migration belongs to R2.
+continuity across both synthetic completed fixtures and real migration.
 
 Three hashes remain distinct: the last committed logical peers hash, the
 normalized current checkpoint peers hash and the exact raw projection-byte
@@ -269,21 +273,28 @@ editor who forges the entire root.
 
 ### Publication, recovery and bounded collection
 
-A writer first claims one of eight `.pairing-v2-slot-<0..7>` directories by
-exclusive creation. A unique token file binds the claim to the root and
-directory inode. **The token identifies the claim over time; device/inode alone
-does not.** Filesystems can reuse an inode after deletion. Inventory, claim
-initialization, sync and release keep an open directory descriptor while
-checking or acting on that claim. Head recovery matches the verified token and
-complete claim, not a reused directory index or inode.
+A writer prepares a unique `.pairing-claim-<uuid>` directory with its complete
+token file, synchronizes both, then atomically renames it onto one of eight
+`.pairing-v2-slot-<0..7>` directories. It never directly creates a canonical
+slot directory. A directory rename replaces an empty destination atomically;
+a nonempty live claim refuses replacement (`ENOTEMPTY` or `EEXIST`). The root is
+synchronized before any bulk staging. Only eight canonical claims can stage
+bulk payloads, each within its 3 MiB bound.
 
-These are resource claims, not time-based locks. An empty interrupted mkdir
-still occupies its slot. Release requires the matching token before unlinking
-it, then retains its descriptor through `rmdir` so another directory cannot
-reuse the pinned inode. A stale release never removes a newer empty claim.
-A crash after token unlink can leave an empty occupied directory; it is not
-reclaimed automatically and does not itself make a completed head pending.
-There is no PID/age takeover or recursive slot deletion.
+**An empty canonical slot proves abandonment.** No live claim is exposed before
+its token exists. A crash after token unlink leaves a safely replaceable empty
+slot; the next writer can reclaim it without an operator or ownership guess.
+Two claimants racing that empty slot have one rename winner. A stale release
+cannot remove the winner's nonempty claim. Claim tokens identify ownership over
+time; device/inode alone does not. Inventory, sync and release retain directory
+descriptor pins across their check/use intervals.
+
+Pre-rename candidates contain only the small token, never bulk payloads or
+authority. An interrupted candidate does not consume a canonical slot or enter
+the authority inventory. Nonempty canonical claims remain occupied and are
+never inferred dead. No PID, age, timeout or inode-only takeover exists. See the
+[cutover and recovery runbook](pairing-capsule-cutover.md) for quiescent cleanup
+of interrupted candidates or nonempty uncommitted claims.
 
 Before bulk staging, the writer checks the 3 MiB candidate budget, 1 MiB file
 bound and resulting authority limits. It writes and synchronizes the new
@@ -334,7 +345,7 @@ bun scripts/pairing-capsule-benchmark.ts large
 ```
 
 `bun run test:pairing-capsule` runs the process/census suite and planted capsule
-controls in the root unit-test chain, including hosted CI when dispatched. Give
+and cutover controls in the root unit-test chain, including hosted CI when dispatched. Give
 the controls an explicit evidence directory to retain their individual logs.
 
 Process tests interrupt actual writes at staging, CAS, directory barriers,
@@ -350,7 +361,7 @@ processes per tier on each supported test Bun. Each path (`read` and stamp) gets
 100 warmups then 1000 timed reads; raw samples and CPU time are emitted. Every
 run must independently meet p50/p95/max of 5/15/50 ms and 25/75/200 ms respectively.
 The runner stops on a timed maximum breach or failed percentiles. This qualifies
-the completed-store read path, not migration, registry admissions, gate holds,
+the migrated-store read path, not registry admissions, gate holds,
 idle CPU, native durability or physical phones.
 
 ## Root identity and external writers

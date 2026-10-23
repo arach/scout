@@ -93,10 +93,20 @@ test("v2 resurfaced legacy generations and authority links refuse at their actua
   expect(()=>f.owner.read()).toThrow("ELOOP");unlinkSync(p);renameSync(backup,p);
   linkSync(p,backup);expect(()=>f.owner.read()).toThrow("unsafe_path");unlinkSync(backup);
 });
-test("v2 eight crashed resource claims refuse new staging without age takeover",()=>{
-  const f=fixture();for(let i=0;i<8;i++)mkdirSync(join(f.root,slotName(i)),{mode:0o700});
-  expect(f.owner.read().revision).toBe(1);expect(()=>f.owner.mutate(1,"full",{type:"grant",peer})).toThrow("capsule_staging_capacity");
+test("v2 eight live token-bearing claims refuse new staging without age takeover",()=>{
+  const f=fixture(),o=f.owner as any;
+  o.operation(undefined,(root:any)=>{
+    const claims=Array.from({length:8},()=>o.claimCapsuleSlot(root));
+    expect(f.owner.read().revision).toBe(1);expect(()=>f.owner.mutate(1,"full",{type:"grant",peer})).toThrow("capsule_staging_capacity");
+    for(const claim of claims)o.releaseCapsuleSlot(root,claim);
+  });
 });
+test("v2 abandoned empty slots are replaceable, not live pre-token claims",()=>{
+  const f=fixture();for(let i=0;i<8;i++)mkdirSync(join(f.root,slotName(i)),{mode:0o700});
+  expect(f.owner.mutate(1,"reclaimed",{type:"grant",peer}).revision).toBe(2);
+  expect(f.owner.read().peers.some(p=>p.publicKey===other)).toBe(true);
+});
+
 test("v2 charge records, part counts and lifetime counters are validated",()=>{
   const f=fixture();rewriteHead(f,h=>{h.chargedBytes--;});expect(()=>f.owner.read()).toThrow("capsule_outcomes_invalid");
 });
