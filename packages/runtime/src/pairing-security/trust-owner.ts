@@ -39,17 +39,20 @@ type Generation = {
   schema: "scout.pairing-trust-owner/v1"; rootId: string; revision: number;
   previousHash: string; peersHash: string; peers: TrustedPeer[];
   managed: Marker | null; mutation: SavedOutcome; adoption?: ProjectionAdoption | null;
+  projectionStage?: string;
 };
 export type TrustSnapshot = Readonly<{ revision: number; peers: readonly TrustedPeer[] }>;
 type State = { revision: number; peers: TrustedPeer[]; hash: string; peersHash: string;
   managed: Marker | null; outcomes: Record<string, SavedOutcome>; bytes: number;
-  projectionHash: string; adoption: ProjectionAdoption | null; pendingStage: string | null };
+  projectionHash: string; adoption: ProjectionAdoption | null; pendingStage: string | null; projectionStage: string | null };
 type Invocation = { owner: PairingTrustOwner; root: PairingRootIdentity; adapter: PairingTrustAdapter;
   holder: object; active: boolean; used: boolean };
 const invocations = new AsyncLocalStorage<Invocation>();
 const contexts = new WeakMap<object, Invocation>();
 const adapters = new Map<string, PairingTrustAdapter>();
 const owners = new Map<string, PairingTrustOwner>();
+// Reentrant local observers see publication_incomplete, never recursively help.
+const completing = new Set<string>();
 const PEERS = "trusted-peers.json", MARKER = "trusted-peers.managed.json";
 const PREFIX = "trusted-peers.owner.";
 const LAST_SEEN = "trusted-peers.last-seen.json";
@@ -125,7 +128,7 @@ export class PairingTrustOwner {
     return Object.freeze({path: this.path, id: this.rootId});
   }
   private check(root: PairingRootIdentity) { if (this.root()?.id !== root.id) refuse("root_replaced"); }
-  private readFile(root: PairingRootIdentity, name: string, stagedGeneration = false): Buffer | null {
+  private readFile(root: PairingRootIdentity, name: string, stagedGeneration = name.startsWith(PREFIX)): Buffer | null {
     this.check(root); const path = join(root.path, name);
     let fd: number;
     try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW); }
@@ -140,17 +143,22 @@ export class PairingTrustOwner {
   }
   /** The CAS staging hard link stays live until projection rename. Its presence
    * distinguishes an in-flight owner publication from an unmanaged old writer.
-   * Only an exact outcome retry can finish a matching post-rename publication. */
+   * Any owner operation can help finish a verified head publication. */
   private pendingStage(root: PairingRootIdentity, revision: number): string | null {
     const target = lstatSync(join(root.path, `${PREFIX}${revision}.json`));
     if (target.nlink === 1) return null;
     owned(target, false, false, true);
     const matches = readdirSync(root.path).filter(name => /^\.pairing-owner-[a-f0-9-]{36}\.tmp$/.test(name))
       .map(name => join(root.path, name)).filter(path => {
-        const stat = lstatSync(path);
+        let stat;
+        try { stat = lstatSync(path); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
         if (id(stat) !== id(target)) return false;
         owned(stat, false, false, true); return true;
       });
+    const now = lstatSync(join(root.path, `${PREFIX}${revision}.json`)); owned(now, false, false, true);
+    if (id(now) !== id(target)) refuse("unsafe_path");
+    if (now.nlink === 1) return null; // Another helper removed the witness.
     if (matches.length !== 1) refuse("unsafe_path");
     this.check(root); return matches[0]!;
   }
@@ -231,7 +239,7 @@ export class PairingTrustOwner {
       || typeof value.adapterId !== "string" || !/^[a-z0-9.-]{1,64}$/.test(value.adapterId)) refuse("managed_marker_invalid");
     return value;
   }
-  private state(root: PairingRootIdentity, allowPendingRetry = false): State {
+  private state(root: PairingRootIdentity, allowPending = false): State {
     this.check(root);
     const marker = this.marker(root);
     const names = readdirSync(root.path).filter(n => n.startsWith(PREFIX));
@@ -242,13 +250,14 @@ export class PairingTrustOwner {
       return Number(match[1]);
     }).sort((a,b) => a-b);
     const projection = this.readFile(root, PEERS);
-    const projectedPeers = projection ? peersOf(JSON.parse(projection.toString())) : [];
+    // Parse the legacy projection only after classifying a pending owner head.
+    // A pending head determines its own peers, even after an outside write.
     const projectionHash = hash(projection ?? Buffer.alloc(0));
-    let current: State = {revision: 0, peers: projectedPeers, hash: projectionHash, peersHash: projectionHash,
-      managed: null, outcomes: {}, bytes: 0, projectionHash, adoption: null, pendingStage: null};
+    let current: State = {revision: 0, peers: [], hash: projectionHash, peersHash: projectionHash,
+      managed: null, outcomes: {}, bytes: 0, projectionHash, adoption: null, pendingStage: null, projectionStage: null};
     for (const revision of revisions) {
       if (revision !== current.revision + 1) refuse("generation_gap");
-      const bytes = this.readFile(root, `${PREFIX}${revision}.json`, allowPendingRetry); if (!bytes) refuse("generation_missing");
+      const bytes = this.readFile(root, `${PREFIX}${revision}.json`); if (!bytes) refuse("generation_missing");
       current.bytes += bytes.length; if (current.bytes > TOTAL_LIMIT) refuse("capacity");
       const envelope = JSON.parse(bytes.toString()), value: Generation = envelope.generation;
       if (!record(value) || envelope.sha256 !== hash(JSON.stringify(value))) refuse("generation_checksum");
@@ -270,20 +279,13 @@ export class PairingTrustOwner {
       if (current.managed && JSON.stringify(value.managed) !== JSON.stringify(current.managed)) refuse("managed_downgrade");
       if (value.adoption != null && (!record(value.adoption)
         || !/^[a-f0-9]{64}$/.test(value.adoption.fromProjectionHash) || !/^[a-f0-9]{64}$/.test(value.adoption.toProjectionHash))) refuse("generation_invalid");
+      if (value.projectionStage !== undefined && !/^\.pairing-owner-[a-f0-9-]{36}\.tmp$/.test(value.projectionStage)) refuse("generation_invalid");
       const pendingStage = this.pendingStage(root, revision);
       if (pendingStage && revision !== revisions.at(-1)) refuse("publication_incomplete");
       current = {...value, peers, outcomes, hash: hash(bytes), bytes: current.bytes,
-        projectionHash, adoption: null, pendingStage};
+        projectionHash, adoption: null, pendingStage, projectionStage: value.projectionStage ?? null};
     }
     if (JSON.stringify(current.managed) !== JSON.stringify(marker)) refuse("managed_marker_mismatch");
-    const changedProjection = current.revision > 0 && projectionHash !== current.peersHash;
-    if ((marker || current.pendingStage) && changedProjection) refuse("external_change_or_incomplete");
-    if (!marker && !current.pendingStage) {
-      // Mixed-version standalone operation: outside writers are not serialized
-      // by our CAS. Adopt their validated array without rewriting our ledger.
-      current.peers = projectedPeers;
-      if (changedProjection) current.adoption = {fromProjectionHash: current.peersHash, toProjectionHash: projectionHash};
-    }
     if (marker) {
       const adapter = adapters.get(root.id);
       if (!adapter || adapter.id !== marker.adapterId) refuse("managed_adapter_required");
@@ -292,7 +294,79 @@ export class PairingTrustOwner {
       this.validateInvocation(active, root);
     }
     if (JSON.stringify(readdirSync(root.path).filter(n => n.startsWith(PREFIX)).sort()) !== JSON.stringify(names.sort())) refuse("revision_conflict");
-    this.check(root); return current;
+    this.check(root);
+    if (current.pendingStage) {
+      if (!allowPending) refuse("publication_incomplete");
+      return current;
+    }
+    const changedProjection = current.revision > 0 && projectionHash !== current.peersHash;
+    if (marker && changedProjection) refuse("external_change_or_incomplete");
+    if (!marker) {
+      // Mixed-version standalone operation: outside writers are not serialized
+      // by our CAS. Adopt their validated array without rewriting our ledger.
+      current.peers = projection ? peersOf(JSON.parse(projection.toString())) : [];
+      if (changedProjection) current.adoption = {fromProjectionHash: current.peersHash, toProjectionHash: projectionHash};
+    }
+    return current;
+  }
+  private retainedStage(root: PairingRootIdentity, name: string, generationAlias = false): Buffer | null {
+    try { return this.readFile(root, name, generationAlias); }
+    catch (error) {
+      // The shared source can be consumed while its fd is being inspected.
+      // Absence is verified below against the ledger/projection, never guessed.
+      try { lstatSync(join(root.path, name)); }
+      catch (missing) { if ((missing as NodeJS.ErrnoException).code === "ENOENT") return null; }
+      throw error;
+    }
+  }
+  /** Publish from ONE consumable source, shared by the reserving writer and all
+   * helpers. Never recreate it: a delayed rename then gets ENOENT instead of
+   * overwriting a newer revision. This is not a liveness/age-based lock. */
+  private completePublication(root: PairingRootIdentity, state: State) {
+    if (completing.has(root.id)) refuse("publication_incomplete");
+    completing.add(root.id);
+    try {
+      const bytes = encodePeers(state.peers);
+      if (hash(bytes) !== state.peersHash) refuse("publication_incomplete");
+      const current = this.state(root, true);
+      if (current.revision !== state.revision || current.hash !== state.hash || !current.pendingStage) {
+        this.syncDirectory(root); return;
+      }
+      let source = state.projectionStage;
+      if (!source) {
+        // Older envelopes did not name the projection stage. A real crash
+        // retains it; ambiguity or absence with an old projection stays closed.
+        const matches = readdirSync(root.path).filter(name => /^\.pairing-owner-[a-f0-9-]{36}\.tmp$/.test(name))
+          .filter(name => { const data = this.retainedStage(root, name, true); return data && hash(data) === state.peersHash; });
+        if (matches.length > 1) refuse("publication_incomplete");
+        source = matches[0] ?? null;
+      }
+      const staged = source ? this.retainedStage(root, source) : null;
+      if (staged) {
+        if (hash(staged) !== state.peersHash) refuse("publication_incomplete");
+        this.check(root);
+        try { renameSync(join(root.path, source!), join(root.path, PEERS)); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      }
+      // Missing source is either a helper's atomic rename or damaged evidence.
+      // Verify the current ledger before removing the witness or claiming ACK.
+      const after = this.state(root, true);
+      if (after.revision === state.revision && after.pendingStage) {
+        if (after.projectionHash !== state.peersHash) refuse("publication_incomplete");
+        try { unlinkSync(after.pendingStage); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      }
+      this.syncDirectory(root);
+    } catch (error) {
+      // Structural integrity/marker/context refusals keep their precise codes.
+      if (error instanceof PairingTrustError) throw error;
+      refuse("publication_incomplete");
+    } finally { completing.delete(root.id); }
+  }
+  private readyState(root: PairingRootIdentity): State {
+    const state = this.state(root, true);
+    if (state.pendingStage) this.completePublication(root, state);
+    return state.pendingStage ? this.state(root) : state;
   }
   private validateInvocation(invocation: Invocation, root: PairingRootIdentity) {
     if (!invocation.active || invocations.getStore() !== invocation || invocation.owner !== this
@@ -333,7 +407,7 @@ export class PairingTrustOwner {
   read(context?: PairingTrustContext): TrustSnapshot {
     const snapshot = this.operation(context, root => {
       if (!root) return {revision: 0, peers: [] as TrustedPeer[]};
-      const state = this.state(root); return {revision: state.revision, peers: structuredClone(state.peers)};
+      const state = this.readyState(root); return {revision: state.revision, peers: structuredClone(state.peers)};
     });
     try {
       const root = this.root(), advisory = root ? this.lastSeen(root) : new Map<string, string>();
@@ -365,15 +439,13 @@ export class PairingTrustOwner {
     else if (mutation.type !== "manage") refuse("invalid_mutation");
     this.root(true);
     return this.operation(context, (bound, invocation) => {
-      const root = bound!, state = this.state(root, true);
+      const root = bound!, state = this.readyState(root);
       const request = JSON.stringify([expectedRevision, mutation.type,
         mutation.type === "grant" ? mutation.peer : mutation.type === "manage" ? null : mutation.publicKey,
         null]);
       const saved = Object.hasOwn(state.outcomes, mutationId) ? state.outcomes[mutationId] : undefined;
       if (saved) {
         if (saved.request !== request) refuse("mutation_id_reused");
-        if (state.pendingStage && saved.outcome.revision !== state.revision) refuse("publication_incomplete");
-        if (state.pendingStage) unlinkSync(state.pendingStage);
         // An earlier attempt may have published but failed its directory sync.
         // A retry must establish the barrier, not infer durability from bytes.
         this.syncDirectory(root);
@@ -382,7 +454,6 @@ export class PairingTrustOwner {
         if (verified.outcomes[mutationId]?.request !== request) refuse("outcome_unavailable");
         return structuredClone(saved.outcome);
       }
-      if (state.pendingStage) refuse("publication_incomplete");
       if (state.revision !== expectedRevision) refuse("revision_conflict");
       if (invocation?.used) refuse("context_already_used");
       if (state.revision >= REVISION_LIMIT) refuse("capacity");
@@ -403,14 +474,15 @@ export class PairingTrustOwner {
       }
       const outcome: TrustOutcome = {mutationId, revision: state.revision + 1, type: mutation.type, publicKey, changed};
       const peerBytes = encodePeers(peers);
-      const generation: Generation = {schema: "scout.pairing-trust-owner/v1", rootId: root.id,
-        revision: outcome.revision, previousHash: state.hash, peersHash: hash(peerBytes), peers, managed, adoption: state.adoption, mutation: {request, outcome}};
-      const bytes = JSON.stringify({generation, sha256: hash(JSON.stringify(generation))});
-      if (state.bytes + Buffer.byteLength(bytes) > TOTAL_LIMIT) refuse("capacity");
       let stagedPeers: string | null = null, stagedGeneration: string | null = null, stagedMarker: string | null = null;
       let reserved = false;
       try {
-        stagedPeers = this.stage(root, peerBytes); stagedGeneration = this.stage(root, bytes);
+        stagedPeers = this.stage(root, peerBytes);
+        const generation: Generation = {schema: "scout.pairing-trust-owner/v1", rootId: root.id,
+          revision: outcome.revision, previousHash: state.hash, peersHash: hash(peerBytes), peers, managed, adoption: state.adoption, projectionStage: basename(stagedPeers), mutation: {request, outcome}};
+        const bytes = JSON.stringify({generation, sha256: hash(JSON.stringify(generation))});
+        if (state.bytes + Buffer.byteLength(bytes) > TOTAL_LIMIT) refuse("capacity");
+        stagedGeneration = this.stage(root, bytes);
         // Revalidate after staging, including external replacement detection.
         const before = this.state(root);
         if (before.revision !== expectedRevision || before.hash !== state.hash || before.projectionHash !== state.projectionHash) refuse("revision_conflict");
@@ -423,16 +495,17 @@ export class PairingTrustOwner {
           stagedMarker = this.stage(root, JSON.stringify(managed));
           linkSync(stagedMarker, join(root.path, MARKER)); unlinkSync(stagedMarker); stagedMarker = null;
         }
-        // Keep the CAS hard link (nlink=2) until projection rename, so an
-        // unmanaged reader cannot mistake pending owner state for an old writer.
-        this.check(root); renameSync(stagedPeers, join(root.path, PEERS));
-        unlinkSync(stagedGeneration); this.syncDirectory(root);
+        // Original writer and helpers consume the same named projection stage.
+        // If a helper already finished, do not rename or replay this mutation.
+        const published = this.state(root, true);
+        if (published.pendingStage && published.revision === outcome.revision && published.hash === hash(bytes)) this.completePublication(root, published);
+        else this.syncDirectory(root);
         if (invocation) this.validateInvocation(invocation, root);
-        const committed = this.state(root);
+        const committed = this.state(root, true);
         if (committed.outcomes[mutationId]?.request !== request) refuse("outcome_unavailable");
         return structuredClone(outcome);
       } finally {
-        for (const path of [stagedPeers, reserved ? null : stagedGeneration, stagedMarker]) {
+        for (const path of [reserved ? null : stagedPeers, reserved ? null : stagedGeneration, stagedMarker]) {
           if (path) { try { unlinkSync(path); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; } }
         }
       }

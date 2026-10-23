@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash } from "node:crypto";
 import { chmodSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +35,15 @@ function manage(o: PairingTrustOwner) {
   const a = adapter(); unregister.push(o.register(a.value));
   o.withInvocation(context => o.mutate(o.read(context).revision, "adopt", {type: "manage"}, context));
   return a;
+}
+function pending(o: PairingTrustOwner) {
+  const revision=o.read().revision, file=join(o.path,`trusted-peers.owner.${revision}.json`);
+  const bytes=readFileSync(join(o.path,"trusted-peers.json"));
+  const generation=JSON.parse(readFileSync(file,"utf8")).generation;
+  writeFileSync(join(o.path,generation.projectionStage),bytes,{mode:0o600});
+  const witness=join(o.path,".pairing-owner-00000000-0000-0000-0000-000000000001.tmp");
+  linkSync(file,witness); writeFileSync(join(o.path,"trusted-peers.json"),"[]");
+  return {file,bytes,generation,witness};
 }
 afterEach(() => { for (const remove of unregister.splice(0)) remove(); for (const path of roots.splice(0)) rmSync(path, {recursive: true, force: true}); });
 
@@ -83,6 +93,54 @@ describe("pairing canonical owner", () => {
     const gen = JSON.parse(readFileSync(join(o.path, "trusted-peers.owner.3.json"), "utf8")).generation;
     expect(gen.mutation.outcome.publicKey).toBe(keyA);
     expect(o.read().peers).toEqual([peer(collision)]);
+  });
+  test("pending head rolls forward on the next read in both modes without a new generation", () => {
+    for (const managed of [false,true]) {
+      const o=owner(); o.mutate(0,"grant",{type:"grant",peer:peer()}); if (managed) manage(o);
+      const fixture=pending(o), generation=readFileSync(fixture.file);
+      expect(o.read()).toEqual({revision:managed?2:1,peers:[peer()]});
+      expect(readFileSync(join(o.path,"trusted-peers.json"))).toEqual(fixture.bytes);
+      expect(readFileSync(fixture.file)).toEqual(generation);
+      expect(readdirSync(o.path).filter(n=>n.endsWith(".tmp"))).toEqual([]);
+    }
+  });
+  test("legacy pending envelopes recover from their unique retained projection source", () => {
+    const o=owner();o.mutate(0,"grant",{type:"grant",peer:peer()});const fixture=pending(o);
+    delete fixture.generation.projectionStage;
+    writeFileSync(fixture.file,JSON.stringify({generation:fixture.generation,sha256:createHash("sha256").update(JSON.stringify(fixture.generation)).digest("hex")}));
+    expect(o.read()).toEqual({revision:1,peers:[peer()]});
+    expect(readFileSync(join(o.path,"trusted-peers.json"))).toEqual(fixture.bytes);
+  });
+  test("unfinishable pending read refuses publication_incomplete, not outside-change or unsafe-path", () => {
+    const o=owner(); o.mutate(0,"grant",{type:"grant",peer:peer()}); const fixture=pending(o);
+    unlinkSync(join(o.path,fixture.generation.projectionStage));
+    expect(()=>o.read()).toThrow("publication_incomplete");
+    expect(readFileSync(join(o.path,"trusted-peers.json"),"utf8")).toBe("[]");
+  });
+  test("recovery refuses a tampered shared projection stage before any rename", () => {
+    const o=owner(); o.mutate(0,"grant",{type:"grant",peer:peer()}); const fixture=pending(o);
+    writeFileSync(join(o.path,fixture.generation.projectionStage),JSON.stringify([peer(keyB)]));
+    expect(()=>o.read()).toThrow("publication_incomplete");
+    expect(readFileSync(join(o.path,"trusted-peers.json"),"utf8")).toBe("[]");
+  });
+  test("pending unmanaged roll-forward overwrites outside writes but never changes the owner outcome", () => {
+    const o=owner(), mutation={type:"grant" as const,peer:peer()}; const outcome=o.mutate(0,"grant",mutation);
+    pending(o); writeFileSync(join(o.path,"trusted-peers.json"),JSON.stringify([peer(keyB)]));
+    expect(o.mutate(0,"grant",mutation)).toEqual(outcome); expect(o.read().peers).toEqual([peer()]);
+    expect(o.read().revision).toBe(1);
+  });
+  test("pending recovery preserves marker, checksum, gaps and exactly-one-witness refusals", () => {
+    for (const kind of ["checksum","gap","marker","aliases","projection-link"]) {
+      const o=owner(); o.mutate(0,"grant-a",{type:"grant",peer:peer()}); o.mutate(1,"grant-b",{type:"grant",peer:peer(keyB)});
+      if (kind === "marker") manage(o);
+      const fixture=pending(o);
+      if (kind === "checksum") { const env=JSON.parse(readFileSync(fixture.file,"utf8")); env.sha256="0".repeat(64);writeFileSync(fixture.file,JSON.stringify(env)); }
+      if (kind === "gap") unlinkSync(join(o.path,"trusted-peers.owner.1.json"));
+      if (kind === "marker") unlinkSync(join(o.path,"trusted-peers.managed.json"));
+      if (kind === "aliases") linkSync(fixture.file,join(o.path,".pairing-owner-00000000-0000-0000-0000-000000000002.tmp"));
+      if (kind === "projection-link") linkSync(join(o.path,"trusted-peers.json"),join(o.path,"projection-alias"));
+      expect(()=>o.read()).toThrow(); expect(readFileSync(join(o.path,"trusted-peers.json"),"utf8")).toBe("[]");
+    }
   });
   test("reconnect storm writes zero generations or projection bytes; advisory lastSeen stays current", () => {
     for (const managed of [false, true]) {

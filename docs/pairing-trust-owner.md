@@ -91,7 +91,9 @@ generation contains:
 - the managed marker value, or null;
 - that revision's mutation-ID/request/outcome record, including full-key revokes;
 - optional `adoption` hashes (`fromProjectionHash`, `toProjectionHash`) recording
-  an unmanaged outside baseline used by this mutation, or null.
+  an unmanaged outside baseline used by this mutation, or null;
+- `projectionStage`, the basename of the already-synchronized projection stage,
+  in new envelopes. Completed older envelopes remain valid without this field.
 
 The owner reconstructs deduplication from every immutable generation. It does not
 copy the entire historical outcome map into each successive file.
@@ -110,20 +112,73 @@ revalidates its baseline, then hard-links the generation to the unique next
 revision name. `EEXIST` is a CAS refusal. Only that winner can replace the peer
 projection by rename. The staging hard link remains until that rename, so a
 reserved generation has two links and cannot be mistaken for a completed
-unmanaged baseline. After rename, the owner removes its staging link and
-synchronizes the parent directory, verifies the
-committed generation and projection again, and only then ACKs. An ID retry also
+unmanaged baseline. Generation reads tolerate two links, but require exactly
+one matching protected staging alias; projections still require a single link.
+After rename, the owner removes its staging link, synchronizes the parent
+directory, verifies the committed chain and only then ACKs. An ID retry also
 synchronizes the directory before returning its recorded outcome, so a prior
 failed directory sync is not mistaken for a durable ACK.
 
-A pending generation retains its protected staging hard link, even when a
-projection rename fails. Normal reads and competing mutations refuse; they do
-not interpret a pending owner write as an outside baseline. An exact recorded-ID
-retry can remove that staging link only when the projection already matches
-that head generation, then re-establish the directory barrier. This finishes
-publication without repeating the mutation. If the projection does not match,
-the evidence stays pending and unavailable. No lock takeover or age-based
-recovery occurs. No ACK does not imply rollback.
+### Pending publications and roll-forward
+
+A pending generation retains its protected staging hard link and its
+synchronized projection source, even if projection rename fails. The next
+owner read, refresh or mutation helps finish this publication. Unmanaged
+completion needs no new lock; managed completion runs under the operation's
+already-held adapter gate. The owner validates the whole chain, root identity,
+marker and gate context before attempting completion. Missing generations,
+gaps, corrupt checksums, marker mismatch and ambiguous staging aliases still
+refuse. Completion cannot bypass those checks or create a missing marker.
+
+The owner encodes the head generation's peers and checks their hash against
+`peersHash`. It also verifies the shared projection source's bytes against that
+hash before rename. Original writer and helpers consume the **same** named
+source by atomic rename. They never recreate a consumed source. Thus only one
+rename can succeed, even if the original writer was merely slow, not dead.
+A late writer treats `ENOENT` from that rename as another helper's completion,
+verifies the current chain/outcome, synchronizes the directory and returns its
+original outcome. It does not replay a mutation or overwrite a later revoke.
+If another owner already advanced the head, the original writer verifies its
+recorded outcome without rewriting the projection.
+
+Older envelopes without `projectionStage` can recover from a unique retained
+projection temp with the verified head hash. Absence or ambiguity with a
+mismatched projection refuses; the owner does not guess or create an
+uncoordinated replacement source. A new generation always binds its source
+before reserving the revision and retains it on publication failure.
+
+A pending stage is classified as `publication_incomplete`, not `unsafe_path`
+or an outside-write diagnosis. Ordinary operations complete valid pending
+work transparently. If completion cannot finish, or a reentrant observer runs
+inside the rename, they refuse `publication_incomplete` without exposing an
+old projection. A managed store with a changed projection **and no pending
+stage** still refuses `external_change_or_incomplete` strictly. No ACK does
+not imply rollback; no age-based takeover or process-liveness guess occurs.
+
+An old binary can write the projection while unmanaged publication is pending.
+Roll-forward overwrites that outside write with the reserved head's peers.
+This is consistent with unmanaged mode's lack of outside-writer protection.
+
+#### Manual completion
+
+Retry an owner `read()` with the same pairing root to request completion; the
+original mutation ID is not needed. A managed host must supply its existing
+trusted adapter and hold the normal gate. An exact-ID/request retry also
+finishes pending work and returns the original recorded outcome, without a
+new generation. Do not remove a generation, marker or staging witness to reset
+the store, and do not retry a relative mutation with a fresh expected revision
+as a substitute for recorded-ID retry.
+
+If `publication_incomplete` persists, preserve the files and stop all writers,
+including old binaries, before manual repair. Under that proven quiescence
+(and the managed gate where applicable), reviewed maintenance can validate the
+root/chain/marker, reconstruct the exact projection from the head's peers,
+verify its `peersHash`, stage/synchronize it, atomically replace the projection,
+quarantine unusable projection-source temps if necessary (never the generation
+witness), and invoke owner completion to synchronize the directory and remove
+the witness. Never reconstruct a consumed source while a paused writer could
+resume. Missing/corrupt authority evidence or marker mismatch needs separate
+reviewed repair, not this projection-completion procedure.
 
 Readers verify checksums, sequence, root identity and managed state. They refuse
 a concurrent changed generation listing instead of combining snapshots. In
@@ -233,7 +288,9 @@ The process suite coordinates two real processes without sleeps as an ordering
 proof, tests reconnect storms (zero generations and unchanged projections),
 current advisory timestamps, unsafe-file replacement, old-binary timestamp
 merging, unmanaged adoption and managed refusal, ACK loss and publication
-interruption. Real runtime and desktop Noise handshakes also complete through
+interruption. Crash tests recover both unmanaged and managed publications;
+a two-process live-writer race proves a helper and later revoke survive the
+original writer resuming. Real runtime and desktop Noise handshakes also complete through
 injected advisory sync/rename failures. The suite instruments actual
 file/directory barrier calls. Its instrumentation must observe operations; no-op
 instrumentation fails. The negative controls use disposable mutated source
