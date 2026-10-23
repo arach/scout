@@ -565,6 +565,12 @@
       "types": "./dist/extension-channel-host.d.ts",
       "import": "./dist/extension-channel-host.js",
       "default": "./dist/extension-channel-host.js"
+    },
+    "./pairing-security/trust-owner": {
+      "bun": "./src/pairing-security/trust-owner.ts",
+      "types": "./dist/pairing-security/trust-owner.d.ts",
+      "import": "./dist/pairing-security/trust-owner.js",
+      "default": "./dist/pairing-security/trust-owner.js"
     }
   },
   "types": "./dist/index.d.ts",
