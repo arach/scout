@@ -3,7 +3,8 @@ export {};
 /** Product-free Inspector v3 diagnostic. No heap snapshot is published by this tool.
  * Based on Fable's retainer walk; validate stride and exhaust the ancestor graph,
  * rather than classifying from a few sampled paths or from the prototype object. */
-const snapshot = JSON.parse(await Bun.file(process.argv[2]!).text());
+export async function walkRetainers(file: string) {
+const snapshot = JSON.parse(await Bun.file(file).text());
 if (snapshot.version !== 3 || snapshot.type !== "Inspector") throw Error("unsupported heap snapshot format");
 const {nodes, nodeClassNames, edges, edgeTypes, edgeNames} = snapshot;
 const fields = 4; // Inspector v3: [id, size, classNameIndex, flags], NOT five.
@@ -57,3 +58,6 @@ for (const target of targets) {
   for (const root of roots) console.log(`ROOT PATH:\n  ${path.get(root)!.map(e => `${classes.get(e.from)}#${e.from} -[${e.type}:${e.name}]->`).join("\n  ")}\n  Subprocess#${target}`);
   if (!vmOnly) process.exitCode = 1;
 }
+
+}
+if (import.meta.main) await walkRetainers(process.argv[2]!);

@@ -131,6 +131,9 @@ function loadNative() {
 }
 /** Candidate allow-list, NOT the product context/credential capability gates.
  * Refuse before native loading/allocation on all other revisions/platforms. */
+/** Evidence-only compile boundary. No pair, endpoint or returned library;
+ * production keeps its lazy factory path and never calls this seam. */
+export function prepareExtensionChannelCodeForWitness(): void { native ??= loadNative(); }
 export function createExtensionChannelCandidate(form: "context" | "credential") {
   if (form !== "context" && form !== "credential") throw new ChannelIoError("invalid_input");
   if (Bun.revision !== "0d9b296af33f2b851fcbf4df3e9ec89751734ba4" || !(process.platform === "darwin" && process.arch === "arm64" || process.platform === "linux" && process.arch === "x64")) throw Error("extension_channel_candidate_unavailable");
