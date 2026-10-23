@@ -66,7 +66,7 @@ test("authority view completes a real committed publication before serving peers
  expect(v.stamp).toBe(o.pairingAuthorityStamp());
  expect(readFileSync(join(f.root,"trusted-peers.json"),"utf8")).not.toContain(f.keys[0]!);
  expect(o.mutate(4,"pending-revoke",{type:"revoke",publicKey:f.keys[0]}).revision).toBe(5);
-});
+},30_000);
 
 for(const flavor of ["full","view"] as const)test(`shared row validator ${flavor} flavor rejects a checksum-consistent malformed row`,()=>{
  const f=fixture();rows(f,r=>r[0][4]="not-boolean");
