@@ -196,6 +196,35 @@
           "reason": "PR #100 adds bounded isolated setup/doctor regression fixtures for core readiness. This test-only allowance does not permit production synchronous spawning or private app dependencies."
         }
       ]
+    },
+    {
+      "id": "pr-95-async-web-install",
+      "sourceHead": "f3bf9527705b102f2b46f68ea3cb53af83c7a710",
+      "reason": "PR #95 replaces synchronous web-install extraction with bounded async spawning. Two obsolete spawnSync pairs retire; one child-only Bun.spawnSync regression fixture is added. No other policy entry changes. This transition follows the separately accounted PR #100 core-readiness fixture addition; that pair remains unchanged.",
+      "fromCount": 175,
+      "toCount": 174,
+      "retired": [
+        {
+          "path": "packages/cli/src/cli/commands/web.ts",
+          "symbol": "spawnSync",
+          "policySha256": "788cab900901b09cb28f5d2a3c36ed6198b64f055b1729fc05c3cd3f4a9719a2",
+          "reason": "PR #95 removes the synchronous production web-install tar extraction and retires this spawnSync allowance."
+        },
+        {
+          "path": "packages/cli/src/cli/commands/web.test.ts",
+          "symbol": "spawnSync",
+          "policySha256": "bdae1b073d30957f80a62fa271b72cd42355ffe567ed3ce3b835552ef844f9bb",
+          "reason": "PR #95 uses async tar fixture helpers in the web-install tests, retiring this spawnSync allowance."
+        }
+      ],
+      "added": [
+        {
+          "path": "packages/cli/src/cli/commands/fixtures/web-stdio.ts",
+          "symbol": "Bun.spawnSync",
+          "policySha256": "3e407ac66cce75c4139ec54af0ef8f1f494d3f6e2e1fe5171ea2dc92d2a8e160",
+          "reason": "New child-only regression fixture forces GC during the legacy synchronous native-call negative control; production installation does not use it."
+        }
+      ]
     }
   ]
 }
