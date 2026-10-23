@@ -180,5 +180,22 @@
       {"path": "packages/web/vite.config.ts","symbol": "execSync","policySha256": "fa29d9b3bca94a0f3a58af48f8731d5a3582713a87d1d5f0d33e8e234b869cf6"}
     ]
   },
-  "changes": []
+  "changes": [
+    {
+      "id": "pr-100-core-readiness-fixtures",
+      "sourceHead": "66b524514cab1bfacd251bbde728f5b8175e315c",
+      "reason": "PR #100, merged as 6092bf44004abe29a862d0f6974279e4795cf6c5, adds one test-only Bun.spawnSync pair for bounded isolated core setup/doctor fixtures. The b90c69fd-to-48a6bb29 policy delta contains no other additions, removals or edits.",
+      "fromCount": 174,
+      "toCount": 175,
+      "retired": [],
+      "added": [
+        {
+          "path": "packages/cli/src/cli/core-readiness.test.ts",
+          "symbol": "Bun.spawnSync",
+          "policySha256": "11f2e152b96797ab94da0e856868121e835b53004b015eafb18917b7c94b0e6f",
+          "reason": "PR #100 adds bounded isolated setup/doctor regression fixtures for core readiness. This test-only allowance does not permit production synchronous spawning or private app dependencies."
+        }
+      ]
+    }
+  ]
 }

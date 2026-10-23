@@ -44,12 +44,19 @@ pair, an unrelated same-count replacement or an unaccounted policy widening
 refuses, as does a missing/partial/vacuous fence report. The fixed-source native
 compile checks remain mandatory independently of this ledger.
 
-PR #95's rebase must append the named 174-to-173 transition: retire `spawnSync`
+PR #100 adds `packages/cli/src/cli/core-readiness.test.ts / Bun.spawnSync` for
+bounded isolated core setup/doctor fixtures. Its named record identifies reviewed
+input `66b524514cab1bfacd251bbde728f5b8175e315c` and merge
+`6092bf44004abe29a862d0f6974279e4795cf6c5`, taking the expected inventory from
+174 to 175. The pinned baseline and its digest remain unchanged.
+
+PR #95's rebase must append the named 175-to-174 transition: retire `spawnSync`
 in `packages/cli/src/cli/commands/web.ts` (async tar extraction) and
 `packages/cli/src/cli/commands/web.test.ts` (async tar fixture helpers); add
 `Bun.spawnSync` in `packages/cli/src/cli/commands/fixtures/web-stdio.ts`
 (child-only legacy synchronous-call regression control). Its unaccounted
-173-entry tree must refuse. Do not edit or regenerate the pinned baseline.
+174-entry tree must refuse against the accounted 175-entry inventory.
+Do not edit or regenerate the pinned baseline.
 
 CLI source units run reuse-sensitive suites in separate processes; Bun
 JS-realm isolation alone does not isolate the descriptor table. No witness
