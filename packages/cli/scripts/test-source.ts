@@ -34,7 +34,7 @@ if (import.meta.main) {
   for (const files of sourceTestPlan(sourceTestFiles(root))) {
     console.log(JSON.stringify({event:"cli-unit-process",files,version:Bun.version,revision:Bun.revision}));
     const preload=files.some(file=>["src/cli/extension-async-io.test.ts","src/cli/extension-context.test.ts","src/cli/extension-numeric-spike.test.ts"].includes(file))
-      ? ["--preload",join(root,"../../scripts/extension-numeric-spike/reservations.ts")] : [];
+      ? ["--preload",join(root,"../../scripts/extension-numeric-spike/preload.ts")] : [];
     const child = Bun.spawn([process.execPath, "test", ...preload, "--isolate", ...files.map(file => `./${file}`)], {
       cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit",
     });

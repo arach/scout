@@ -193,7 +193,21 @@ export class DescriptorReservations {
 // Preloading and importing share this instance, including in a test realm.
 const key=Symbol.for("scout.numeric-witness.descriptor-reservations.v1");
 const globals=globalThis as typeof globalThis & {[key]?:DescriptorReservations};
-const supported=typeof Bun!=="undefined" && Bun.revision==="0d9b296af33f2b851fcbf4df3e9ec89751734ba4"
-  && (process.platform==="darwin" && process.arch==="arm64" || process.platform==="linux" && process.arch==="x64");
-export const reservations=supported ? (globals[key]??=new DescriptorReservations()) : undefined;
-if(reservations) process.once("exit",()=>reservations.dispose());
+/** Explicit proof startup only. Never called by a reader or an env switch. */
+export function initializeDescriptorReservations(): DescriptorReservations | undefined {
+  const supported=typeof Bun!=="undefined" && Bun.revision==="0d9b296af33f2b851fcbf4df3e9ec89751734ba4"
+    && (process.platform==="darwin" && process.arch==="arm64" || process.platform==="linux" && process.arch==="x64");
+  if (!supported) return undefined;
+  if (!globals[key]) {
+    const reservations = new DescriptorReservations();
+    globals[key] = reservations;
+    process.once("exit", () => reservations.dispose());
+  }
+  return globals[key];
+}
+/** Fail closed before startup; never reserve descriptors as a read side effect. */
+export function readDescriptorReservations(): DescriptorReservations {
+  const reservations = globals[key];
+  if (!reservations) throw Error("numeric spike requires explicit descriptor reservation startup");
+  return reservations;
+}

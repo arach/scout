@@ -7,6 +7,7 @@ import {readFileSync,readdirSync,mkdtempSync,writeFileSync,rmSync} from "node:fs
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 import {pathToFileURL} from "node:url";
+export async function prepareContract() {
 let compiles=0,pairs=0;
 const library={symbols:{scout_channel_pair:()=>{pairs++;throw Error("seam created pair");}}};
 const key=Symbol.for("scout.prepare-contract.ffi");
@@ -42,3 +43,6 @@ if(productionCallers)throw Error("CLI/environment reaches witness seam");
 console.log(JSON.stringify({event:"prepare-contract",compiles,pairs,endpoints:0,idempotent:true,productionCallers}));
 
 } finally {delete globals[key];rmSync(temporary,{recursive:true,force:true});}
+
+}
+if (import.meta.main) await prepareContract();

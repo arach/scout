@@ -169,3 +169,45 @@ test("nonzero command drains both piped output tails before its parent exits", a
     rmSync(root, {recursive: true, force: true});
   }
 }, 15000);
+
+
+import { Writable } from "node:stream";
+for (const code of [0, 7]) {
+  test(`output drain write failure preserves child status ${code}`, async () => {
+    const broken = new Writable({write(_chunk, _encoding, done) {done(Error("synthetic write failure"));}});
+    const sink = new Writable({write(_chunk, _encoding, done) {done();}});
+    const args = [process.execPath, "--eval", `console.log("output");process.exit(${code})`];
+    try {
+      await command(args, process.env, {stdout: broken, stderr: sink, timeoutMs: 1000});
+      throw Error("unexpected success");
+    } catch (error) {
+      expect((error as Error).message).toBe(code ? `qualification command failed: ${args.join(" ")}` : "qualification output drain failed");
+      expect(String((error as Error).cause)).toContain("synthetic write failure");
+    } finally {broken.destroy(); sink.destroy();}
+  });
+  test(`output drain shares one bounded budget and preserves child status ${code}`, async () => {
+    const held = new Writable({write() {}}), sink = new Writable({write() {}});
+    const args = [process.execPath, "--eval", `console.log("output");console.error("error");process.exit(${code})`];
+    const start = performance.now();
+    try {
+      await command(args, process.env, {stdout: held, stderr: sink, timeoutMs: 25});
+      throw Error("unexpected success");
+    } catch (error) {
+      expect((error as Error).message).toBe(code ? `qualification command failed: ${args.join(" ")}` : "qualification output drain failed");
+      expect(String((error as Error).cause)).toContain("timed out after 25 ms");
+      expect(performance.now() - start).toBeLessThan(2000);
+    } finally {held.destroy(); sink.destroy();}
+  });
+}
+
+test("apparatus imports perform no descriptor I/O or exit-listener registration", async () => {
+  const child = Bun.spawn([process.execPath, join(import.meta.dir,"extension-numeric-spike/inert-import.ts")], {stdout:"pipe", stderr:"pipe"});
+  const timer = setTimeout(() => child.kill("SIGKILL"), 10000);
+  try {
+    const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    expect(err).toBe(""); expect(code).toBe(0);
+    const receipt = JSON.parse(out);
+    expect(receipt).toMatchObject({event:"apparatus-import-inert", identical:true, readerRefused:true, exitListenerDelta:0});
+    expect(receipt.before).toBe(receipt.after);
+  } finally {clearTimeout(timer); if(child.exitCode===null) child.kill("SIGKILL"); await child.exited;}
+}, 15000);
