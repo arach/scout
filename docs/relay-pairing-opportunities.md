@@ -160,6 +160,15 @@ its direct Noise channel. The server intercepts this before the application
 router and requires authenticated full-key equality with its own host identity.
 A paired phone key, claimed device ID, plaintext client, HTTP header or relayed
 RPC cannot open the opportunity. The QR control carries `open` or `cancel` and an optional cancellation ID.
+If an approved request's window was consumed, cancelled, expired or invalidated
+by an authority change before the phone fetched its room, its poll answers
+`410` with status `expired`. The phone must make a new request. The poll does
+not touch the old request's expiry. This is best-effort UX: spent IDs exist
+only for the runtime lifetime. After a controller restart forgets them, an
+approved request without a known window can answer `202` again. An unavailable
+controller also remains unknown, not proof of a spent window. No persisted
+approval reconstructs an invitation.
+
 Cancellation marks the request ID spent even if its window has not opened yet.
 A delayed open cannot revive that ID within the same runtime. The HTTP route
 also keeps its denial recheck after controller startup.

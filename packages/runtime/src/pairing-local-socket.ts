@@ -208,6 +208,8 @@ export async function openPairingLocalChannel(
 export type PairingOpportunityControlAction = "open" | "cancel" | "request-open" | "request-read" | "request-cancel";
 export type PairingRequestBinding = { requestId: string; publicKey?: string; authorityStamp?: string };
 export type LocalPairingOpportunity = { windowId: string; payload: QRPayload };
+/** Best-effort terminal knowledge retained only by the current runtime. */
+export type LocalApprovalPairingOpportunity = LocalPairingOpportunity | { status: "spent" };
 
 export function requestLocalPairingOpportunity(port: number, action: "open" | "cancel", windowId?: string) {
   return requestLocalPairingControl(port, {action, windowId});
@@ -220,11 +222,17 @@ export function requestLocalApprovalPairingOpportunity(
   return requestLocalPairingControl(port, {action: `request-${action}`, binding});
 }
 
+function requestLocalPairingControl(
+  port: number, params: {action: "open" | "cancel"; windowId?: string},
+): Promise<LocalPairingOpportunity | null>;
+function requestLocalPairingControl(
+  port: number, params: {action: "request-open" | "request-read" | "request-cancel"; binding: PairingRequestBinding},
+): Promise<LocalApprovalPairingOpportunity | null>;
 async function requestLocalPairingControl(
   port: number, params: {action: PairingOpportunityControlAction; windowId?: string; binding?: PairingRequestBinding},
-): Promise<LocalPairingOpportunity | null> {
+): Promise<LocalApprovalPairingOpportunity | null> {
   let channel: PairingLocalChannel | undefined;
-  type Result = {windowId: string; payload: QRPayload} | null;
+  type Result = LocalApprovalPairingOpportunity | null;
   let settle!: (value: Result) => void, fail!: (error: Error) => void;
   const id = `pairing-${crypto.randomUUID()}`;
   const result = new Promise<Result>((resolve, reject) => { settle = resolve; fail = reject; });
