@@ -20,3 +20,4 @@ test('same filenames cannot hide substituted bundle bytes',()=>assert.match(chec
 for (const p of ['apps/desktop/src/core/setup/local-edge-dependencies.ts', 'apps/desktop/src/core/setup/terminal-pty-dependencies.ts']) {
  test(`retired readiness input cannot return: ${p}`, () => assert.match(check({...expected,removedSources:[p]}, {...observed,sources:[source,{...source,source:p}]}, expected.packedFiles).join('\n'), /Removed private source returned/));
 }
+test('removed private source cannot return inside an existing bundle',()=>assert.match(check({...expected,removedSources:[source.source]},observed,expected.packedFiles).join('\n'),/Removed private source returned/));

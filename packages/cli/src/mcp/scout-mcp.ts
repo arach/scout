@@ -3279,7 +3279,7 @@ export function createScoutMcpServer(options: {
   registerRouteContext(server, routeContextDependencies({ brokerUrl: deps.resolveBrokerUrl() }),
     !toolFilter || (toolFilter("route_context") && toolFilter("ask")));
   registerSessionDiscoveryTools(server, sessionDiscoveryDependencies(resolveScoutWebOrigin(env), { env }));
-  registerHerdrWorkspaceTools(server, herdrWorkspacesDependencies(resolveScoutWebOrigin(env), { env }));
+  registerHerdrWorkspaceTools(server, herdrWorkspacesDependencies({ env }));
   registerSessionSendTool(server, sessionSendDependencies(env));
   registerFlightCancelTool(server, id => cancelScoutFlight(deps.resolveBrokerUrl(), id));
   registerAttachmentReaderTool(server, {
