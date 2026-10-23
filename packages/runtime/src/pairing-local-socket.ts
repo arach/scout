@@ -206,7 +206,7 @@ export async function openPairingLocalChannel(
 /** Explicit local QR workflow control, authenticated with this host's own key.
  * A phone's paired key cannot invoke the server-side control hook. */
 export type PairingOpportunityControlAction = "open" | "cancel" | "request-open" | "request-read" | "request-cancel";
-export type PairingRequestBinding = { requestId: string; publicKey?: string };
+export type PairingRequestBinding = { requestId: string; publicKey?: string; authorityStamp?: string };
 export type LocalPairingOpportunity = { windowId: string; payload: QRPayload };
 
 export function requestLocalPairingOpportunity(port: number, action: "open" | "cancel", windowId?: string) {

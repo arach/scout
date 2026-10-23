@@ -13,6 +13,7 @@ const cases: Record<string, Record<string, unknown>> = {
     qrPaired: true, secondSurvivesQR: true, secondPaired: true, authorityCancelsThird: true},
   "A-DELIVERY": {deniedClosed: true, requestNotQR: true, denied: 403, deniedLocation: null, expired: 410, expiredLocation: null,
     pending: 202, pendingLocation: null, live: 302, replay: 410, replayLocation: null},
+  "A-STARTUP-AUTHORITY": {approvalStatus: 503, noPayload: true, regranted: false, trusted: false},
   "A-RACE": {denialStatus: 200, lateApprovalStatus: 409, closed: true, poll: 403},
   "A-RETRY": {afterCleanupStatus: 409, sameRoom: true, sameId: true, sameDeadline: true, reopenStatus: 409, cancelled: true},
   "A-LOCAL-AUTH": {errorCode: -32001, noRoom: true, remainsOpen: true},

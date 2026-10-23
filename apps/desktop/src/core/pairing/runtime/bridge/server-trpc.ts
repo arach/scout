@@ -300,6 +300,7 @@ export function startBridgeServerTRPC(options: {
         const requestAction = ["request-open", "request-read", "request-cancel"].includes(action);
         const validBinding = binding && typeof binding.requestId === "string"
           && /^[a-zA-Z0-9._:-]{1,128}$/.test(binding.requestId)
+          && (binding.authorityStamp === undefined || (typeof binding.authorityStamp === "string" && /^[a-f0-9]{64}$/.test(binding.authorityStamp)))
           && (binding.publicKey === undefined || (typeof binding.publicKey === "string" && /^[a-f0-9]{64}$/.test(binding.publicKey)));
         if (!state.localService || !options.pairingControl || !["open", "cancel", "request-open", "request-read", "request-cancel"].includes(action)
           || (requestAction && !validBinding)

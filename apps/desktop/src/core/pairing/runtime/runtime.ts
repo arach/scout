@@ -126,7 +126,7 @@ export async function startPairingRuntime(options?: {
       if (approvalWindows.size >= 32) throw new Error("Too many pairing windows");
       const payload = Object.freeze({...qrPayload, room: crypto.randomUUID(), expiresAt: Date.now() + 300_000});
       window = { requestId: binding.requestId, payload, publicKey: binding.publicKey, closed: false, connections: [],
-        opportunity: pairingTrustOwner().openPairingOpportunity(payload.room, payload.expiresAt, binding.publicKey) };
+        opportunity: pairingTrustOwner().openPairingOpportunity(payload.room, payload.expiresAt, binding.publicKey, binding.authorityStamp) };
       approvalWindows.set(binding.requestId, window);
       const current = window;
       try { window.connections = connectRelays("pairing", payload, window); }

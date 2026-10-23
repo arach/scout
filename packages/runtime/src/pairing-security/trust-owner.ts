@@ -438,17 +438,24 @@ export class PairingTrustOwner {
       if (root) this.recordLastSeen(root, snapshot.peers, publicKey, lastSeen);
     } catch { /* Authority succeeded; advisory metadata is optional. */ }
   }
+  /** Verified decision baseline for a trusted workflow crossing process startup.
+   * This is not a grant; only a matching live opportunity can admit a peer. */
+  pairingAuthorityStamp(): string {
+    return this.operation(undefined, root => this.pairingOpportunityStamp(root!, this.readyState(root!)));
+  }
+  private pairingOpportunityStamp(root: PairingRootIdentity, state: State): string {
+    return hash(JSON.stringify([root.id, state.revision, state.hash, state.projectionHash, state.managed]));
+  }
   /** Trusted local workflow only. Opening a window does not write authority.
    * Any intervening authority change cancels it; advisory lastSeen is excluded. */
-  openPairingOpportunity(room: string, expiresAt: number, expectedPublicKey?: string): PairingOpportunity {
+  openPairingOpportunity(room: string, expiresAt: number, expectedPublicKey?: string, expectedAuthorityStamp?: string): PairingOpportunity {
     if (expectedPublicKey !== undefined) fullKey(expectedPublicKey);
     if (typeof room !== "string" || !room || room.length > 256 || !Number.isFinite(expiresAt) || expiresAt <= Date.now()
       || expiresAt - Date.now() > 300_000) refuse("invalid_pairing_opportunity");
     this.root(true);
-    const stamp = (root: PairingRootIdentity, state: State) => hash(JSON.stringify([
-      root.id, state.revision, state.hash, state.projectionHash, state.managed,
-    ]));
+    const stamp = (root: PairingRootIdentity, state: State) => this.pairingOpportunityStamp(root, state);
     const baseline = this.operation(undefined, root => stamp(root!, this.readyState(root!)));
+    if (expectedAuthorityStamp !== undefined && expectedAuthorityStamp !== baseline) refuse("pairing_opportunity_closed");
     const deadline = performance.now() + (expiresAt - Date.now());
     const id = randomUUID(); let closed = false, consumed = false;
     const valid = () => !closed && !consumed && Date.now() < expiresAt && performance.now() < deadline;

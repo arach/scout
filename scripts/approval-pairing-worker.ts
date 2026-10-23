@@ -138,9 +138,10 @@ const web = resolve("packages/web/server");
 let beforeApprovalOpen: (() => Promise<void>) | undefined;
 mock.module(resolve(web, "pairing.ts"), () => ({
   controlScoutWebApprovalPairing: async (action: "open" | "read" | "cancel", request: any) => {
+    const authorityStamp = action === "open" ? owner.pairingAuthorityStamp() : undefined;
     if (action === "open") await beforeApprovalOpen?.();
     return requestLocalApprovalPairingOpportunity(bridgePort, action, {
-      requestId: request.token, ...(request.requesterPublicKey ? {publicKey: request.requesterPublicKey} : {}),
+      requestId: request.token, authorityStamp, ...(request.requesterPublicKey ? {publicKey: request.requesterPublicKey} : {}),
     });
   },
   controlScoutWebPairingService: async () => { throw Error("approval must not open QR"); },
@@ -300,6 +301,23 @@ try {
       expired: expiredPoll.status, expiredLocation: expiredPoll.headers.get("location"),
       pending: pendingPoll.status, pendingLocation: pendingPoll.headers.get("location"),
       live: livePoll.status, replay: replay.status, replayLocation: replay.headers.get("location")});
+  } else if (scenario === "A-STARTUP-AUTHORITY") {
+    grantTrusted(); const request = await knock(trustedKey);
+    let release!: () => void, entered = false;
+    beforeApprovalOpen = () => new Promise<void>(done => {release = done; entered = true;});
+    const approving = approve(request);
+    await waitFor(() => entered, "approval startup blocked");
+    owner.mutate(owner.read().revision, crypto.randomUUID(), {type: "revoke", publicKey: trustedKey});
+    beforeApprovalOpen = undefined; release();
+    const approvalStatus = (await approving).status;
+    const invitation = payload(await poll(request));
+    let regranted = false;
+    if (invitation) {
+      await carrierReady(invitation.room);
+      regranted = await probe(await connect(trusted, invitation.room, "IK"));
+    }
+    record({approvalStatus, noPayload: invitation === null, regranted,
+      trusted: owner.read().peers.some(peer => peer.publicKey === trustedKey)});
   } else if (scenario === "A-RACE") {
     const request = await knock(); let release!: () => void, entered = false;
     beforeApprovalOpen = () => new Promise<void>(done => {release = done; entered = true;});

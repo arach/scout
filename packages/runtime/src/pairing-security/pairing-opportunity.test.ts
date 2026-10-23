@@ -65,3 +65,11 @@ test("request validity observes authority change, expiry, and late trusted-key r
  const trusted=owner.openPairingOpportunity("request",Date.now()+1000,other);let checks=0;
  expect(trusted.admit(other,"request",()=>{if(++checks===2)owner.mutate(owner.read().revision,"revoke",{type:"revoke",publicKey:other});return true;})).toBe(false);
 });
+
+test("startup cannot arm an approval against a changed decision authority", () => {
+ const owner=setup(), before=owner.pairingAuthorityStamp();
+ owner.mutate(0,"seed",{type:"grant",peer:{publicKey:key,pairedAt:"2026-01-01"}});
+ expect(()=>owner.openPairingOpportunity("request",Date.now()+1000,key,before)).toThrow("pairing_opportunity_closed");
+ const current=owner.pairingAuthorityStamp();
+ expect(owner.openPairingOpportunity("request",Date.now()+1000,key,current).isOpen()).toBe(true);
+});

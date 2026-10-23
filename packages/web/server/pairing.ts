@@ -1067,9 +1067,11 @@ export async function controlScoutWebApprovalPairing(
     return requestLocalApprovalPairingOpportunity(resolveScoutPairingConfig().port, action, binding);
   }
   return serializePairingMutation(async () => {
+    // Preserve the approved authority baseline across asynchronous startup.
+    const authorityStamp = pairingTrustOwner().pairingAuthorityStamp();
     await ensureDefaultScoutPairingWorkspaceConfig(currentDirectory);
     if (!await requestPairingActionFromSupervisor("start")) await ensureScoutPairingRuntimeStarted();
-    const result = await requestLocalApprovalPairingOpportunity(resolveScoutPairingConfig().port, "open", binding);
+    const result = await requestLocalApprovalPairingOpportunity(resolveScoutPairingConfig().port, "open", {...binding, authorityStamp});
     invalidateScoutWebPairingStateCache();
     return result;
   });

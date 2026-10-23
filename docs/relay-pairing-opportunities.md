@@ -74,7 +74,12 @@ Existing non-pairing mesh presence is unchanged.
 
 Approving a named request on the authenticated host is an explicit local pairing
 action. It starts the reconnect-only controller if necessary, then opens a
-private pairing window for that request. It does not press Show code or read an
+private pairing window for that request. Before asynchronous controller startup,
+the host captures the canonical owner's verified authority stamp. The receiving
+owner compares that stamp before creating the opportunity. A revoke or other
+authority change during startup therefore prevents the old approval from
+arming a new window. The stamp comes from trusted host composition, never from
+the device's request. It does not press Show code or read an
 existing QR. The approved response is the possession channel in place of a QR.
 
 A device can add the optional `x-scout-device-public-key` header to its first
