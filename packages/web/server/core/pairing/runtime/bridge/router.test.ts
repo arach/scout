@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { pairedRouterContext } from "../../../../../../../scripts/fixtures/paired-router-context.ts";
+import { afterAll, afterEach, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { pairedRouterFixture } from "../../../../../../../scripts/fixtures/paired-router-context.ts";
 import { SessionRegistryError } from "@openscout/agent-sessions";
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -10,9 +10,11 @@ import type { Bridge } from "./bridge.ts";
 import { bridgeRouter } from "./router.ts";
 import { revokeArtifactPresentation } from "./artifact-presentation.ts";
 
-// Each positive caller performs a durable v1 → v2 migration and a real Noise
-// handshake. Bound that fixture I/O separately from the old 5s stub budget.
+// Durable fixture setup is separate from the bounded resolver/Noise tests.
 setDefaultTimeout(30_000);
+let transports: ReturnType<typeof pairedRouterFixture>;
+beforeAll(() => { transports = pairedRouterFixture(); }, 120_000);
+afterAll(() => transports?.dispose());
 
 function createBridgeStub() {
   const replayCalls: string[] = [];
@@ -84,7 +86,7 @@ function createCaller(
     relayUrls?: string[];
   } = {},
 ) {
-  const fixture = pairedRouterContext({ bridge, cwd: "/tmp/openscout", ...context });
+  const fixture = transports.bind({ bridge, cwd: "/tmp/openscout", ...context });
   disposeCallers.push(fixture.dispose);
   return bridgeRouter.createCaller(fixture.ctx);
 }
