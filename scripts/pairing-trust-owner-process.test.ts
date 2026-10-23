@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pairingTrustOwner, type PairingTrustAdapter } from "../packages/runtime/src/pairing-security/trust-owner.ts";
+import {capsuleFixture} from "./fixtures/pairing-capsule.ts";
 
 const project = fileURLToPath(new URL("..", import.meta.url)), worker = join(project, "scripts/pairing-trust-owner-worker.ts");
 const roots: string[] = [], cleanups: Array<() => void> = [];
@@ -20,6 +21,139 @@ async function result(child: ReturnType<typeof launch>) {
 }
 async function ready(path: string) { const end = Date.now()+10_000; while (!existsSync(path)) { if (Date.now()>end) throw Error("ready timeout"); await Bun.sleep(5); } }
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); for (const root of roots.splice(0)) rmSync(root,{recursive:true,force:true}); });
+
+function completedCapsule(managed=false,generations=1){
+  const f=fixture(),data=join(f.root,"pairing-capsule-data");mkdirSync(data,{mode:0o700});
+  let unregister:(()=>void)|undefined;
+  const store=capsuleFixture(data,{generations,prepare:managed?owner=>{
+    let holder:object|null=null;
+    unregister=owner.register({id:"test.adapter",withGate(_r,body){holder={};try{return body(holder);}finally{holder=null;}},currentHolder(){return holder;}});
+    owner.withInvocation(c=>owner.mutate(1,"fixture-manage",{type:"manage"},c));
+  }:undefined});
+  unregister?.();
+  return {...f,data,store};
+}
+describe("v2 real process publication and recovery",()=>{
+  test("actual v2 barriers bracket CAS, retirement, receipt and claim release",async()=>{
+    const {data,coordination}=completedCapsule(),output=await result(launch("capsule-write",data,coordination,JSON.stringify({expected:1})));
+    expect(output.value).toMatchObject({ok:true,result:{revision:2}});
+    const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(JSON.parse);
+    const linked=events.findIndex(e=>e.event==="link"),projection=events.findIndex(e=>e.event==="rename" && e.target.endsWith("trusted-peers.json"));
+    const retired=events.map((e,i)=>e.event==="unlink" && (e.path.includes(".commit.") || e.path.includes(".done."))?i:-1).filter(i=>i>=0);
+    const receipt=events.findIndex(e=>e.event==="rename" && e.target.includes(".done."));
+    const released=events.findIndex(e=>e.event==="unlink" && e.path.includes(".pairing-v2-slot-"));
+    const dirsync=(from:number,to:number)=>events.slice(from+1,to).some(e=>e.event==="sync_success" && e.directory && e.path.endsWith("/pairing-capsule-data"));
+    expect(linked).toBeGreaterThan(0);expect(projection).toBeGreaterThan(linked);expect(retired).toHaveLength(2);
+    expect(dirsync(linked,retired[0]!)).toBe(true);expect(dirsync(retired.at(-1)!,receipt)).toBe(true);expect(dirsync(receipt,released)).toBe(true);
+    const staged=events.slice(0,linked).filter(e=>e.event==="sync_success" && !e.directory);
+    expect(staged).toHaveLength(5);expect(events.filter(e=>e.event==="sync_success")).toHaveLength(15);
+    expect(dirsync(-1,linked)).toBe(true);
+  });
+  test("fresh process validates early outcome bytes rather than a prior positive",async()=>{
+    const {data,coordination,store}=completedCapsule();
+    expect((await result(launch("read",data,coordination))).value.ok).toBe(true);
+    const path=join(data,store.head.parts[0]!.name),bytes=readFileSync(path,"utf8");
+    writeFileSync(path,bytes.replace("fixture-final","fixture-dirty"));
+    const changed=await result(launch("read",data,coordination));expect(changed.value.ok).toBe(false);expect(changed.value.error).toContain("capsule_chunk_checksum");
+  });
+  test("runtime and desktop Noise plus web revoke use the same managed v2 owner",async()=>{
+    const {data,coordination}=completedCapsule(false,0),output=await result(launch("capsule-paths",data,coordination));
+    expect(output.code,output.stderr).toBe(0);expect(output.value).toEqual({ok:true,removed:true,revision:4,peers:1,reconnectGenerations:0});
+    const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(JSON.parse);
+    const publications=events.filter(e=>(e.event==="link" || e.event==="rename") && !e.target.endsWith("trusted-peers.last-seen.json"));
+    expect(publications).toHaveLength(13);expect(publications.every(e=>e.held===true)).toBe(true);
+    expect(readdirSync(data).filter(n=>n.includes(".commit."))).toEqual(["trusted-peers.v2.commit.5.json"]);
+  });
+  test("real interruptions retain exact retries, bounded collection and fresh readers",async()=>{
+    for(const managed of [false,true])for(const point of ["after-staging","after-cas","after-publication-sync","after-projection","after-witness","during-collection","after-receipt","after-token-release","lost-ack"]){
+      const {data,coordination}=completedCapsule(managed),expected=managed?2:1;
+      const options={point,managed,expected,id:"capsule-write"};
+      const crashed=await result(launch("capsule-write",data,coordination,JSON.stringify(options)));
+      expect(crashed.code,`${managed}:${point}: ${crashed.stderr}`).toBe(point==="lost-ack"?82:81);
+      const recovered=await result(launch("capsule-recover",data,coordination,JSON.stringify({managed})));
+      expect(recovered.value,`${managed}:${point}`).toMatchObject({ok:true,snapshot:{revision:expected+(point==="after-staging"?0:1)}});
+      // A pre-CAS crash is a bounded abandoned resource claim, not authority.
+      const retried=await result(launch("capsule-write",data,coordination,JSON.stringify({managed,expected,id:"capsule-write"})));
+      expect(retried.value,`${managed}:${point}`).toMatchObject({ok:true,result:{mutationId:"capsule-write",revision:expected+1}});
+      expect(readdirSync(data).filter(n=>n.includes(".commit.")).length).toBe(1);
+      expect(readdirSync(data).filter(n=>n.includes(".done.")).length).toBe(1);
+      expect(readdirSync(data).filter(n=>n.startsWith(".pairing-v2-slot-")).length).toBe(["after-staging","after-token-release"].includes(point)?1:0);
+      console.log(JSON.stringify({capsuleCrash:{managed,point},events:readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(JSON.parse)}));
+    }
+  },30000);
+  test("late helpers cannot recreate consumed projection or receipt after a later revoke",async()=>{
+    for(const point of ["before-projection","before-receipt"]){
+      const {data,coordination,store}=completedCapsule();
+      const first=launch("capsule-write",data,coordination,JSON.stringify({point,expected:1,id:"capsule-write"}));
+      try{
+        await ready(join(coordination,`ready-${point}`));
+        expect(store.owner.read().revision).toBe(2);
+        store.owner.mutate(2,"later-revoke",{type:"revoke",publicKey:key});
+      }finally{writeFileSync(join(coordination,"go"),"go");}
+      const output=await result(first);expect(output.value,output.stderr).toMatchObject({ok:true,result:{revision:2}});
+      expect(store.owner.read().revision).toBe(3);expect(store.owner.read().peers.some(p=>p.publicKey===key)).toBe(false);
+      expect(readdirSync(data).filter(n=>n.includes(".commit."))).toEqual(["trusted-peers.v2.commit.3.json"]);
+      expect(readdirSync(data).filter(n=>n.includes(".done."))).toEqual(["trusted-peers.v2.done.3.json"]);
+      const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(JSON.parse);
+      expect(events.filter(e=>e.event==="rename")).toHaveLength(point==="before-receipt"?1:0);
+    }
+  });
+  test("concurrent v2 staging refuses interference without merging stale mutations",async()=>{
+    const {data,coordination,store}=completedCapsule();
+    const children=["a","b"].map(id=>launch("capsule-race",data,coordination,JSON.stringify({id,expected:1,mutation:{type:"grant",peer:{...peer,publicKey:id.repeat(64)}}})));
+    await Promise.all([ready(join(coordination,"ready-a")),ready(join(coordination,"ready-b"))]);writeFileSync(join(coordination,"go"),"go");
+    const outputs=await Promise.all(children.map(result));expect(outputs.filter(o=>o.value.ok).length).toBeLessThanOrEqual(1);
+    expect(outputs.filter(o=>!o.value.ok).length).toBeGreaterThanOrEqual(1);
+    console.log(JSON.stringify({concurrentCapsuleReplies:outputs}));
+    const snapshot=store.owner.read();expect([1,2]).toContain(snapshot.revision);
+    expect(snapshot.peers).toHaveLength(snapshot.revision);
+    // Interference can refuse both candidates before CAS, or lose the winner's
+    // ACK after CAS. A caller must obtain a fresh view, not merge stale edits.
+    if(snapshot.revision===1)store.owner.mutate(1,"explicit-fresh-attempt",{type:"grant",peer});
+    expect(store.owner.read().revision).toBe(2);
+  });
+  test("two paused next-serial CAS contenders publish exactly one head",async()=>{
+    const {data,coordination,store}=completedCapsule();
+    const children:ReturnType<typeof launch>[]=[];
+    try{for(const id of ["a","b"]){children.push(launch("capsule-write",data,coordination,JSON.stringify({point:"before-cas",id,expected:1,mutation:{type:"grant",peer:{...peer,publicKey:id.repeat(64)}}})));await ready(join(coordination,`ready-before-cas-${id}`));}}
+    finally{writeFileSync(join(coordination,"go"),"go");}
+    const outputs=await Promise.all(children.map(result));
+    // The winner may lose its ACK while the loser cleans its candidate. Disk
+    // authority, not number of replies, determines the one winning mutation.
+    expect(outputs.filter(o=>o.value.ok).length).toBeLessThanOrEqual(1);
+    const snapshot=store.owner.read();expect(snapshot.revision).toBe(2);expect(snapshot.peers).toHaveLength(2);
+    const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(JSON.parse);
+    expect(events.filter(e=>e.event==="link")).toHaveLength(1);
+    const winner=snapshot.peers.some(p=>p.publicKey===key)?"a":"b";
+    expect(store.owner.mutate(1,winner,{type:"grant",peer:{...peer,publicKey:winner.repeat(64)}}).revision).toBe(2);
+  });
+  test("failed candidate leaves no authority; failed collector refuses new epochs until repaired",async()=>{
+    for(const point of ["sync-fail","rename-fail","collector-fail"]){
+      const {data,coordination,store}=completedCapsule();
+      const output=await result(launch("capsule-write",data,coordination,JSON.stringify({point,expected:1})));
+      expect(output.value.ok).toBe(false);
+      if(point==="sync-fail"){
+        expect(store.owner.read().revision).toBe(1);expect(readdirSync(data).filter(n=>n.startsWith(".pairing-v2"))).toEqual([]);
+      }else{
+        expect(output.value.error).toContain(point==="collector-fail"?"capsule_collection_failed":"publication_incomplete");
+        const failed=await result(launch("capsule-recover",data,coordination,JSON.stringify({point})));
+        expect(failed.value.ok).toBe(false);expect(readdirSync(data).filter(n=>n.includes(".commit.")).length).toBe(2);
+        const blocked=await result(launch("capsule-write",data,coordination,JSON.stringify({point,expected:2,id:"must-not-pile-up"})));
+        expect(blocked.value.ok).toBe(false);expect(readdirSync(data).filter(n=>n.includes(".commit.")).length).toBe(2);
+        expect(store.owner.read().revision).toBe(2);
+        expect(readdirSync(data).filter(n=>n.includes(".commit.")).length).toBe(1);
+      }
+    }
+  });
+  test("first managed adoption can recover after consuming its sole marker stage",async()=>{
+    const {data,coordination}=completedCapsule();
+    const output=await result(launch("capsule-write",data,coordination,JSON.stringify({point:"after-marker",managed:true,expected:1,id:"first-manage",mutation:{type:"manage"}})));
+    expect(output.code).toBe(81);
+    const recovered=await result(launch("capsule-recover",data,coordination,JSON.stringify({managed:true})));
+    expect(recovered.value).toMatchObject({ok:true,snapshot:{revision:2}});
+    const unregistered=await result(launch("read",data,coordination));expect(unregistered.value.error).toContain("managed_adapter_required");
+  });
+});
 
 describe("pairing owner real cross-process and I/O paths", () => {
   test("unmanaged CAS race: one winner, one refusal, no lost update", async () => {
