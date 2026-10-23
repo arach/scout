@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/cli/commands/fixtures/web-stdio.ts",
+  "symbol": "Bun.spawnSync",
+  "category": "test",
+  "reason": "Child-only Linux regression intercepts legacy synchronous extraction to force GC during the native call; never used by production installation",
+  "owner": "desktop"
+}

@@ -170,28 +170,39 @@ describe("herdr_workspaces", () => {
 });
 
 describe("herdrWorkspacesDependencies", () => {
-  test("asks the web server for the digest and never shells herdr itself", async () => {
+  test("asks only the selected broker and snapshots its environment", async () => {
     const seen: string[] = [];
-    const deps = herdrWorkspacesDependencies("http://localhost:43120", {
-      env: {},
-      fetchImpl: (async (input: unknown) => {
+    const env = { OPENSCOUT_BROKER_URL: "http://localhost:43121", OPENSCOUT_WEB_URL: "https://web-must-not-be-used.invalid" };
+    const deps = herdrWorkspacesDependencies({ env,
+      fetchImpl: Object.assign(async (input: Parameters<typeof fetch>[0]) => {
         seen.push(String(input));
-        return new Response(JSON.stringify({ ok: true, digests: [], truncated: true }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }) as unknown as typeof fetch,
+        return Response.json({ schema: "scout.herdr-workspaces/v1", nodeId: "node-one", scannedAt: 100,
+          availability: "partial", reason: null, requestedSession: "openscout", count: 0, digests: [], truncated: true,
+          coverage: { kind: "ttl_cached_probes", scope: "this_host_only", listedSessions: 1,
+            limits: { sessions: 8, enumeratedSessions: 256, workspacesPerSession: 16, tabsPerSession: 64,
+              inputPanesPerSession: 256, emittedPanesPerSession: 40, leadsPerSession: 12, concurrentSessions: 2 } } });
+      }, { preconnect() {} }) as typeof fetch,
     });
-    const result = await deps.readDigests("openscout");
-    expect(seen[0]).toBe("http://localhost:43120/api/terminal-hosts/herdr/workspaces?session=openscout");
-    expect(result).toEqual({ digests: [], truncated: true, available: true });
+    env.OPENSCOUT_BROKER_URL = "https://changed.invalid";
+    expect(await deps.readDigests("openscout")).toMatchObject({ digests: [], truncated: true, available: true,
+      runtimeRead: { nodeId: "node-one", availability: "partial", requestedSession: "openscout", sessions: [] } });
+    expect(seen).toEqual(["http://localhost:43121/v1/terminal-hosts/herdr/workspaces?session=openscout"]);
   });
 
-  test("a failed read is unavailable, not empty", async () => {
-    const deps = herdrWorkspacesDependencies("http://localhost:43120", {
-      env: {},
-      fetchImpl: (async () => new Response("nope", { status: 500 })) as unknown as typeof fetch,
+  test("a failed read is unavailable, with safe HTTP status and no web fallback", async () => {
+    let calls = 0;
+    const deps = herdrWorkspacesDependencies({ env: { OPENSCOUT_BROKER_URL: "http://localhost:43121" },
+      fetchImpl: Object.assign(async () => { calls++; return Response.json({ error: "local_only", detail: "do-not-reflect" }, { status: 403 }); }, { preconnect() {} }) as typeof fetch,
     });
-    expect(await deps.readDigests()).toEqual({ digests: [], truncated: false, available: false });
+    expect(await deps.readDigests()).toEqual({ digests: [], truncated: false, available: false,
+      readError: { status: 403, code: "local_only" } });
+    expect(calls).toBe(1);
+  });
+
+  test("partial empty observations never claim there are no sessions", async () => {
+    const client = await clientFor(dependencies({ readDigests: async () => ({ digests: [], available: true, truncated: true }) }));
+    const result = await client.callTool({ name: "herdr_workspaces", arguments: {} });
+    expect((result.content as Array<{ text: string }>)[0]!.text).toContain("incomplete observation");
+    expect(result.structuredContent).toMatchObject({ available: true, truncated: true });
   });
 });

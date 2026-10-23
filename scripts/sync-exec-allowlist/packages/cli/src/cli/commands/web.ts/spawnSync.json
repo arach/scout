@@ -1,7 +1,0 @@
-{
-  "path": "packages/cli/src/cli/commands/web.ts",
-  "symbol": "spawnSync",
-  "category": "cli",
-  "reason": "one-shot `scout web` commands: credential-store reads/writes (security, secret-tool) with the download key on stdin, and the tar extract of a verified download",
-  "owner": "desktop"
-}

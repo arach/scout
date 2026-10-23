@@ -1,8 +1,9 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { promisify } from "node:util";
 import { Writable } from "node:stream";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -48,6 +49,8 @@ export type ScoutWebCommandDeps = {
   keyStores?: DistKeyStore[];
   promptKey?: () => Promise<string>;
   restartWeb?: () => Promise<string>;
+  /** May shorten the complete download budget; never extends the production cap. */
+  downloadTimeoutMs?: number;
 };
 
 export function renderWebCommandHelp(): string {
@@ -123,13 +126,14 @@ async function distRequest(
   key: string,
   path: string,
   timeoutMs = 15_000,
+  signal = AbortSignal.timeout(timeoutMs),
 ): Promise<Response> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const url = `${distBaseUrl(context.env)}${path}`;
   try {
     return await fetchImpl(url, {
       headers: { authorization: `Bearer ${key}`, accept: "application/json, application/gzip" },
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     });
   } catch (error) {
     throw new ScoutCliError(`Couldn't reach ${distBaseUrl(context.env)}: ${error instanceof Error ? error.message : String(error)}`);
@@ -202,7 +206,12 @@ async function runInstall(context: ScoutCommandContext, args: string[], deps: Sc
     return;
   }
 
-  const response = await distRequest(context, deps, resolved.key, `/v1/dist/web-full/${encodeURIComponent(version)}`, DOWNLOAD_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(deps.downloadTimeoutMs)
+    ? Math.max(1, Math.min(DOWNLOAD_TIMEOUT_MS, deps.downloadTimeoutMs!)) : DOWNLOAD_TIMEOUT_MS;
+  // One budget covers headers, body consumption AND the file writer. Passing
+  // a signal only to fetch leaves a stalled stream/pipeline without a deadline.
+  const downloadSignal = AbortSignal.timeout(timeoutMs);
+  const response = await distRequest(context, deps, resolved.key, `/v1/dist/web-full/${encodeURIComponent(version)}`, timeoutMs, downloadSignal);
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string } | null;
     const reason = explainFailure(response.status, body);
@@ -223,7 +232,7 @@ async function runInstall(context: ScoutCommandContext, args: string[], deps: Sc
     const hash = createHash("sha256");
     const source = Readable.fromWeb(response.body as unknown as NodeWebReadableStream<Uint8Array>);
     source.on("data", (chunk: Buffer) => hash.update(chunk));
-    await pipeline(source, createWriteStream(tarball));
+    await pipeline(source, createWriteStream(tarball), { signal: downloadSignal });
     const actual = hash.digest("hex");
     if (actual !== expected) {
       throw new ScoutCliError(`Checksum mismatch (expected ${expected.slice(0, 12)}…, got ${actual.slice(0, 12)}…); not installing.`);
@@ -231,8 +240,15 @@ async function runInstall(context: ScoutCommandContext, args: string[], deps: Sc
 
     const unpacked = join(workDirectory, "client");
     mkdirSync(unpacked, { recursive: true });
-    const tar = spawnSync("tar", ["-xzf", tarball, "-C", unpacked], { encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL" });
-    if (tar.status !== 0) throw new ScoutCliError(`Couldn't unpack the download: ${(tar.error?.message || tar.stderr || "tar failed").trim()}`);
+    // Keep extraction on the main event loop. On Bun 1.3.13/1.3.14, GC
+    // inside synchronous child execution can poison Linux stdio epoll entries.
+    try {
+      await promisify(execFile)("tar", ["-xzf", tarball, "-C", unpacked], {
+        encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 128 * 1024,
+      });
+    } catch (error) {
+      throw new ScoutCliError(`Couldn't unpack the download: ${error instanceof Error ? error.message : String(error)}`);
+    }
     const profile = readWebFullClientProfile(unpacked);
     if (!existsSync(join(unpacked, "index.html")) || profile?.version !== version) {
       throw new ScoutCliError(`The download isn't the full web app for ${version}; not installing it.`);
