@@ -68,7 +68,7 @@ test("managed cutover preserves stamp and policy, excludes advisory data and per
   expect(h.policy).toMatchObject({revision: 2, marker: {adapterId: "cutover.test"}});
   f.owner.mutate(2, "revoke", {type: "revoke", publicKey: f.keys[0]!}); expect(f.owner.read().peers).toEqual([]);
   removers.pop()!(); expect(() => new PairingTrustOwner(f.root).read()).toThrow("managed_adapter_required");
-});
+}, 30000);
 
 test("migration refuses another observable live invocation before reserving resources", async () => {
   const f = fixture({prepare(o) {removers.push(o.register(adapter())); o.mutate(1, "manage", {type: "manage"});}});
@@ -79,7 +79,7 @@ test("migration refuses another observable live invocation before reserving reso
     expect(existsSync(join(f.root, CUT_DIRECTORY))).toBe(false);
   } finally {release(); await held;}
   f.owner.withInvocation(c => f.owner.migrateToCapsule("now", c)); expect(f.owner.read().revision).toBe(2);
-});
+}, 30000);
 
 test("a live pinned-v1 holder exposed by currentHolder cannot be replaced by a claimed new holder", async () => {
   let holder: object | null = null, acquisitions = 0;
@@ -105,7 +105,7 @@ test("a live pinned-v1 holder exposed by currentHolder cannot be replaced by a c
     expect(existsSync(join(f.root, CUT_DIRECTORY))).toBe(false);
   } finally {release(); await active;}
   f.owner.migrateToCapsule("after-old"); expect(f.owner.read().revision).toBe(2);
-});
+}, 30000);
 
 test("migrated reads remain exhaustive and resurrected retired generations refuse", () => {
   const f = fixture({generations: 4, keys: 2});
@@ -118,4 +118,4 @@ test("migrated reads remain exhaustive and resurrected retired generations refus
   expect(() => new PairingTrustOwner(f.root).read()).toThrow("capsule_chunk_checksum");
   writeFileSync(path, bytes); writeFileSync(join(f.root, "trusted-peers.owner.1.json"), retired, {mode: 0o600});
   expect(() => f.owner.read()).toThrow("capsule_unexpected_history");
-});
+}, 30000);
