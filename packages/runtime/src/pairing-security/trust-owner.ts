@@ -59,6 +59,8 @@ export interface PairingOpportunity {
   admit(publicKey: string, room: string, isLive: () => boolean): boolean;
 }
 export type TrustSnapshot = Readonly<{ revision: number; peers: readonly TrustedPeer[] }>;
+/** One coherent authority read. Advisory lastSeen is deliberately excluded. */
+export type PairingAuthorityView = TrustSnapshot & Readonly<{stamp: string}>;
 type State = { revision: number; peers: TrustedPeer[]; hash: string; peersHash: string;
   managed: Marker | null; outcomes: Record<string, SavedOutcome>; bytes: number;
   projectionHash: string; adoption: ProjectionAdoption | null; pendingStage: string | null; projectionStage: string | null;
@@ -266,10 +268,10 @@ export class PairingTrustOwner {
       || typeof value.adapterId !== "string" || !/^[a-z0-9.-]{1,64}$/.test(value.adapterId)) refuse("managed_marker_invalid");
     return value;
   }
-  private state(root: PairingRootIdentity, allowPending = false): State {
+  private state(root: PairingRootIdentity, allowPending = false, materialize = true): State {
     this.check(root);
     const inventory = readdirSync(root.path);
-    if (inventory.some(n => n.startsWith(CAPSULE_PREFIX) || n.startsWith(".pairing-v2"))) return this.capsuleState(root, allowPending, inventory);
+    if (inventory.some(n => n.startsWith(CAPSULE_PREFIX) || n.startsWith(".pairing-v2"))) return this.capsuleState(root, allowPending, inventory, materialize);
     const marker = this.marker(root);
     const names = readdirSync(root.path).filter(n => n.startsWith(PREFIX));
     if (names.length > REVISION_LIMIT) refuse("capacity");
@@ -392,12 +394,14 @@ export class PairingTrustOwner {
       refuse("publication_incomplete");
     } finally { completing.delete(root.id); }
   }
-  private readyState(root: PairingRootIdentity): State {
+  private readyState(root: PairingRootIdentity, materialize = true): State {
     this.finishPendingCutover(root);
-    const state = this.state(root, true);
+    const state = this.state(root, true, materialize);
     if (state.capsule) {
-      if (state.capsule.needsRecovery) this.completeCapsule(root, state);
-      return state.capsule.needsRecovery ? this.state(root) : state;
+      // Recovery consumes the full retry rows/buffers. A view never enters it
+      // with a partial build; completion precedes the final exhaustive view.
+      if (state.capsule.needsRecovery) this.completeCapsule(root, materialize ? state : this.state(root, true));
+      return state.capsule.needsRecovery ? this.state(root, false, materialize) : state;
     }
     if (state.pendingStage) this.completePublication(root, state);
     return state.pendingStage ? this.state(root) : state;
@@ -808,7 +812,7 @@ export class PairingTrustOwner {
     }
     this.check(root); return {claims,allowed};
   }
-  private capsuleState(root: PairingRootIdentity, allowPending: boolean, inventory: string[]): State {
+  private capsuleState(root: PairingRootIdentity, allowPending: boolean, inventory: string[], materialize = true): State {
     const names = inventory.filter(n=>n.startsWith(PREFIX) || n.startsWith(CAPSULE_PREFIX) || n.startsWith(".pairing-v2")).sort();
     if (names.length > 360) refuse("capacity");
     const barriers = names.filter(n=>n.startsWith(PREFIX));
@@ -847,6 +851,10 @@ export class PairingTrustOwner {
     const uniqueParts=new Set(h.parts.map(p=>p.name));
     if (uniqueParts.size !== h.parts.length) refuse("capsule_invalid");
     const outcomes:Record<string,SavedOutcome>={}, rows:CapsuleRow[]=[], partData:Buffer[]=[];
+    // Full callers keep the existing retry lookup and chunk materialization.
+    // Views retain only duplicate IDs and the last row, never prior bodies.
+    const ids = materialize ? null : new Set<string>();
+    let rowCount=0, lastRow:CapsuleRow|undefined;
     let charge=0, cutCharge=0, policy:ManagedPolicy|null=null, cutPolicy:ManagedPolicy|null=null, authorityBytes=physical.length+barrierBytes.length+cutBytes.length;
     // Reject an over-budget inventory before allocating its bodies. Each
     // declared byte length is also compared with the checked file below.
@@ -862,15 +870,15 @@ export class PairingTrustOwner {
       if(i) fullDigest.update(","); fullDigest.update(bytes.subarray(1,-1));
       if(i<b.parts.length){if(i)cutDigest.update(",");cutDigest.update(bytes.subarray(1,-1));}
       for(const value of values){
-        if(!rowValid(value,rows.length+1,root.id) || Object.hasOwn(outcomes,value[0])) refuse("capsule_outcome_invalid");
-        const row=value; rows.push(row); charge+=row[6];
+        if(!rowValid(value,rowCount+1,root.id) || (ids ? ids.has(value[0]) : Object.hasOwn(outcomes,value[0]))) refuse("capsule_outcome_invalid");
+        const row=value; rowCount++; lastRow=row; if(materialize)rows.push(row); else ids!.add(row[0]); charge+=row[6];
         if(row[2]==="manage") {if(policy)refuse("managed_downgrade");policy={revision:row[1],marker:row[7]!};}
         if(row[1]<=b.revision){cutCharge+=row[6];cutPolicy=policy;}
-        Object.defineProperty(outcomes,row[0],{value:{request:row[5],outcome:outcome(row)},enumerable:true});
+        if(materialize)Object.defineProperty(outcomes,row[0],{value:{request:row[5],outcome:outcome(row)},enumerable:true});
       }
-      partData.push(bytes);
+      if(materialize)partData.push(bytes);
     }
-    if(rows.length!==h.revision || charge!==h.chargedBytes || charge>TOTAL_LIMIT || cutCharge!==b.chargedBytes
+    if(rowCount!==h.revision || charge!==h.chargedBytes || charge>TOTAL_LIMIT || cutCharge!==b.chargedBytes
       || b.parts.reduce((n,p)=>n+p.count,0)!==b.revision || fullDigest.update("]").digest("hex")!==h.outcomesDigest
       || cutDigest.update("]").digest("hex")!==b.outcomesDigest) refuse("capsule_outcomes_invalid");
     // Permanent policy is derived from all retained records, not a head flag.
@@ -879,7 +887,7 @@ export class PairingTrustOwner {
       if(h.previousLogicalHead!==b.logicalHead || h.previousPhysicalHead!==cutHash || h.logicalHead!==b.logicalHead || h.logicalPeersHash!==b.logicalPeersHash || h.checkpointPeersHash!==b.checkpointPeersHash
         || h.projectionHash!==b.projectionHash || h.outcomesDigest!==b.outcomesDigest) refuse("capsule_cut_changed");
     } else if(h.logicalPeersHash!==h.checkpointPeersHash || h.projectionHash!==h.checkpointPeersHash
-      || h.logicalHead!==logicalHead(root.id,h.revision,h.previousLogicalHead,h.logicalPeersHash,h.policy,rows.at(-1)!,h.adoption,h.outcomesDigest)) refuse("capsule_logical_head_invalid");
+      || h.logicalHead!==logicalHead(root.id,h.revision,h.previousLogicalHead,h.logicalPeersHash,h.policy,lastRow!,h.adoption,h.outcomesDigest)) refuse("capsule_logical_head_invalid");
     this.capsulePolicy(root,policy);
     const slots=this.capsuleSlots(root,inventory);
     if(h.slot!==null && (!record(h.slot) || !integer(h.slot.index,0,7) || !token(h.slot.token)
@@ -1234,6 +1242,18 @@ export class PairingTrustOwner {
       }
     } catch { /* An unavailable advisory file never hides an authority snapshot. */ }
     return snapshot;
+  }
+  /** Exhaustive transport authority without the unused saved-retry lookup.
+   * Every call re-reads/hashes/validates all authority through the same validator
+   * as read(). No cache, advisory merge, automatic migration or session state.
+   * Pending publication completes with a full build before any view is served. */
+  readAuthority(context?: PairingTrustContext): PairingAuthorityView {
+    this.root(true);
+    return this.operation(context, root => {
+      const state = this.readyState(root!, false);
+      return {revision: state.revision, peers: structuredClone(state.peers),
+        stamp: this.pairingOpportunityStamp(root!, state)};
+    });
   }
   /** Membership is authoritative; the subsequent display-only write is best
    * effort, needs no gate and never changes projection/generations/outcomes. */

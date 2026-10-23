@@ -11,7 +11,7 @@ const original=readFileSync(ownerPath,"utf8"),unit=readFileSync(join(root,"packa
 const controls=[
   {id:"cached-positive",test:"v2 cold readers and every warm read",edits:[
     ['const completing = new Set<string>();','const completing = new Set<string>(); const cached=new Map<string,State>();'],
-    ['return this.capsuleState(root, allowPending, inventory);','{ if(!cached.has(root.id))cached.set(root.id,this.capsuleState(root,allowPending,inventory)); return cached.get(root.id)!; }'],
+    ['return this.capsuleState(root, allowPending, inventory, materialize);','{ if(!cached.has(root.id))cached.set(root.id,this.capsuleState(root,allowPending,inventory,materialize)); return cached.get(root.id)!; }'],
   ]},
   {id:"skipped-early-chunk",test:"v2 cold readers and every warm read",edits:[
     ['const completing = new Set<string>();','const completing = new Set<string>(); const cached=new Map<string,Buffer>();'],
