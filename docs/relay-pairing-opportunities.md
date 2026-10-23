@@ -243,3 +243,38 @@ phone UI or complete credential-revocation tests.
 through the actual own-key control and both relay clients, with instrumented
 application sinks. It verifies keyed and legacy admission, private delivery,
 coexisting windows, denial/replay/expiry, and authority cancellation.
+
+## Live-session authority and close codes
+
+Secure endpoints require the v2 trust capsule before they start listening. A
+host with a v1 store refuses startup with `pairing_trust_capsule_migration_required`.
+It does not migrate on an incoming request. The host's trusted local cutover
+procedure must drain old desktop, CLI and web users, exclude unsupported writers,
+call the canonical owner's `migrateToCapsule(migrationId)` and complete recovery
+before starting these endpoints. Registry startup is not that deployment
+procedure and does not certify that old processes have been excluded.
+
+A paired transport takes its authority stamp once after successful admission.
+Every later admission and protected send verifies current authority. A changed
+stamp invalidates the old handle, including after revoke and regrant of the same
+key. Any real pairing authority change therefore requires older, still-trusted
+phones to reconnect. Advisory updates and opening, cancelling or retiring an
+unused pairing window do not change authority. The host's own authenticated
+local-service channels are a separate class, not paired-phone principals.
+
+The runtime exports `PAIRING_AUTHORITY_CHANGED_CLOSE_CODE` with value **4006**.
+Its reason is `authority changed, reconnect`. This code is used only when the
+same fresh view that invalidates the stamp still contains the authenticated full
+key. A missing key, unavailable membership or changed root uses **4003**. Codes
+4000 through 4005 are occupied; in particular the hosted relay uses 4005 for
+`Host asleep`. A revoke acknowledgement confirms authority publication, not
+physical closure or phone acknowledgement across every process. Close delivery
+is advisory; a lost close frame does not preserve permission.
+
+Pairing revocation is not removal of all device access. Existing SSH grants,
+open terminal sessions, issued HTTP bearers and already-received data have
+separate owners. Credential matching and prefix-only legacy migration remain
+required follow-on work after the registry. Only an established full-key owner
+can migrate automatically; ambiguous or unknown legacy ownership requires local
+review or explicit re-provisioning. The registry does not complete credential
+revocation or the private consuming-graph proof.

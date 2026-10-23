@@ -8,13 +8,13 @@ import {pairingTrustOwner, type PairingTrustOwner, type TrustedPeer} from "../..
 import {pack,digest,CUTOVER,commitName,doneName,dataName,CHUNK_TARGET,
   type CapsuleRow,type CapsuleBarrier,type CapsuleHead,type ManagedPolicy} from "../../packages/runtime/src/pairing-security/trust-capsule.ts";
 
-export function legacyFixture(path:string, options:{generations?:number;keys?:number;factory?:typeof pairingTrustOwner;
+export function legacyFixture(path:string, options:{generations?:number;keys?:number;publicKeys?:string[];factory?:typeof pairingTrustOwner;
   prepare?:(owner:PairingTrustOwner)=>void;projection?:string|null}={}) {
   const root=realpathSync(path), temp=realpathSync(tmpdir());
   if(!root.startsWith(temp+"/") || !root.split("/").at(-1)!.startsWith("pairing-capsule-") || readdirSync(root).length)throw Error("empty temporary capsule fixture required");
   const generations=options.generations??1, keyCount=options.keys??(generations?1:0);
   const stat=lstatSync(root), rootId=`${stat.dev}:${stat.ino}`;
-  const owner=(options.factory??pairingTrustOwner)(root), keys=Array.from({length:keyCount},(_,i)=>(i+1).toString(16).padStart(64,"0"));
+  const owner=(options.factory??pairingTrustOwner)(root), keys=options.publicKeys??Array.from({length:keyCount},(_,i)=>(i+1).toString(16).padStart(64,"0"));
   const peers:TrustedPeer[]=[]; let previousHash=digest(JSON.stringify(peers,null,2));
   for(let revision=1;revision<generations;revision++){
     let peer:TrustedPeer;

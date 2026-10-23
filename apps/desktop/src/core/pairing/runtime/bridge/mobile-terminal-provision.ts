@@ -149,15 +149,19 @@ export async function readMobileTerminalStatus(
 export async function provisionMobileTerminalAccess(
   sshPublicKey: string,
   deviceId: string | undefined,
-  deviceClass: string | undefined = undefined,
+  deviceClass: string | undefined,
+  binding: {publicKey: string; admit(): void},
 ): Promise<MobileTerminalProvisionResult> {
-  const id = deviceId?.trim() || "scout-ios-device";
+  binding.admit();
+  if (!/^[a-f0-9]{64}$/.test(binding.publicKey)) throw new Error("Full Noise key required for credential ownership");
+  const id = binding.publicKey; // New ownership is never minted from a display prefix.
   const sessionName = provisionedMobileTerminalSessionName(sshPublicKey, deviceClass);
   const sshDir = join(homedir(), ".ssh");
   const authorizedKeysPath = join(sshDir, "authorized_keys");
   const hostKeyFingerprint = readRequiredHostKeyFingerprint();
 
   const result = withAuthorizedKeysLock(sshDir, () => {
+    binding.admit(); // Revalidate after any lock wait, before credential effects.
     if (!existsSync(sshDir)) {
       mkdirSync(sshDir, { recursive: true, mode: 0o700 });
     }
@@ -174,6 +178,7 @@ export async function provisionMobileTerminalAccess(
     const result = provisionSshTerminalAccess({
       authorizedKeys: existing,
       deviceId: id,
+      pairingNoisePublicKey: binding.publicKey,
       sshPublicKey,
       terminalSessionName: sessionName,
     });

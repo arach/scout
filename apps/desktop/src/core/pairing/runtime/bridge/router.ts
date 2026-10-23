@@ -1,3 +1,4 @@
+import { transportDomainForBridge, requireTransportContext, hasPairedTransport, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
 // tRPC v11 router for the Bridge server.
 //
 // Maps every JSON-RPC method from the legacy switch statement in server.ts
@@ -93,7 +94,7 @@ import { getMobileMeshNodes } from "./mobile-mesh-nodes.ts";
 // Context
 // ---------------------------------------------------------------------------
 
-export interface BridgeContext {
+export interface BridgeContext extends TransportContext {
   bridge: Bridge;
   cwd: string;
   deviceId?: string;
@@ -126,7 +127,24 @@ const logged = t.middleware(async ({ path, type, next }) => {
   return result;
 });
 
-const procedure = t.procedure.use(logged);
+// Wrap the actual resolver, not middleware before an asynchronous input parser.
+function liveProcedure<T extends object>(builder: T): T {
+  return new Proxy(builder, {get(target, prop, receiver) {
+    const value = Reflect.get(target, prop, receiver);
+    if (typeof value !== "function") return value;
+    if (["query", "mutation", "subscription"].includes(String(prop))) return (resolver: (opts: any) => any) =>
+      value.call(target, (opts: any) => {
+        try { requireTransportContext(opts.ctx); }
+        catch { throw new TRPCError({code: "UNAUTHORIZED", message: "Live authenticated transport required"}); }
+        return resolver(opts);
+      });
+    return (...args: unknown[]) => {
+      const next = value.apply(target, args);
+      return next && typeof next === "object" && "query" in next ? liveProcedure(next) : next;
+    };
+  }});
+}
+const procedure = liveProcedure(t.procedure.use(logged));
 
 // ---------------------------------------------------------------------------
 // Helpers (ported from server.ts)
@@ -691,7 +709,7 @@ const sessionRouter = t.router({
 
 const mobileRouter = t.router({
   endpoints: procedure.query(({ ctx }) => {
-    if (!ctx.secureTransport || !ctx.trustedPeer || !ctx.deviceId) {
+    if (!hasPairedTransport(ctx) || !ctx.deviceId) {
       throw new TRPCError({ code: "UNAUTHORIZED", message: "Trusted encrypted mobile transport required" });
     }
     return { version: 1, source: "bridge-rpc", protected: true,
@@ -924,7 +942,7 @@ const mobileRouter = t.router({
       }),
     )
     .mutation(({ input, ctx }) => {
-      if (!ctx.secureTransport || !ctx.trustedPeer || !ctx.deviceId) {
+      if (!hasPairedTransport(ctx) || !ctx.deviceId) {
         throw new TRPCError({
           code: "UNAUTHORIZED",
           message: "Artifact presentation requires a trusted paired device over the encrypted bridge.",
@@ -1142,7 +1160,7 @@ const mobileRouter = t.router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      if (!ctx.secureTransport || !ctx.trustedPeer || !ctx.deviceId) {
+      if (!hasPairedTransport(ctx) || !ctx.deviceId) {
         throw new TRPCError({
           code: "UNAUTHORIZED",
           message: "Attachment upload requires a trusted paired device over the encrypted bridge.",
@@ -1157,7 +1175,7 @@ const mobileRouter = t.router({
   attachmentFetch: procedure
     .input(z.object({ id: z.string().min(1) }))
     .query(async ({ input, ctx }) => {
-      if (!ctx.secureTransport || !ctx.trustedPeer || !ctx.deviceId) {
+      if (!hasPairedTransport(ctx) || !ctx.deviceId) {
         throw new TRPCError({
           code: "UNAUTHORIZED",
           message: "Attachment fetch requires a trusted paired device over the encrypted bridge.",
@@ -1174,26 +1192,26 @@ const mobileRouter = t.router({
   terminalProvision: procedure
     .input(z.object({ sshPublicKey: z.string(), deviceClass: z.string().optional() }))
     .mutation(async ({ input, ctx }) => {
-      if (!ctx.secureTransport || !ctx.trustedPeer || !ctx.deviceId) {
+      if (!hasPairedTransport(ctx) || !ctx.deviceId) {
         throw new TRPCError({
           code: "UNAUTHORIZED",
           message: "Terminal provisioning requires a trusted paired device over the encrypted bridge.",
         });
       }
-      return await provisionMobileTerminalAccess(input.sshPublicKey, ctx.deviceId, input.deviceClass);
+      return await provisionMobileTerminalAccess(input.sshPublicKey, ctx.deviceId, input.deviceClass, {publicKey: requireTransportContext(ctx, true).publicKey!, admit: () => {requireTransportContext(ctx, true);}});
     }),
 
   terminalStatus: procedure
     .input(z.object({ sessionName: z.string() }).optional())
     .query(async ({ input, ctx }) => {
-      if (!ctx.secureTransport || !ctx.trustedPeer || !ctx.deviceId) {
+      if (!hasPairedTransport(ctx) || !ctx.deviceId) {
         throw new TRPCError({
           code: "UNAUTHORIZED",
           message: "Terminal status requires a trusted paired device over the encrypted bridge.",
         });
       }
       try {
-        return await readMobileTerminalStatus(input?.sessionName, ctx.deviceId);
+        return await readMobileTerminalStatus(input?.sessionName, requireTransportContext(ctx, true).publicKey!);
       } catch (error) {
         if (error instanceof InvalidMobileTerminalSessionError) {
           throw new TRPCError({ code: "BAD_REQUEST", message: error.message, cause: error });

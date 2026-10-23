@@ -1,3 +1,4 @@
+import { transportDomainForBridge, requireTransportContext, hasPairedTransport, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
 import type { PairingOpportunityControlAction, PairingRequestBinding } from "@openscout/runtime/pairing-local-socket";
 // Bridge server — Hono + tRPC edition.
 //
@@ -62,7 +63,7 @@ import {
 // Imported from router.ts when it exists; defined inline for now.
 // ---------------------------------------------------------------------------
 
-export interface BridgeContext {
+export interface BridgeContext extends TransportContext {
   bridge: Bridge;
   deviceId: string | undefined;
   cwd: string;
@@ -233,6 +234,8 @@ export function startBridgeServerTRPC(options: {
 }): { stop: () => void } {
   const { bridge, port, secure = false, identity } = options;
   const ownPublicKeyHex = identity ? bytesToHex(identity.publicKey) : null;
+  const domain = secure && identity ? transportDomainForBridge(bridge, bytesToHex(identity.publicKey)) : undefined;
+  const activeTransports = new Set<SecureTransport>();
 
   if (secure && !identity) {
     throw new Error("[bridge-trpc] secure mode requires an identity (key pair)");
@@ -302,7 +305,7 @@ export function startBridgeServerTRPC(options: {
           && /^[a-zA-Z0-9._:-]{1,128}$/.test(binding.requestId)
           && (binding.authorityStamp === undefined || (typeof binding.authorityStamp === "string" && /^[a-f0-9]{64}$/.test(binding.authorityStamp)))
           && (binding.publicKey === undefined || (typeof binding.publicKey === "string" && /^[a-f0-9]{64}$/.test(binding.publicKey)));
-        if (!state.localService || !options.pairingControl || !["open", "cancel", "request-open", "request-read", "request-cancel"].includes(action)
+        if (!state.transport?.isLive() || !state.localService || !options.pairingControl || !["open", "cancel", "request-open", "request-read", "request-cancel"].includes(action)
           || (requestAction && !validBinding)
           || (windowId !== undefined && typeof windowId !== "string")) {
           sendControl({id: request.id, error: {code: -32001, message: "Local pairing control requires the host identity"}});
@@ -575,7 +578,7 @@ export function startBridgeServerTRPC(options: {
       return;
     }
 
-    const res = await handleRPC(bridge, req, state.deviceId);
+    const res = await handleRPC(bridge, req, state.ctx);
     sendRaw(JSON.stringify(res));
   }
 
@@ -604,6 +607,7 @@ export function startBridgeServerTRPC(options: {
 
     // Subscribe to future events.
     state.unsub = bridge.onEvent((sequenced) => {
+      if (state.transport && !state.transport.isLive()) return;
       logBridgeEvent(sequenced.event, sequenced.seq);
       sendEvent(
         JSON.stringify({ seq: sequenced.seq, event: sequenced.event }),
@@ -704,7 +708,7 @@ export function startBridgeServerTRPC(options: {
             {
               onReady: (remotePublicKey, readyInfo) => {
                 const pubHex = bytesToHex(remotePublicKey);
-                const trusted = pubHex === ownPublicKeyHex || (readyInfo.wasTrustedPeer && isTrustedPeer(pubHex));
+                const trusted = pubHex === ownPublicKeyHex ? transport.activateLocalService() : transport.activatePaired();
                 state.localService = pubHex === ownPublicKeyHex;
                 state.deviceId = pubHex.slice(0, 16);
                 state.secureTransport = true;
@@ -723,13 +727,13 @@ export function startBridgeServerTRPC(options: {
                 }
 
                 // Build tRPC context now that we know the peer.
-                state.ctx = {
+                state.ctx = transport.bindContext({
                   bridge,
                   deviceId: state.deviceId,
                   cwd: resolveCurrentDirectory(),
                   secureTransport: true,
                   trustedPeer: trusted,
-                };
+                });
                 state.ready = true;
 
                 // Push bridge events through the encrypted channel.
@@ -765,19 +769,27 @@ export function startBridgeServerTRPC(options: {
                 state.abortController.abort();
               },
             },
-            { trustOnComplete: false, skipTrustWrite: hex => hex === ownPublicKeyHex },
+            { trustOnComplete: false, skipTrustWrite: hex => hex === ownPublicKeyHex, domain,
+              close: (code, reason) => {
+                state.ready = false; state.pendingMessages.length = 0;
+                state.unsub?.(); state.tailUnsub?.(); state.brokerWatchAbort?.abort(); state.abortController.abort();
+                for (const ctrl of state.abortControllers.values()) ctrl.abort();
+                state.abortControllers.clear(); state.activeSubscriptions.clear();
+                activeTransports.delete(transport); ws.close(code, reason);
+                const grace = setTimeout(() => ws.terminate(), 1000); grace.unref?.();
+              } },
           );
 
-          state.transport = transport;
+          state.transport = transport; activeTransports.add(transport);
         } else {
           // --- Plaintext mode -----------------------------------------------
-          state.ctx = {
+          state.ctx = plaintextPilotContext({
             bridge,
             deviceId: undefined,
             cwd: resolveCurrentDirectory(),
             secureTransport: false,
             trustedPeer: false,
-          };
+          });
           state.ready = true;
 
           subscribeBridgeEvents(ws, state);
@@ -824,7 +836,9 @@ export function startBridgeServerTRPC(options: {
 
   return {
     stop() {
-      server.stop();
+      for (const transport of activeTransports) transport.dispose();
+      activeTransports.clear();
+      server.stop(true);
     },
   };
 }

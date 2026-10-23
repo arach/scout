@@ -1,3 +1,4 @@
+import { transportDomainForBridge, requireTransportContext, hasPairedTransport, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
 // Bridge WebSocket server.
 //
 // Exposes the bridge over a local WebSocket so the relay (or a direct LAN
@@ -98,7 +99,7 @@ interface SocketState {
   trustedPeer?: boolean;
 }
 
-export interface BridgeRpcContext {
+export interface BridgeRpcContext extends TransportContext {
   deviceId?: string;
   secureTransport?: boolean;
   trustedPeer?: boolean;
@@ -176,6 +177,8 @@ export function startBridgeServer(
     throw new Error("[bridge] secure mode requires an identity (key pair)");
   }
 
+  const domain = secure && identity ? transportDomainForBridge(bridge, bytesToHex(identity.publicKey)) : undefined;
+  const activeTransports = new Set<SecureTransport>();
   // Per-socket state, keyed by the raw ServerWebSocket reference.
   const socketState = new WeakMap<ServerWebSocket<unknown>, SocketState>();
   const server = Bun.serve({
@@ -205,10 +208,11 @@ export function startBridgeServer(
             {
               onReady: (remotePublicKey, readyInfo) => {
                 const pubHex = bytesToHex(remotePublicKey);
-                const trusted = readyInfo.wasTrustedPeer && isTrustedPeer(pubHex);
+                const trusted = transport.activatePaired();
                 state.deviceId = pubHex.slice(0, 16);
                 state.secureTransport = true;
                 state.trustedPeer = trusted;
+                Object.assign(state, transport.bindContext({bridge}));
                 console.log(
                   `[bridge] secure handshake complete (peer: ${pubHex.slice(0, 12)}..., trusted: ${trusted}, device: ${state.deviceId})`,
                 );
@@ -256,6 +260,7 @@ export function startBridgeServer(
               },
 
               onError: (err) => {
+                transport.dispose();
                 console.error("[bridge] secure transport error:", err.message);
               },
 
@@ -263,10 +268,13 @@ export function startBridgeServer(
                 state.unsub?.();
               },
             },
-            { trustOnComplete: false },
+            { trustOnComplete: false, domain, close: (code, reason) => {
+              state.unsub?.(); activeTransports.delete(transport); ws.close(code, reason);
+              const grace = setTimeout(() => ws.terminate(), 1000); grace.unref?.();
+            } },
           );
 
-          state.transport = transport;
+          state.transport = transport; activeTransports.add(transport);
         } else {
           // Plaintext mode — push existing sessions with seq wrapper.
           for (const session of bridge.listSessions()) {
@@ -305,7 +313,7 @@ export function startBridgeServer(
           }
 
           const connState = socketState.get(ws);
-          handleRPC(bridge, req, connState).then((res) => {
+          handleRPC(bridge, req, plaintextPilotContext({bridge, ...connState})).then((res) => {
             ws.send(JSON.stringify(res));
           });
         }
@@ -314,6 +322,8 @@ export function startBridgeServer(
       close(ws) {
         console.log("[bridge] client disconnected");
         const state = socketState.get(ws);
+        state?.transport?.dispose();
+        if (state?.transport) activeTransports.delete(state.transport);
         state?.unsub?.();
       },
     },
@@ -324,7 +334,9 @@ export function startBridgeServer(
 
   return {
     stop() {
-      server.stop();
+      for (const transport of activeTransports) transport.dispose();
+      activeTransports.clear();
+      server.stop(true);
     },
   };
 }
@@ -345,6 +357,8 @@ export async function handleRPC(
   rpcContext?: string | BridgeRpcContext,
 ): Promise<RPCResponse> {
   const context = normalizeBridgeRpcContext(rpcContext);
+  try { requireTransportContext(context); }
+  catch { return {id: req.id, error: {code: -32001, message: "Live authenticated transport required"}}; }
   const rpcStart = Date.now();
   const paramsSnippet = summarizeRPCParams(req.method, req.params);
   log.debug("rpc:req", `→ ${req.method}${paramsSnippet}`);
@@ -713,7 +727,7 @@ async function handleRPCInner(
         if (!p?.sessionId || !p?.sourcePath) {
           return { id: req.id, error: { code: -32602, message: "sessionId and sourcePath are required" } };
         }
-        if (!rpcContext.secureTransport || !rpcContext.trustedPeer || !rpcContext.deviceId) {
+        if (!hasPairedTransport(rpcContext) || !rpcContext.deviceId) {
           return {
             id: req.id,
             error: {
@@ -895,7 +909,7 @@ async function handleRPCInner(
         if (!p?.data || !p?.mediaType) {
           return { id: req.id, error: { code: -32602, message: "data and mediaType are required" } };
         }
-        if (!rpcContext.secureTransport || !rpcContext.trustedPeer || !rpcContext.deviceId) {
+        if (!hasPairedTransport(rpcContext) || !rpcContext.deviceId) {
           return {
             id: req.id,
             error: {
@@ -923,7 +937,7 @@ async function handleRPCInner(
         if (!p?.id) {
           return { id: req.id, error: { code: -32602, message: "id is required" } };
         }
-        if (!rpcContext.secureTransport || !rpcContext.trustedPeer || !rpcContext.deviceId) {
+        if (!hasPairedTransport(rpcContext) || !rpcContext.deviceId) {
           return {
             id: req.id,
             error: {
@@ -960,7 +974,7 @@ async function handleRPCInner(
         if (!p?.sshPublicKey) {
           return { id: req.id, error: { code: -32602, message: "sshPublicKey is required" } };
         }
-        if (!rpcContext.secureTransport || !rpcContext.trustedPeer || !rpcContext.deviceId) {
+        if (!hasPairedTransport(rpcContext) || !rpcContext.deviceId) {
           return {
             id: req.id,
             error: {
@@ -971,13 +985,13 @@ async function handleRPCInner(
         }
         return {
           id: req.id,
-          result: await provisionMobileTerminalAccess(p.sshPublicKey, rpcContext.deviceId, p.deviceClass),
+          result: await provisionMobileTerminalAccess(p.sshPublicKey, rpcContext.deviceId, p.deviceClass, {publicKey: requireTransportContext(rpcContext, true).publicKey!, admit: () => {requireTransportContext(rpcContext, true);}}),
         };
       }
 
       case "mobile/terminal/status": {
         const p = req.params as { sessionName?: string } | null;
-        if (!rpcContext.secureTransport || !rpcContext.trustedPeer || !rpcContext.deviceId) {
+        if (!hasPairedTransport(rpcContext) || !rpcContext.deviceId) {
           return {
             id: req.id,
             error: {
@@ -989,7 +1003,7 @@ async function handleRPCInner(
         try {
           return {
             id: req.id,
-            result: await readMobileTerminalStatus(p?.sessionName, rpcContext.deviceId),
+            result: await readMobileTerminalStatus(p?.sessionName, requireTransportContext(rpcContext, true).publicKey!),
           };
         } catch (error) {
           if (error instanceof InvalidMobileTerminalSessionError) {
