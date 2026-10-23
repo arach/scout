@@ -1,7 +1,7 @@
 # Pairing trust owner contract v1
 
 The public runtime owns pairing trust persistence for one resolved pairing root.
-Runtime pairing, retained desktop pairing, reconnect metadata updates and the web
+Runtime pairing, retained desktop pairing, reconnect membership checks and the web
 peer-delete route use this owner. A desktop identity module delegates to runtime;
 it has no independent trust writer. Phone pairing is not operator-decision
 entitlement. This mechanism introduces no host policy, input actuator, session
@@ -14,14 +14,17 @@ registry, authorization endpoint or automatic adapter installation.
 
 - `read(context?)` returns an owned snapshot of peers and the owner revision.
 - `mutate(expectedRevision, mutationId, mutation, context?)` publishes one grant,
-  refresh, full-key revoke, or explicit managed adoption. A conflicting revision
+  full-key revoke, or explicit managed adoption. A conflicting revision
   refuses. There is no automatic retry of a relative change.
 - An exact mutation-ID/request retry returns the persisted original outcome,
   including after a later revision or a lost ACK. Reusing an ID with another
   request refuses. Keep the original expected revision when retrying an ID.
-- `refresh` updates only an existing peer's `lastSeen`. It cannot recreate a
-  revoked key. Handshake completion uses refresh when the key was already
-  trusted, including `trustOnComplete:false` paths.
+- `refresh(publicKey, lastSeen, context?)` validates current membership only.
+  It refuses a missing/revoked key and writes nothing. Handshake completion uses
+  this check for existing peers, including `trustOnComplete:false` paths.
+  `lastSeen` is persisted **at grant time only** and can be stale thereafter.
+  It is advisory, never an admission input or proof of current presence. A
+  reconnect never changes the digest-covered projection or creates a generation.
 - `revokePrefix` resolves either the existing 16-character display prefix or a
   full 64-character key against the current snapshot. The persisted operation
   and outcome always name the full key.
@@ -51,7 +54,9 @@ generation contains:
 - hash of the previous generation's bytes (the legacy seed hash for revision 1);
 - the complete peer array and the digest of its exact JSON projection;
 - the managed marker value, or null;
-- that revision's mutation-ID/request/outcome record, including full-key revokes.
+- that revision's mutation-ID/request/outcome record, including full-key revokes;
+- optional `adoption` hashes (`fromProjectionHash`, `toProjectionHash`) recording
+  an unmanaged outside baseline used by this mutation, or null.
 
 The owner reconstructs deduplication from every immutable generation. It does not
 copy the entire historical outcome map into each successive file.
@@ -60,24 +65,36 @@ Mutation outcomes are not pruned. The owner refuses at 65,536 generations, 1 MiB
 file, 128 MiB of generation bytes, or 4096 peers. There is no automatic compaction,
 reset or age-based loss of deduplication. Capacity/recovery/migration must be an
 explicit reviewed operation; deleting owner metadata is not a supported reset.
+Only real trust mutations (grant, revoke, managed adoption) grow this chain.
+**Named follow-up: authority-chain checkpoint/compaction**, with a separately
+reviewed root/revision/dedup preservation protocol. It is not a merge gate.
 
 There is no mutable head pointer and no new unmanaged cross-process lock.
 A writer stages and synchronizes the peer projection and complete generation,
 revalidates its baseline, then hard-links the generation to the unique next
 revision name. `EEXIST` is a CAS refusal. Only that winner can replace the peer
-projection by rename. It synchronizes the parent directory, verifies the
+projection by rename. The staging hard link remains until that rename, so a
+reserved generation has two links and cannot be mistaken for a completed
+unmanaged baseline. After rename, the owner removes its staging link and
+synchronizes the parent directory, verifies the
 committed generation and projection again, and only then ACKs. An ID retry also
 synchronizes the directory before returning its recorded outcome, so a prior
 failed directory sync is not mistaken for a durable ACK.
 
-A generation reservation without its matching peer projection is **unavailable**,
-not an older permissive snapshot. Other writers cannot pass baseline verification
-while publication is incomplete. If a process dies at that boundary, the owner
-keeps the evidence and refuses; it does not steal a reservation or repair it from
-an old file. After projection rename, a lost ACK can leave a committed mutation.
-No ACK does not imply rollback. Readers verify checksums, sequence, root identity,
-managed state and projection digest, and refuse a concurrent changed generation
-listing rather than combine snapshots. No watcher is needed.
+A pending generation retains its protected staging hard link, even when a
+projection rename fails. Normal reads and competing mutations refuse; they do
+not interpret a pending owner write as an outside baseline. An exact recorded-ID
+retry can remove that staging link only when the projection already matches
+that head generation, then re-establish the directory barrier. This finishes
+publication without repeating the mutation. If the projection does not match,
+the evidence stays pending and unavailable. No lock takeover or age-based
+recovery occurs. No ACK does not imply rollback.
+
+Readers verify checksums, sequence, root identity and managed state. They refuse
+a concurrent changed generation listing instead of combining snapshots. In
+managed mode, projection-digest mismatch refuses strictly, without a watcher.
+In unmanaged mode, a validated changed projection is the current baseline, as
+specified below; it does not rewrite the existing owner ledger.
 
 The file and directory barriers are actual synchronous filesystem `fsync`
 operations. This is a specified filesystem publication model, not hardware
@@ -97,19 +114,31 @@ hard-linked data file, wrong owner, writable-by-others root/file or replaced
 bound root refuses. Different roots have separate owners. Aliasing an ancestor
 does not create a second owner; final symlink roots remain unsupported.
 
-External edits/replacements of an adopted active file are unsupported. Digest
-verification makes a grant or revocation edit unavailable; it does not import
-that edit. Generation checksums detect accidental metadata edits, not a hostile
-same-user editor that forges the entire store and its checksums. This is not
-same-user sandboxing. There is no claim that detection cancels an operation that
-was admitted before an external write.
+**Unmanaged mode offers no protection against outside writers**, as before.
+During a mixed-version rollout, an older installed binary can normally rewrite
+`trusted-peers.json` directly. Reads adopt that validated array as current peers,
+without changing owner revisions or mutation-ID outcomes. The next owner trust
+mutation derives from that array and records its baseline adoption hashes.
+Deletion adopts an empty baseline; malformed or unsafe files still refuse.
+The chain remains the owner's own CAS/deduplication ledger, not a quarantine
+instrument for legacy projection writes. Owner callers get lost-update refusal
+among themselves and full-key revocation. An outside writer can still lose an
+update or resurrect a revoked key; unmanaged mode does not claim otherwise.
+
+**Strict external-change refusal starts at managed adoption.** An out-of-band
+active-file grant, revocation or deletion then makes the store unavailable;
+it is not imported. Registration alone does not turn a root into managed mode.
+The marker/generation pairing remains mandatory, so missing a marker cannot
+downgrade an already managed generation into unmanaged adoption. Generation
+checksums detect accidental metadata edits, not a hostile same-user editor
+that forges the entire store and its checksums. This is not same-user sandboxing.
+Detection cannot cancel an operation admitted before an external write.
 
 **A managed marker cannot constrain an old binary that does not check it.**
-Old binaries and raw editors are unsupported writers after adoption. Detection
-is not exclusion. A consuming host must separately prove exclusion of old
-writers before relying on gated admission. Do not copy an owner store to a new
-root/inode as if its revision were valid there; root migration needs explicit
-review.
+Old binaries and raw editors are unsupported writers after managed adoption.
+Detection is not exclusion. A consuming host must separately prove old-writer
+exclusion before relying on gated admission. Do not copy an owner store to a new
+root/inode as if its revision were valid there; root migration needs review.
 
 ## Dormant managed-store seam
 
@@ -166,7 +195,8 @@ bun run check:presentation
 ```
 
 The process suite coordinates two real processes without sleeps as an ordering
-proof, tests ACK loss and publication interruption, and instruments the actual
+proof, tests reconnect storms (zero generations), unmanaged old-binary adoption
+and managed refusal, ACK loss and publication interruption, and instruments the actual
 file/directory barrier calls. Its instrumentation must observe operations; no-op
 instrumentation fails. The negative controls use disposable mutated source
 copies, not production switches or edits to the checkout. The source census

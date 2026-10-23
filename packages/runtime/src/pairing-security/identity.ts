@@ -110,10 +110,9 @@ export function saveTrustedPeer(peer: TrustedPeer): void {
   owner.mutate(revision, randomUUID(), {type: "grant", peer});
 }
 
-/** Reconnect metadata cannot grant a missing/revoked key. */
+/** Reconnect validates membership only; lastSeen persists at grant time. */
 export function refreshTrustedPeer(publicKey: string, lastSeen: string): void {
-  const owner = pairingTrustOwner(), revision = owner.read().revision;
-  owner.mutate(revision, randomUUID(), {type: "refresh", publicKey, lastSeen});
+  pairingTrustOwner().refresh(publicKey, lastSeen);
 }
 
 export function isTrustedPeer(publicKeyHex: string): boolean {

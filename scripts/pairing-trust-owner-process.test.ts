@@ -33,6 +33,24 @@ describe("pairing owner real cross-process and I/O paths", () => {
     expect(pairingTrustOwner(data).read().peers.length).toBe(1);
     expect(readdirSync(data).some(name => name.includes("lock"))).toBe(false);
   });
+  test("pending owner CAS is not mistaken for an unmanaged outside write", async () => {
+    const {data,coordination}=fixture(), first=launch("instrument",data,coordination,"before-projection");
+    await ready(join(coordination,"ready-before-projection"));
+    const owner=pairingTrustOwner(data);
+    expect(()=>owner.read()).toThrow("unsafe_path");
+    expect(()=>owner.mutate(1,"competitor",{type:"grant",peer:{...peer,publicKey:"b".repeat(64)}})).toThrow("external_change_or_incomplete");
+    expect(readdirSync(data)).not.toContain("trusted-peers.owner.2.json");
+    writeFileSync(join(coordination,"go"),"go"); expect((await result(first)).value.ok).toBe(true);
+    owner.mutate(1,"competitor",{type:"grant",peer:{...peer,publicKey:"b".repeat(64)}});
+    expect(owner.read().peers.map(p=>p.publicKey)).toEqual([key,"b".repeat(64)]);
+  });
+  test("failed projection rename retains the pending CAS witness, not an outside-write baseline", async () => {
+    const {data,coordination}=fixture(), output=await result(launch("instrument",data,coordination,"rename-fail"));
+    expect(output.value.ok).toBe(false); const owner=pairingTrustOwner(data);
+    expect(()=>owner.read()).toThrow("unsafe_path");
+    expect(()=>owner.mutate(0,"instrument",{type:"grant",peer})).toThrow("external_change_or_incomplete");
+    expect(readdirSync(data).filter(n=>n.endsWith(".tmp")).length).toBe(1);
+  });
   test("delayed reconnect in another process cannot restore a revoked key", async () => {
     const {data, coordination} = fixture(), owner = pairingTrustOwner(data);
     owner.mutate(0,"seed",{type:"grant",peer});
@@ -94,12 +112,12 @@ describe("pairing owner real cross-process and I/O paths", () => {
     const forged = await result(launch("forged",data,coordination,capture));
     expect(forged.value.ok).toBe(false); expect(forged.value.error).toContain("invalid_context");
   });
-  test("real runtime and retained desktop Noise completion, refresh and web revoke all use the installed gate", async () => {
+  test("real runtime and retained desktop reconnect storm writes zero generations; authority publications stay gated", async () => {
     const {data,coordination}=fixture(), output=await result(launch("managed-paths",data,coordination));
-    expect(output.code,output.stderr).toBe(0); expect(output.value).toEqual({ok:true,removed:true,revision:6,peers:1});
+    expect(output.code,output.stderr).toBe(0); expect(output.value).toEqual({ok:true,removed:true,revision:4,peers:1,reconnectGenerations:0});
     const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(line=>JSON.parse(line));
     const publications=events.filter(e=>e.event === "link" || e.event === "rename");
-    expect(publications.length).toBe(13); expect(publications.every(e=>e.held === true)).toBe(true);
+    expect(publications.length).toBe(9); expect(publications.every(e=>e.held === true)).toBe(true);
   });
   test("actual web DELETE returns ambiguous 409, full-key 200, missing 404 and managed unavailable 503", async () => {
     const {data,coordination}=fixture(), output=await result(launch("routes",data,coordination));

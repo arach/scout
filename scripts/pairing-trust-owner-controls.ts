@@ -13,16 +13,22 @@ const unit = readFileSync(join(root,"packages/runtime/src/pairing-security/trust
 const controls = [
   {id:"cas", expected:"stale revision refuses byte-identically", edits:[
     ['if (state.revision !== expectedRevision) refuse("revision_conflict");',''],
-    ['if (before.revision !== expectedRevision || before.hash !== state.hash) refuse("revision_conflict");',''],
+    ['if (before.revision !== expectedRevision || before.hash !== state.hash || before.projectionHash !== state.projectionHash) refuse("revision_conflict");',''],
   ]},
   {id:"dedup", expected:"ACK-loss retry returns recorded outcome", edits:[['if (saved) {','if (false && saved) {']]},
-  {id:"resurrection", expected:"revoke versus a paused reconnect", edits:[['if (index < 0) refuse("peer_revoked");','if (index < 0) peers.push({publicKey: mutation.publicKey, pairedAt: "recreated", lastSeen: mutation.lastSeen});']]},
+  {id:"resurrection", expected:"revoke versus a paused reconnect", edits:[['if (!snapshot.peers.some(peer => peer.publicKey === publicKey)) refuse("peer_revoked");','if (!snapshot.peers.some(peer => peer.publicKey === publicKey)) this.mutate(snapshot.revision, randomUUID(), {type:"grant",peer:{publicKey,pairedAt:lastSeen}}, context);']]},
   {id:"ambiguous", expected:"ambiguous-prefix DELETE refuses", edits:[['if (matches.length > 1) refuse("ambiguous_prefix");','']]},
   {id:"managed-fallback", expected:"managed marker refuses without adapter", edits:[['if (marker) {','if (false && marker) {']]},
-  {id:"external-change", expected:"external changes in both directions", edits:[['if (current.revision && (!projection || hash(projection) !== current.peersHash)) refuse("external_change_or_incomplete");','']]},
+  {id:"external-change", expected:"external changes in both directions", edits:[['if ((marker || current.pendingStage) && changedProjection) refuse("external_change_or_incomplete");','']]},
   {id:"context-lifetime", expected:"inherited async task is dead", edits:[['!invocation.active || ','']]},
   {id:"gate-holder", expected:"context is checked against actual current gate holder", edits:[['|| invocation.adapter.currentHolder(root) !== invocation.holder','']]},
   {id:"generation-checksum", expected:"generation checksum detects", edits:[['if (!record(value) || envelope.sha256 !== hash(JSON.stringify(value))) refuse("generation_checksum");','']]},
+  {id:"refresh-growth", expected:"reconnect storm writes zero generations", edits:[['const snapshot = this.read(context);','const snapshot = this.read(context); if (snapshot.peers.length) this.mutate(snapshot.revision, randomUUID(), {type:"grant",peer:snapshot.peers[0]!}, context);']]},
+  {id:"unmanaged-adoption", expected:"unmanaged old-binary writes are adopted", edits:[['if ((marker || current.pendingStage) && changedProjection)', 'if (changedProjection)']]},
+  {id:"pending-publication", expected:"pending CAS witness survives until projection rename", edits:[
+    ['reserved = true;','reserved = true; unlinkSync(stagedGeneration);'],
+    ['unlinkSync(stagedGeneration); this.syncDirectory(root);','this.syncDirectory(root);'],
+  ]},
   {id:"sync-omitted", expected:"required file and directory barriers", edits:[['fsyncSync(fd);','void fd;']]},
 ];
 const evidence: unknown[] = [];
@@ -53,6 +59,21 @@ test("required file and directory barriers",()=>{
 const data=${JSON.stringify(join(scratch,"data"))}; original.mkdirSync(data,{mode:0o700});
 pairingTrustOwner(data).mutate(0,"id",{type:"grant",peer:{publicKey:"a".repeat(64),pairedAt:"date"}});
 expect(syncs).toBe(3);
+});`;
+    }
+    if (control.id === "pending-publication") {
+      tests = `import {expect,test,mock} from "bun:test";
+import fs from "node:fs";
+const original={...fs}; let owner:any, observed=false, premature=false;
+mock.module("node:fs",()=>({...original, renameSync:(source:string,target:string)=>{
+if (target.endsWith("trusted-peers.json")) { observed=true; try {owner.read();premature=true;} catch {} }
+original.renameSync(source,target);
+}}));
+const {pairingTrustOwner}=await import(${JSON.stringify(module)});
+test("pending CAS witness survives until projection rename",()=>{
+const data=${JSON.stringify(join(scratch,"data"))}; original.mkdirSync(data,{mode:0o700}); owner=pairingTrustOwner(data);
+owner.mutate(0,"id",{type:"grant",peer:{publicKey:"a".repeat(64),pairedAt:"date"}});
+expect(observed).toBe(true); expect(premature).toBe(false);
 });`;
     }
     writeFileSync(testFile,tests);

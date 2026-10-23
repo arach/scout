@@ -71,8 +71,8 @@ describe("pairing canonical owner", () => {
     const o = owner(); o.mutate(0, "grant", {type: "grant", peer: peer()});
     const paused = o.read();
     o.mutate(paused.revision, "revoke", {type: "revoke", publicKey: keyA});
-    expect(() => o.mutate(paused.revision, "stale-refresh", {type: "refresh", publicKey: keyA, lastSeen: "later"})).toThrow("revision_conflict");
-    expect(() => o.mutate(o.read().revision, "fresh-refresh", {type: "refresh", publicKey: keyA, lastSeen: "later"})).toThrow("peer_revoked");
+    expect(paused.peers[0]!.publicKey).toBe(keyA);
+    expect(() => o.refresh(keyA, "later")).toThrow("peer_revoked");
     expect(o.read().peers).toEqual([]);
   });
   test("ambiguous-prefix DELETE refuses; a revoke outcome persists the full key", () => {
@@ -84,6 +84,41 @@ describe("pairing canonical owner", () => {
     expect(gen.mutation.outcome.publicKey).toBe(keyA);
     expect(o.read().peers).toEqual([peer(collision)]);
   });
+  test("reconnect storm writes zero generations or projection bytes; lastSeen stays at grant time", () => {
+    for (const managed of [false, true]) {
+      const o = owner(); o.mutate(0,"grant",{type:"grant",peer:{...peer(),lastSeen:"grant-time"}});
+      if (managed) manage(o);
+      const revision = o.read().revision;
+      const before = readdirSync(o.path).sort().map(name => [name,readFileSync(join(o.path,name),"utf8")]);
+      for (let i=0;i<1000;i++) { o.refresh(keyA,`reconnect-${i}`); if (i === 0) expect(o.read().revision).toBe(revision); }
+      expect(o.read().revision).toBe(revision); expect(o.read().peers[0]!.lastSeen).toBe("grant-time");
+      expect(readdirSync(o.path).sort().map(name=>[name,readFileSync(join(o.path,name),"utf8")])).toEqual(before);
+    }
+  });
+  test("unmanaged old-binary writes are adopted without replaying or rewriting the owner ledger", () => {
+    const o = owner(), grant = {type:"grant" as const,peer:peer()};
+    const first = o.mutate(0,"grant",grant); o.mutate(1,"revoke",{type:"revoke",publicKey:keyA});
+    const ledger = readFileSync(join(o.path,"trusted-peers.owner.2.json"));
+    // An old writer can even resurrect a key: unmanaged mode does not exclude it.
+    const external = JSON.stringify([peer(),peer(keyB)]);
+    writeFileSync(join(o.path,"trusted-peers.json"),external);
+    expect(o.read()).toEqual({revision:2,peers:[peer(),peer(keyB)]});
+    expect(o.mutate(0,"grant",grant)).toEqual(first); expect(o.read().revision).toBe(2);
+    expect(readFileSync(join(o.path,"trusted-peers.json"),"utf8")).toBe(external);
+    expect(readFileSync(join(o.path,"trusted-peers.owner.2.json"))).toEqual(ledger);
+    o.mutate(2,"revoke-b",{type:"revoke",publicKey:keyB});
+    const next = JSON.parse(readFileSync(join(o.path,"trusted-peers.owner.3.json"),"utf8")).generation;
+    expect(next.adoption.fromProjectionHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(next.adoption.toProjectionHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(next.adoption.fromProjectionHash).not.toBe(next.adoption.toProjectionHash);
+    expect(o.read()).toEqual({revision:3,peers:[peer()]});
+  });
+  test("unmanaged deletion adopts empty; malformed external projections still refuse", () => {
+    const o = owner(); o.mutate(0,"grant",{type:"grant",peer:peer()});
+    unlinkSync(join(o.path,"trusted-peers.json")); expect(o.read().peers).toEqual([]);
+    o.mutate(1,"new-grant",{type:"grant",peer:peer(keyB)}); expect(o.read().peers).toEqual([peer(keyB)]);
+    writeFileSync(join(o.path,"trusted-peers.json"),"{bad"); expect(()=>o.read()).toThrow();
+  });
   test("external changes in both directions refuse without a watcher", () => {
     for (const replacement of [[], [peer(), peer(keyB)]]) {
       const o = owner(); o.mutate(0, "grant", {type: "grant", peer: peer()}); manage(o);
@@ -92,9 +127,9 @@ describe("pairing canonical owner", () => {
       expect(() => o.mutate(2, "mutate", {type: "revoke", publicKey: keyA})).toThrow("external_change_or_incomplete");
     }
   });
-  test("missing/corrupt generation or projection never falls back", () => {
+  test("managed missing/corrupt generation or projection never falls back", () => {
     for (const kind of ["projection", "gap", "corrupt", "root"]) {
-      const o = owner(); o.mutate(0, "one", {type: "grant", peer: peer()}); o.mutate(1, "two", {type: "grant", peer: peer(keyB)});
+      const o = owner(); o.mutate(0, "one", {type: "grant", peer: peer()}); o.mutate(1, "two", {type: "grant", peer: peer(keyB)}); manage(o);
       if (kind === "projection") unlinkSync(join(o.path, "trusted-peers.json"));
       if (kind === "gap") unlinkSync(join(o.path, "trusted-peers.owner.1.json"));
       if (kind === "corrupt") writeFileSync(join(o.path, "trusted-peers.owner.2.json"), "{bad");
@@ -123,7 +158,9 @@ describe("pairing canonical owner", () => {
     const o = owner(), a = adapter(), remove = o.register(a.value); unregister.push(remove);
     expect(o.read().revision).toBe(0);
     expect(readdirSync(o.path)).toEqual([]);
-    o.mutate(0,"ordinary-grant",{type:"grant",peer:peer()}); remove();
+    o.mutate(0,"ordinary-grant",{type:"grant",peer:peer()});
+    writeFileSync(join(o.path,"trusted-peers.json"),JSON.stringify([peer(keyB)]));
+    expect(o.read().peers).toEqual([peer(keyB)]); remove();
     expect(o.read().revision).toBe(1);
     expect(readdirSync(o.path)).not.toContain("trusted-peers.managed.json");
   });

@@ -30,6 +30,8 @@ if (mode === "instrument" || mode === "managed-paths") {
     if (detail === "after-cas" && String(target).includes("trusted-peers.owner.")) process.exit(73);
   }) as any;
   fs.renameSync = ((source: any, target: any) => {
+    if (detail === "before-projection" && String(target).endsWith("trusted-peers.json")) pause("ready-before-projection");
+    if (detail === "rename-fail") throw Object.assign(Error("injected rename failure"),{code:"EIO"});
     original.renameSync(source, target); trace({event: "rename", target: String(target), held});
     if (detail === "after-rename") process.exit(74);
   }) as any;
@@ -66,10 +68,16 @@ try {
         if (errors.length || !server.isReady() || !client.isReady()) throw Error("real handshake did not complete: "+errors.map(String));
       }
       const identity=runtime.generateKeyPair(), first=runtime.generateKeyPair(), second=runtime.generateKeyPair();
-      exchange(runtime.SecureTransport,identity,first,true); exchange(runtime.SecureTransport,identity,first,false);
-      exchange(desktop.SecureTransport,identity,second,true); exchange(desktop.SecureTransport,identity,second,false);
+      exchange(runtime.SecureTransport,identity,first,true);
+      const beforeRuntime = owner.read().revision;
+      for (let i=0;i<100;i++) exchange(runtime.SecureTransport,identity,first,false);
+      const runtimeGrowth = owner.read().revision-beforeRuntime;
+      exchange(desktop.SecureTransport,identity,second,true);
+      const beforeDesktop = owner.read().revision;
+      for (let i=0;i<100;i++) exchange(desktop.SecureTransport,identity,second,false);
+      const reconnectGenerations = runtimeGrowth+owner.read().revision-beforeDesktop;
       const removed=web.removeScoutPairingTrustedPeer(runtime.bytesToHex(first.publicKey));
-      console.log(JSON.stringify({ok:true,removed,revision:owner.read().revision,peers:owner.read().peers.length})); remove();
+      console.log(JSON.stringify({ok:true,removed,revision:owner.read().revision,peers:owner.read().peers.length,reconnectGenerations})); remove();
     } else {
       const collision=key.slice(0,16)+"b".repeat(48);
       owner.mutate(0,"a",{type:"grant",peer}); owner.mutate(1,"b",{type:"grant",peer:{...peer,publicKey:collision}});
