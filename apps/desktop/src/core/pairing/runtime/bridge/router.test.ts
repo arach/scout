@@ -1,8 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { pairedRouterContext } from "../../../../../../../scripts/fixtures/paired-router-context.ts";
 
 import type { Bridge } from "./bridge.ts";
 import { bridgeRouter, lookupMobileInboxItemForEvent } from "./router.ts";
 import type { SessionState } from "@openscout/agent-sessions";
+
+// Each positive caller performs a durable v1 → v2 migration and a real Noise
+// handshake. Bound that fixture I/O separately from the old 5s stub budget.
+setDefaultTimeout(30_000);
 
 function createBridgeStub() {
   const replayCalls: string[] = [];
@@ -59,19 +64,35 @@ function createBridgeStub() {
   };
 }
 
-function createCaller(bridge: Bridge) {
-  return bridgeRouter.createCaller({
-    bridge,
-    cwd: "/tmp/openscout",
-    deviceId: undefined,
-  });
+const disposeCallers: (() => void)[] = [];
+afterEach(() => {
+  for (const dispose of disposeCallers.splice(0)) dispose();
+});
+
+function createCaller(
+  bridge: Bridge,
+  context: {
+    deviceId?: string;
+    secureTransport?: boolean;
+    trustedPeer?: boolean;
+    reconnectRoom?: string;
+    relayUrls?: string[];
+  } = {},
+) {
+  const fixture = pairedRouterContext({ bridge, cwd: "/tmp/openscout", ...context });
+  disposeCallers.push(fixture.dispose);
+  return bridgeRouter.createCaller(fixture.ctx);
 }
 
 describe("mobile reconnect coordinates", () => {
   test("requires a trusted encrypted transport and reports its reconnect room", async () => {
     const { bridge } = createBridgeStub();
-    await expect(createCaller(bridge).mobile.endpoints()).rejects.toThrow("Trusted encrypted mobile transport required");
-    const caller = bridgeRouter.createCaller({ bridge, cwd: "/tmp/scout", deviceId: "phone",
+    await expect(bridgeRouter.createCaller({ bridge, cwd: "/tmp/scout" }).mobile.endpoints())
+      .rejects.toMatchObject({ code: "UNAUTHORIZED", message: "Live authenticated transport required" });
+    await expect(bridgeRouter.createCaller({ bridge, cwd: "/tmp/scout", deviceId: "phone",
+      secureTransport: true, trustedPeer: true }).mobile.endpoints())
+      .rejects.toMatchObject({ code: "UNAUTHORIZED", message: "Live authenticated transport required" });
+    const caller = createCaller(bridge, { deviceId: "phone",
       secureTransport: true, trustedPeer: true, reconnectRoom: "stable-reconnect-room",
       relayUrls: ["wss://relay.example.test"] });
     const result = await caller.mobile.endpoints();

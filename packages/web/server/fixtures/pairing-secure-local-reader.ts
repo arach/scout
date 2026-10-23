@@ -1,15 +1,19 @@
 // Run with HOME pointed at a scratch directory: pairing identity paths are
 // fixed from homedir() at module load.
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createScoutPairingBridgeClient } from "../pairing.ts";
 import { startBridgeServerTRPC } from "../core/pairing/runtime/bridge/server-trpc.ts";
 import { bytesToHex, generateKeyPair, loadOrCreateIdentity, SecureTransport } from "../core/pairing/runtime/security/index.ts";
 import type { Bridge } from "../core/pairing/runtime/bridge/bridge.ts";
+import { pairingTrustOwner } from "@openscout/runtime/pairing-security/trust-owner";
 import { resolveOpenScoutPairingHome } from "@openscout/runtime/support-paths";
 
 const identity = loadOrCreateIdentity();
+// The parent supplies an isolated HOME. Complete the explicit local cutover
+// before any secure listener, including the empty-authority local-service case.
+const owner = pairingTrustOwner();
+owner.migrateToCapsule("local-reader-fixture");
 const bridge = {
   listSessions: () => [],
   getSessionSummaries: () => [],
@@ -46,15 +50,16 @@ const trustedPeersWritten = existsSync(join(resolveOpenScoutPairingHome(), "trus
 
 // Even when this key is already on the paired list, neither side rewrites it.
 const peersFile = join(resolveOpenScoutPairingHome(), "trusted-peers.json");
-const seeded = JSON.stringify([{ publicKey: bytesToHex(identity.publicKey), pairedAt: "2026-01-01T00:00:00.000Z" }]);
-writeFileSync(peersFile, seeded);
+owner.mutate(owner.read().revision, "local-reader-seed", {
+  type: "grant", peer: { publicKey: bytesToHex(identity.publicKey), pairedAt: "2026-01-01T00:00:00.000Z" },
+});
+const seeded = readFileSync(peersFile, "utf8");
 const seededServer = startBridgeServerTRPC({ bridge, port, secure: true, identity });
 const seededClient = await createScoutPairingBridgeClient(port);
 await seededClient.query("bridgeStatus");
 seededClient.close();
 seededServer.stop();
 const seededRecordUntouched = readFileSync(peersFile, "utf8") === seeded;
-rmSync(peersFile);
 
 // A squatter on the port that claims plaintext cannot talk the reader down:
 // with no config the bridge is secure, so the reader insists on Noise.
