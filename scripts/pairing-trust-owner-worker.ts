@@ -18,7 +18,7 @@ const pause = (name: string) => {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
   }
 };
-if (mode === "instrument" || mode === "managed-paths") {
+if (["instrument","managed-instrument","instrument-revoke","managed-instrument-revoke","recover","recover-managed","managed-paths"].includes(mode)) {
   fs.openSync = ((path: any, ...args: any[]) => { const fd = (original.openSync as any)(path, ...args); fdPaths.set(fd, String(path)); return fd; }) as any;
   fs.fsyncSync = ((fd: number) => {
     syncs++; trace({event: "sync", number: syncs, path: fdPaths.get(fd)});
@@ -42,7 +42,13 @@ const {pairingTrustOwner} = await import("../packages/runtime/src/pairing-securi
 const key = "a".repeat(64), peer = {publicKey: key, pairedAt: "2026-01-01T00:00:00Z"};
 try {
   const owner = pairingTrustOwner(root);
-  if (mode === "race") {
+  if (mode.startsWith("managed-instrument") || mode === "recover-managed") {
+    let holder:object|null=null;
+    owner.register({id:"test.adapter",withGate(_r,body){holder={};held=true;try{return body(holder);}finally{held=false;holder=null;}},currentHolder(){return holder;}});
+  }
+  if (mode === "recover" || mode === "recover-managed") {
+    console.log(JSON.stringify({ok:true,snapshot:owner.read()}));
+  } else if (mode === "race") {
     const snapshot = owner.read(); pause(`ready-${detail}`);
     const result = owner.mutate(snapshot.revision, `race-${detail}`, {type: "grant", peer: {...peer, publicKey: detail.repeat(64)}});
     console.log(JSON.stringify({ok: true, result}));
@@ -50,8 +56,9 @@ try {
     const {refreshTrustedPeer, loadTrustedPeers} = await import("../packages/runtime/src/pairing-security/identity.ts");
     if (!loadTrustedPeers().has(key)) throw Error("seed missing"); pause("ready-reconnect");
     refreshTrustedPeer(key, "later"); console.log(JSON.stringify({ok: true}));
-  } else if (mode === "instrument") {
-    const result = owner.mutate(0, "instrument", {type: "grant", peer});
+  } else if (["instrument","managed-instrument","instrument-revoke","managed-instrument-revoke"].includes(mode)) {
+    const revoking=mode.endsWith("-revoke"), managed=mode.startsWith("managed-");
+    const result = owner.mutate((managed?1:0)+(revoking?1:0), "instrument", revoking?{type:"revoke",publicKey:key}:{type: "grant", peer});
     console.log(JSON.stringify({ok: true, result, syncs}));
   } else if (mode === "managed-paths" || mode === "routes") {
     const web = await import("../packages/web/server/pairing.ts");

@@ -29,27 +29,55 @@ describe("pairing owner real cross-process and I/O paths", () => {
     const values = await Promise.all([result(a), result(b)]);
     expect(values.every(v => v.code === 0)).toBe(true);
     expect(values.filter(v => v.value.ok).length).toBe(1);
-    expect(values.find(v => !v.value.ok)?.value.error).toMatch(/revision_conflict|external_change_or_incomplete|unsafe_path/);
+    expect(values.find(v => !v.value.ok)?.value.error).toMatch(/revision_conflict|publication_incomplete|external_change_or_incomplete|unsafe_path/);
     expect(pairingTrustOwner(data).read().peers.length).toBe(1);
     expect(readdirSync(data).some(name => name.includes("lock"))).toBe(false);
   });
-  test("pending owner CAS is not mistaken for an unmanaged outside write", async () => {
+  test("a helper completes a live writer; a later revoke survives the original writer resuming", async () => {
     const {data,coordination}=fixture(), first=launch("instrument",data,coordination,"before-projection");
     await ready(join(coordination,"ready-before-projection"));
     const owner=pairingTrustOwner(data);
-    expect(()=>owner.read()).toThrow("unsafe_path");
-    expect(()=>owner.mutate(1,"competitor",{type:"grant",peer:{...peer,publicKey:"b".repeat(64)}})).toThrow("external_change_or_incomplete");
-    expect(readdirSync(data)).not.toContain("trusted-peers.owner.2.json");
-    writeFileSync(join(coordination,"go"),"go"); expect((await result(first)).value.ok).toBe(true);
-    owner.mutate(1,"competitor",{type:"grant",peer:{...peer,publicKey:"b".repeat(64)}});
-    expect(owner.read().peers.map(p=>p.publicKey)).toEqual([key,"b".repeat(64)]);
+    expect(owner.read()).toEqual({revision:1,peers:[peer]});
+    owner.mutate(1,"revoke",{type:"revoke",publicKey:key});
+    writeFileSync(join(coordination,"go"),"go"); const output=await result(first);
+    expect(output.value).toMatchObject({ok:true,result:{mutationId:"instrument",revision:1}});
+    expect(owner.read()).toEqual({revision:2,peers:[]});
+    const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(line=>JSON.parse(line));
+    expect(events.filter(e=>e.event === "rename")).toEqual([]);
   });
-  test("failed projection rename retains the pending CAS witness, not an outside-write baseline", async () => {
+  test("failed projection rename retains recoverable evidence and reports publication_incomplete", async () => {
     const {data,coordination}=fixture(), output=await result(launch("instrument",data,coordination,"rename-fail"));
-    expect(output.value.ok).toBe(false); const owner=pairingTrustOwner(data);
-    expect(()=>owner.read()).toThrow("unsafe_path");
-    expect(()=>owner.mutate(0,"instrument",{type:"grant",peer})).toThrow("external_change_or_incomplete");
-    expect(readdirSync(data).filter(n=>n.endsWith(".tmp")).length).toBe(1);
+    expect(output.value.ok).toBe(false); expect(output.value.error).toContain("publication_incomplete");
+    expect(readdirSync(data).filter(n=>n.endsWith(".tmp")).length).toBe(2);
+    const owner=pairingTrustOwner(data);
+    expect(owner.read()).toEqual({revision:1,peers:[peer]});
+    expect(owner.mutate(0,"instrument",{type:"grant",peer}).revision).toBe(1);
+  });
+  test("crash between link and rename rolls forward on the next operation in both modes", async () => {
+    for (const managed of [false,true]) for (const revoking of [false,true]) {
+      const {data,coordination}=fixture(), owner=pairingTrustOwner(data);
+      if (revoking) owner.mutate(0,"seed",{type:"grant",peer});
+      if (managed) {
+        let holder:object|null=null;
+        const remove=owner.register({id:"test.adapter",withGate(_r,body){holder={};try{return body(holder);}finally{holder=null;}},currentHolder(){return holder;}});
+        owner.withInvocation(c=>owner.mutate(revoking?1:0,"adopt",{type:"manage"},c));remove();
+      }
+      const crashed=await result(launch((managed?"managed-instrument":"instrument")+(revoking?"-revoke":""),data,coordination,"after-cas"));
+      expect(crashed.code).toBe(73);
+      if (managed) expect(()=>owner.read()).toThrow("managed_adapter_required");
+      const completed=await result(launch(managed?"recover-managed":"recover",data,coordination));
+      expect(completed.value).toEqual({ok:true,snapshot:{revision:(managed?2:1)+(revoking?1:0),peers:revoking?[]:[peer]}});
+      const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(line=>JSON.parse(line));
+      const renames=events.filter(e=>e.event === "rename"); expect(renames.length).toBe(1);
+      expect(renames[0].held).toBe(managed);
+    }
+  });
+  test("a read unable to finish in-flight publication reports publication_incomplete", async () => {
+    const {data,coordination}=fixture(), first=launch("instrument",data,coordination,"before-projection");
+    await ready(join(coordination,"ready-before-projection"));
+    const reader=await result(launch("recover",data,coordination,"rename-fail"));
+    expect(reader.value.ok).toBe(false); expect(reader.value.error).toContain("publication_incomplete");
+    writeFileSync(join(coordination,"go"),"go");expect((await result(first)).value.ok).toBe(true);
   });
   test("delayed reconnect in another process cannot restore a revoked key", async () => {
     const {data, coordination} = fixture(), owner = pairingTrustOwner(data);
@@ -67,7 +95,7 @@ describe("pairing owner real cross-process and I/O paths", () => {
       console.log(JSON.stringify({instrument:point||"success",trace}));
       const owner = pairingTrustOwner(data);
       if (point === "after-cas") {
-        expect(output.code).toBe(73); expect(()=>owner.read()).toThrow();
+        expect(output.code).toBe(73); expect(owner.read()).toEqual({revision:1,peers:[peer]});
       } else if (point === "after-rename" || point === "sync-3") {
         if (point === "after-rename") expect(output.code).toBe(74); else expect(output.value.ok).toBe(false);
         const retried = owner.mutate(0,"instrument",{type:"grant",peer});

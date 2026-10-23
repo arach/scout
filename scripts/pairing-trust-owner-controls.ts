@@ -19,26 +19,36 @@ const controls = [
   {id:"resurrection", expected:"revoke versus a paused reconnect", edits:[['if (!snapshot.peers.some(peer => peer.publicKey === publicKey)) refuse("peer_revoked");','if (!snapshot.peers.some(peer => peer.publicKey === publicKey)) this.mutate(snapshot.revision, randomUUID(), {type:"grant",peer:{publicKey,pairedAt:lastSeen}}, context);']]},
   {id:"ambiguous", expected:"ambiguous-prefix DELETE refuses", edits:[['if (matches.length > 1) refuse("ambiguous_prefix");','']]},
   {id:"managed-fallback", expected:"managed marker refuses without adapter", edits:[['if (marker) {','if (false && marker) {']]},
-  {id:"external-change", expected:"external changes in both directions", edits:[['if ((marker || current.pendingStage) && changedProjection) refuse("external_change_or_incomplete");','']]},
+  {id:"external-change", expected:"external changes in both directions", edits:[['if (marker && changedProjection) refuse("external_change_or_incomplete");','']]},
   {id:"context-lifetime", expected:"inherited async task is dead", edits:[['!invocation.active || ','']]},
   {id:"gate-holder", expected:"context is checked against actual current gate holder", edits:[['|| invocation.adapter.currentHolder(root) !== invocation.holder','']]},
   {id:"generation-checksum", expected:"generation checksum detects", edits:[['if (!record(value) || envelope.sha256 !== hash(JSON.stringify(value))) refuse("generation_checksum");','']]},
   {id:"refresh-growth", expected:"reconnect storm writes zero generations", edits:[['const snapshot = this.read(context);','const snapshot = this.read(context); if (snapshot.peers.length) this.mutate(snapshot.revision, randomUUID(), {type:"grant",peer:snapshot.peers[0]!}, context);']]},
   {id:"advisory-merge", expected:"advisory merge takes the later projection or reconnect time", edits:[['Date.parse(value) > Date.parse(latest)','Date.parse(value) < Date.parse(latest)']]},
-  {id:"unmanaged-adoption", expected:"unmanaged old-binary writes are adopted", edits:[['if ((marker || current.pendingStage) && changedProjection)', 'if (changedProjection)']]},
+  {id:"unmanaged-adoption", expected:"unmanaged old-binary writes are adopted", edits:[['if (marker && changedProjection)', 'if (changedProjection)']]},
   {id:"pending-publication", expected:"pending CAS witness survives until projection rename", edits:[
     ['reserved = true;','reserved = true; unlinkSync(stagedGeneration);'],
-    ['unlinkSync(stagedGeneration); this.syncDirectory(root);','this.syncDirectory(root);'],
   ]},
+  {id:"generation-two-links", expected:"pending head rolls forward on the next read", edits:[['stagedGeneration = name.startsWith(PREFIX)','stagedGeneration = false']]},
+  {id:"roll-forward", expected:"pending head rolls forward on the next read", edits:[['if (state.pendingStage) this.completePublication(root, state);','']]},
+  {id:"pending-classification", expected:"unfinishable pending read refuses publication_incomplete", edits:[['refuse("publication_incomplete")','refuse("unsafe_path")']]},
+  {id:"recovery-hash", expected:"recovery refuses a tampered shared projection stage", edits:[['if (hash(staged) !== state.peersHash) refuse("publication_incomplete");','']]},
+  {id:"late-writer-ack", expected:"consumed projection stage tolerates a helper and a later revoke", edits:[['catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }','catch (error) { throw error; }']]},
+  {id:"late-writer-replay", expected:"consumed projection stage tolerates a helper and a later revoke", edits:[['catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }','catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; renameSync(this.stage(root, bytes), join(root.path, PEERS)); }']]},
   {id:"sync-omitted", expected:"required file and directory barriers", edits:[['fsyncSync(fd);','void fd;']]},
 ];
-const evidence: unknown[] = [];
-for (const control of controls) {
+async function checkDisk(control: string) {
   const volume = process.platform === "darwin" ? "/System/Volumes/Data" : "/";
+  const human = Bun.spawn(["df","-h",volume],{stdout:"pipe",stderr:"pipe"});
+  const humanText = await new Response(human.stdout).text();
+  if (await human.exited !== 0) throw Error("disk check failed");
   const disk = Bun.spawn(["df","-Pk",volume],{stdout:"pipe",stderr:"pipe"});
   const diskText = await new Response(disk.stdout).text();
   if (await disk.exited !== 0 || Number(diskText.trim().split("\n").at(-1)?.trim().split(/\s+/)[3]) < 3 * 1024 * 1024) throw Error("stop: less than 3 GiB free or disk check failed");
-  console.log(JSON.stringify({control:control.id,disk:diskText.trim()}));
+  console.log(JSON.stringify({control,disk:humanText.trim(),blocks:diskText.trim()}));
+}
+const evidence: unknown[] = [];
+for (const control of controls) {
   const scratch = mkdtempSync(join(tmpdir(),"pairing-owner-control-"));
   try {
     let source = original;
@@ -77,7 +87,38 @@ owner.mutate(0,"id",{type:"grant",peer:{publicKey:"a".repeat(64),pairedAt:"date"
 expect(observed).toBe(true); expect(premature).toBe(false);
 });`;
     }
+    if (control.id.startsWith("late-writer-")) {
+      tests = `import {expect,test,mock} from "bun:test";
+import fs from "node:fs";
+const original={...fs}; let helper:any, interposed=false;
+mock.module("node:fs",()=>({...original,renameSync:(source:string,target:string)=>{
+if (!interposed && target.endsWith("trusted-peers.json")) {
+interposed=true; helper.read(); helper.mutate(1,"later-revoke",{type:"revoke",publicKey:"a".repeat(64)});
+}
+original.renameSync(source,target);
+}}));
+const {PairingTrustOwner}=await import(${JSON.stringify(module)});
+const other=await import(${JSON.stringify(module+"?helper")});
+test("consumed projection stage tolerates a helper and a later revoke",()=>{
+const data=${JSON.stringify(join(scratch,"data"))};original.mkdirSync(data,{mode:0o700});
+const owner=new PairingTrustOwner(data);helper=new other.PairingTrustOwner(data);
+expect(owner.mutate(0,"first",{type:"grant",peer:{publicKey:"a".repeat(64),pairedAt:"date"}}).revision).toBe(1);
+expect(interposed).toBe(true);expect(owner.read()).toEqual({revision:2,peers:[]});
+});`;
+    }
+    if (control.id.startsWith("late-writer-")) {
+      const baselineModule=join(scratch,"baseline.ts"), baselineTest=join(scratch,"baseline.test.ts");
+      writeFileSync(baselineModule,original.replace('"../support-paths.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/support-paths.ts")).href)));
+      writeFileSync(baselineTest,tests.replaceAll(module,baselineModule));
+      await checkDisk(control.id+"-positive");
+      const baseline=Bun.spawn([process.execPath,"test",baselineTest],{stdout:"pipe",stderr:"pipe"});
+      const [code,out,err]=await Promise.all([baseline.exited,new Response(baseline.stdout).text(),new Response(baseline.stderr).text()]);
+      writeFileSync(join(output,`${control.id}-positive.log`),out+err);
+      if (code !== 0) throw Error(`positive control fixture failed: ${control.id}`);
+      rmSync(join(scratch,"data"),{recursive:true,force:true});
+    }
     writeFileSync(testFile,tests);
+    await checkDisk(control.id);
     const child = Bun.spawn([process.execPath,"test",testFile],{stdout:"pipe",stderr:"pipe"});
     const [exit,stdout,stderr]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
     const log=stdout+stderr; writeFileSync(join(output,`${control.id}.log`),log);
