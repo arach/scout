@@ -110,7 +110,25 @@ async function denied(pattern: "XX" | "IK", keys = phone) {
 }
 try {
   await Bun.sleep(40);
-  if (scenario === "revoked") {
+  if (scenario === "live-revoke") {
+    seed(); const current = await accepted("IK");
+    const beforeDispatch = dispatches;
+    current.data.length = 0;
+    revoke(); // mutate returns only after its verified publication acknowledgement.
+    const revokedRevision = owner.read().revision;
+    const memberAfterAck = owner.read().peers.some(p => p.publicKey === key);
+    if (current.state.closed === 0) {
+      current.transport.send(JSON.stringify({id: "after-ack", method: "session/list"}));
+      current.transport.send(JSON.stringify({id: 91, jsonrpc: "2.0", method: "query", params: {path: "probe"}}));
+    }
+    bridgeEvents?.({seq: 91, event: {event: "secret-event"}});
+    await Bun.sleep(100);
+    console.log(JSON.stringify({observation: "live-revoke", flavor, revokedRevision, memberAfterAck,
+      postAckDispatches: dispatches - beforeDispatch,
+      rpcAfterAck: current.data.some(x => x.includes("rpc-secret")),
+      eventAfterAck: current.data.some(x => x.includes("secret-event")),
+      phoneClose: current.state.closed, data: current.data}));
+  } else if (scenario === "revoked") {
     seed(); const first = await accepted(); revoke();
     // Already-connected revocation is the separate registry change. This fix
     // must not let an unadmitted reconnect evict this still-connected peer.
