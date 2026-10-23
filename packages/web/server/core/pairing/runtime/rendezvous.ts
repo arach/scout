@@ -49,7 +49,6 @@ export function buildPairingRendezvousNode(
   const meshId = readEnv(env, "OPENSCOUT_MESH_ID") ?? "openscout";
   const name = readEnv(env, "OPENSCOUT_NODE_NAME") ?? hostname();
   const nodeId = readEnv(env, "OPENSCOUT_NODE_ID") ?? normalizeNodeId(`${name}-${meshId}`);
-  const pairing = snapshot.pairing;
 
   return {
     id: nodeId,
@@ -58,22 +57,8 @@ export function buildPairingRendezvousNode(
     advertiseScope: "mesh",
     registeredAt: snapshot.startedAt ?? now,
     lastSeenAt: now,
-    meshEntrypoints: pairing
-      ? [
-          {
-            kind: "mobile_pairing",
-            relay: pairing.relay,
-            ...(pairing.fallbackRelays?.length ? { fallbackRelays: pairing.fallbackRelays } : {}),
-            room: pairing.room,
-            publicKey: pairing.publicKey,
-            expiresAt: pairing.expiresAt,
-            lastSeenAt: snapshot.updatedAt,
-            metadata: {
-              source: "openscout-pairing-runtime",
-            },
-          },
-        ]
-      : [],
+    // QR invitations are local consent, never mesh discovery metadata.
+    meshEntrypoints: [],
   };
 }
 

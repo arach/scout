@@ -67,6 +67,19 @@ function createCaller(bridge: Bridge) {
   });
 }
 
+describe("mobile reconnect coordinates", () => {
+  test("requires a trusted encrypted transport and reports its reconnect room", async () => {
+    const { bridge } = createBridgeStub();
+    await expect(createCaller(bridge).mobile.endpoints()).rejects.toThrow("Trusted encrypted mobile transport required");
+    const caller = bridgeRouter.createCaller({ bridge, cwd: "/tmp/scout", deviceId: "phone",
+      secureTransport: true, trustedPeer: true, reconnectRoom: "stable-reconnect-room",
+      relayUrls: ["wss://relay.example.test"] });
+    const result = await caller.mobile.endpoints();
+    expect(result.relay.reconnectRoom).toBe("stable-reconnect-room");
+    expect(result.endpoints.relayUrls).toEqual(["wss://relay.example.test"]);
+  });
+});
+
 describe("bridgeRouter sync compatibility", () => {
   test("sync.status falls back to the most recent session when sessionId is omitted", async () => {
     const stub = createBridgeStub();

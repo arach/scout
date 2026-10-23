@@ -7,13 +7,8 @@ import {
   type OpenScoutMeshPresence,
 } from "@openscout/protocol";
 
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-
 import { isLoopbackHost } from "./broker-process-manager.js";
 import { readOpenScoutNetworkSettingsSync } from "./open-scout-network.js";
-import { resolveOpenScoutPairingHomeForEnv } from "./support-paths.js";
 
 export interface MeshRendezvousPublishConfig {
   url: string;
@@ -186,60 +181,30 @@ export function startMeshRendezvousPublisher(
   };
 }
 
+/** @deprecated Pairing invitations are local-only and no longer published. */
 export function readMobilePairingMeshEntrypoint(
   env: RuntimeEnv = process.env,
   now: number = Date.now(),
 ): MobilePairingMeshEntrypoint | undefined {
-  const runtimeStatePath = env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH
-    ?? join(resolveOpenScoutPairingHomeForEnv(env), "runtime.json");
-  if (!existsSync(runtimeStatePath)) {
-    return undefined;
-  }
-
-  try {
-    return mobilePairingMeshEntrypointFromSnapshot(
-      JSON.parse(readFileSync(runtimeStatePath, "utf8")),
-      now,
-    );
-  } catch {
-    return undefined;
-  }
+  void env;
+  void now;
+  return undefined;
 }
 
+/** @deprecated Pairing invitations are local-only and no longer published. */
 export function mobilePairingMeshEntrypointFromSnapshot(
   input: unknown,
   now: number = Date.now(),
 ): MobilePairingMeshEntrypoint | undefined {
-  if (!isRecord(input)) return undefined;
-  const pairing = isRecord(input["pairing"]) ? input["pairing"] : undefined;
-  if (!pairing) return undefined;
-
-  const relay = readString(pairing["relay"]);
-  const room = readString(pairing["room"]);
-  const publicKey = readString(pairing["publicKey"]);
-  const expiresAt = readNumber(pairing["expiresAt"]);
-  if (!relay || !room || !isPublicKeyHex(publicKey) || !expiresAt || expiresAt <= now) {
-    return undefined;
-  }
-
-  const fallbackRelays = readFallbackRelays(pairing);
-  const lastSeenAt = readNumber(input["updatedAt"]);
-  return {
-    kind: "mobile_pairing",
-    relay,
-    ...(fallbackRelays.length > 0 ? { fallbackRelays } : {}),
-    room,
-    publicKey,
-    expiresAt,
-    ...(lastSeenAt ? { lastSeenAt } : {}),
-    metadata: {
-      source: "openscout-pairing-runtime",
-    },
-  };
+  // Kept as a compatibility export. Pairing invitations must not be published
+  // to rendezvous, and existing mobile_pairing decoders require a room.
+  void input;
+  void now;
+  return undefined;
 }
 
 function reachableEntrypointsForNode(node: NodeDefinition): NodeMeshEntrypoint[] {
-  const entrypoints = [...(node.meshEntrypoints ?? [])];
+  const entrypoints = (node.meshEntrypoints ?? []).filter(entrypoint => entrypoint.kind !== "mobile_pairing");
   if (node.brokerUrl && isReachableHttpUrl(node.brokerUrl)) {
     entrypoints.push({
       kind: "http",
@@ -286,45 +251,4 @@ function readPositiveInteger(value: string | undefined, fallback: number): numbe
 
 function readBooleanFlag(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(value?.trim().toLowerCase() ?? "");
-}
-
-function readFallbackRelays(pairing: Record<string, unknown>): string[] {
-  const direct = readStringArray(pairing["fallbackRelays"]);
-  if (direct.length > 0) {
-    return direct;
-  }
-
-  const qrValue = readString(pairing["qrValue"]);
-  if (!qrValue) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(qrValue);
-    return isRecord(parsed) ? readStringArray(parsed["fallbackRelays"]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function readNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function readStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.map(readString).filter((entry): entry is string => Boolean(entry))
-    : [];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isPublicKeyHex(value: string | undefined): value is string {
-  return Boolean(value && /^[0-9a-fA-F]{64}$/.test(value));
 }

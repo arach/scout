@@ -97,6 +97,8 @@ interface SocketState {
   ctx?: BridgeContext;
   /** Whether the Noise handshake is complete (always true in plaintext mode). */
   ready: boolean;
+  /** Verified equality with this host's own Noise key; never request metadata. */
+  localService?: boolean;
   /** Queue of raw messages received before handshake completes (secure mode). */
   pendingMessages: string[];
   /** Active subscription iterators keyed by tRPC message id. */
@@ -225,8 +227,11 @@ export function startBridgeServerTRPC(options: {
   port: number;
   secure?: boolean;
   identity?: KeyPair;
+  /** Trusted bootstrap hook; intercepted before the remotely callable router. */
+  pairingControl?: (action: "open" | "cancel", windowId?: string) => unknown;
 }): { stop: () => void } {
   const { bridge, port, secure = false, identity } = options;
+  const ownPublicKeyHex = identity ? bytesToHex(identity.publicKey) : null;
 
   if (secure && !identity) {
     throw new Error("[bridge-trpc] secure mode requires an identity (key pair)");
@@ -282,6 +287,25 @@ export function startBridgeServerTRPC(options: {
     text: string,
   ) {
     const send = createSender(ws, state);
+    try {
+      const request = JSON.parse(text);
+      if (request.method === "pairing/opportunity") {
+        // This local JSON-RPC control is not a tRPC result envelope.
+        const sendControl = (value: unknown) => {
+          const frame = JSON.stringify(value);
+          if (state.transport) state.transport.send(frame); else ws.send(frame);
+        };
+        const {action, windowId} = request.params ?? {};
+        if (!state.localService || !options.pairingControl || !["open", "cancel"].includes(action)
+          || (windowId !== undefined && typeof windowId !== "string")) {
+          sendControl({id: request.id, error: {code: -32001, message: "Local pairing control requires the host identity"}});
+        } else {
+          try { sendControl({id: request.id, result: options.pairingControl(action, windowId)}); }
+          catch (error) { log.error("pairing", `Local pairing control failed: ${String(error)}`); sendControl({id: request.id, error: {code: -32000, message: "Pairing authority unavailable"}}); }
+        }
+        return;
+      }
+    } catch { /* Normal dispatcher handles invalid JSON. */ }
 
     // If the router isn't loaded, fall back to the legacy RPC handler.
     if (!bridgeRouter) {
@@ -673,7 +697,8 @@ export function startBridgeServerTRPC(options: {
             {
               onReady: (remotePublicKey, readyInfo) => {
                 const pubHex = bytesToHex(remotePublicKey);
-                const trusted = readyInfo.wasTrustedPeer && isTrustedPeer(pubHex);
+                const trusted = pubHex === ownPublicKeyHex || (readyInfo.wasTrustedPeer && isTrustedPeer(pubHex));
+                state.localService = pubHex === ownPublicKeyHex;
                 state.deviceId = pubHex.slice(0, 16);
                 state.secureTransport = true;
                 state.trustedPeer = trusted;
@@ -733,7 +758,7 @@ export function startBridgeServerTRPC(options: {
                 state.abortController.abort();
               },
             },
-            { trustOnComplete: false },
+            { trustOnComplete: false, skipTrustWrite: hex => hex === ownPublicKeyHex },
           );
 
           state.transport = transport;

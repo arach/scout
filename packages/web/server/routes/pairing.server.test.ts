@@ -74,6 +74,7 @@ describe("createOpenScoutWebServer: pairing routes", () => {
       body: JSON.stringify({ decision: "approve" }),
     });
     expect(approval.status).toBe(200);
+    expect(stubs.controlPairingCalls, "approval must not open a pairing window").toBe(0);
 
     peerAddress = "192.168.18.201";
     const delivered = await server.app.request(`http://localhost/pair?route=lan&token=${token}`, {
@@ -90,6 +91,29 @@ describe("createOpenScoutWebServer: pairing routes", () => {
     });
     expect(replay.status).toBe(410);
     await server.stop();
+  });
+
+  test("approval outside an explicit window yields no payload and opens no window", async () => {
+    stubs.pairingStateResult = makePairingState({ pairing: null });
+    let peerAddress = "192.168.18.203";
+    const server = await createOpenScoutWebServer({ currentDirectory: "/tmp/openscout",
+      assetMode: "static", staticRoot: makeStaticRoot(), lanAccessScope: "pairing",
+      resolvePeerAddress: () => peerAddress });
+    try {
+      const knock = await server.app.request("http://localhost/pair", { headers: { accept: "application/json" } });
+      const { token } = await knock.json() as { token: string };
+      peerAddress = "127.0.0.1";
+      const approval = await server.app.request(`http://localhost/api/pairing/requests/${token}/decide`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision: "approve" }) });
+      expect(approval.status).toBe(200);
+      expect(stubs.controlPairingCalls, "approval must not open a pairing window").toBe(0);
+      peerAddress = "192.168.18.203";
+      const poll = await server.app.request(`http://localhost/pair?token=${token}`, {
+        headers: { accept: "application/json" }, redirect: "manual" });
+      expect(poll.status).toBe(202);
+      expect(poll.headers.get("location")).toBeNull();
+      expect(await poll.json()).toMatchObject({ status: "approved", token });
+    } finally { await server.stop(); }
   });
 
   test("keeps denied LAN sources denied without minting another request", async () => {

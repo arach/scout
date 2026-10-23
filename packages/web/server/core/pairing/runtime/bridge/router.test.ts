@@ -70,6 +70,8 @@ function createCaller(
     deviceId?: string;
     secureTransport?: boolean;
     trustedPeer?: boolean;
+    reconnectRoom?: string;
+    relayUrls?: string[];
   } = {},
 ) {
   return bridgeRouter.createCaller({
@@ -78,6 +80,8 @@ function createCaller(
     deviceId: context.deviceId,
     secureTransport: context.secureTransport,
     trustedPeer: context.trustedPeer,
+    reconnectRoom: context.reconnectRoom,
+    relayUrls: context.relayUrls,
   });
 }
 
@@ -177,8 +181,12 @@ describe("bridgeRouter sync compatibility", () => {
         deviceId: "device-1",
         secureTransport: true,
         trustedPeer: true,
+        reconnectRoom: "stable-reconnect-room",
+        relayUrls: ["wss://relay.example.test"],
       }).mobile.endpoints();
 
+      expect(result.relay.reconnectRoom).toBe("stable-reconnect-room");
+      expect(result.endpoints.relayUrls).toEqual(["wss://relay.example.test"]);
       expect(result.version).toBe(1);
       expect(result.protected).toBe(true);
       expect(result.transport.deviceId).toBe("device-1");

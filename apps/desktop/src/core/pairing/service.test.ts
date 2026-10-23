@@ -5,7 +5,7 @@ afterEach(() => {
 });
 
 describe("pairing service", () => {
-  test("refreshes an expired active runtime pairing payload without starting a second runtime", async () => {
+  test("explicit pair view opens a fresh local opportunity without starting a second runtime", async () => {
     const startPairingRuntime = mock(async () => {
       throw new Error("startPairingRuntime should not run for an active snapshot");
     });
@@ -13,6 +13,7 @@ describe("pairing service", () => {
     const expiredAt = Date.now() - 60_000;
 
     mock.module("./runtime/index.ts", () => ({
+      requestLocalPairingOpportunity: async (_port: number, action: string) => action === "open" ? ({windowId: "window", payload: {v: 1, relay: "wss://relay.test", room: "room-expired", fallbackRelays: ["wss://mac.tailnet.ts.net:43131"], publicKey: "local-public-key", expiresAt: Date.now() + 60_000}}) : null,
       pairingPaths: () => ({
         rootDir: "/tmp/pairing",
         configPath: "/tmp/pairing/config.json",

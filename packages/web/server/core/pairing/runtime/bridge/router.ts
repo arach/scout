@@ -120,6 +120,8 @@ export interface BridgeContext {
   deviceId?: string;
   secureTransport?: boolean;
   trustedPeer?: boolean;
+  reconnectRoom?: string;
+  relayUrls?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +278,7 @@ async function buildMobileEndpointManifest(ctx: BridgeContext) {
   const webUrl = httpUrl(host, webPort);
   const pairingBridgeUrl = wsUrl(host, pairingBridgePort);
   const pairingFileServerUrl = httpUrl(host, pairingFileServerPort);
-  const relayUrls = currentMobileRelayUrls(host, pairingBridgePort);
+  const relayUrls = ctx.relayUrls ?? currentMobileRelayUrls(host, pairingBridgePort);
   const voicePort = resolveVoiceLegPort();
   const voiceHealth = await probeVoiceLegHealth(voicePort);
   const voiceReachableFromPhone = voiceHealth.reachable && isMobileReachableHost(host);
@@ -320,6 +322,7 @@ async function buildMobileEndpointManifest(ctx: BridgeContext) {
       pairingFileServerUrl,
       relayUrls,
     },
+    relay: { reconnectRoom: ctx.reconnectRoom ?? null },
     voice: {
       available: voiceReachableFromPhone,
       port: voicePort,
