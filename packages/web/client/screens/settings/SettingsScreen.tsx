@@ -456,6 +456,14 @@ function PairingSettingsScreen() {
                 <>
                   <button
                     type="button"
+                    className="s-btn s-btn-primary"
+                    disabled={Boolean(controlBusy)}
+                    onClick={() => void control("start")}
+                  >
+                    {controlBusy === "start" ? "Opening..." : "Show pairing code"}
+                  </button>
+                  <button
+                    type="button"
                     className="s-btn"
                     disabled={Boolean(controlBusy)}
                     onClick={() => void control("restart")}

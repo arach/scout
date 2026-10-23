@@ -1,3 +1,4 @@
+import { isTrustedPeer } from "@openscout/runtime/pairing-security/identity";
 // Relay client — connects the bridge OUTBOUND to a relay server.
 //
 // This lets phones and tablets reach the bridge when they're not on the same
@@ -43,6 +44,9 @@ export interface RelayClientOptions {
   qrPayload?: QRPayload;
   /** Optional lifecycle callbacks for status surfaces. */
   events?: RelayEventHandlers;
+  /** Trusted local workflow, never a wire field. Absent means reconnect only. */
+  onPeerAdmitted?: () => void;
+  admitNewPeer?: (publicKey: string, room: string, isLive: () => boolean) => boolean;
 }
 
 export interface RelayConnection {
@@ -75,6 +79,8 @@ interface RelayPeerState {
   transport: SecureTransport;
   deviceId?: string;
   trustedPeer?: boolean;
+  publicKey?: string;
+  admitted?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,19 +159,23 @@ export function connectToRelay(
     console.log(`[relay-client] connecting to relay (room: ${qrPayload.room})`);
     events?.onConnecting?.({ relayUrl: eventRelayUrl, room: qrPayload.room });
 
-    ws = new WebSocket(url, relayWebSocketOptions(relayUrl) as never);
+    const socket = new WebSocket(url, relayWebSocketOptions(relayUrl) as never);
+    ws = socket;
 
-    ws.addEventListener("open", () => {
+    socket.addEventListener("open", () => {
+      if (stopped || ws !== socket) return;
       console.log(`[relay-client] connected to relay (room: ${qrPayload.room})`);
       backoff = INITIAL_BACKOFF_MS;
       events?.onConnected?.({ relayUrl: eventRelayUrl, room: qrPayload.room });
     });
 
-    ws.addEventListener("message", (event) => {
+    socket.addEventListener("message", (event) => {
+      if (stopped || ws !== socket) return;
       handleRelaySocketMessage(event.data);
     });
 
-    ws.addEventListener("close", (event) => {
+    socket.addEventListener("close", (event) => {
+      if (stopped || ws !== socket) return;
       console.log(`[relay-client] disconnected (code: ${event.code}, reason: ${event.reason})`);
       events?.onClosed?.({
         relayUrl: eventRelayUrl,
@@ -177,7 +187,8 @@ export function connectToRelay(
       scheduleReconnect();
     });
 
-    ws.addEventListener("error", () => {
+    socket.addEventListener("error", () => {
+      if (stopped || ws !== socket) return;
       const error = new Error("Relay websocket error");
       console.error("[relay-client] connection error");
       events?.onError?.({ relayUrl: eventRelayUrl, room: qrPayload.room, error });
@@ -247,8 +258,25 @@ export function connectToRelay(
       {
         onReady: (remotePublicKey, readyInfo) => {
           const pubHex = bytesToHex(remotePublicKey);
-          peer.deviceId = pubHex.slice(0, 16);
-          peer.trustedPeer = readyInfo.wasTrustedPeer;
+          try {
+            const live = () => !stopped && ws?.readyState === WebSocket.OPEN && securePeers.get(clientId) === peer;
+            const trusted = isTrustedPeer(pubHex)
+              || options.admitNewPeer?.(pubHex, qrPayload.room, live) === true;
+            if (!live() || !trusted || !isTrustedPeer(pubHex)) {
+              sendRelayClose(clientId, 4003, "Untrusted peer");
+              teardownSecurePeer(clientId);
+              return;
+            }
+            peer.publicKey = pubHex;
+            peer.deviceId = pubHex.slice(0, 16);
+            peer.trustedPeer = true;
+            peer.admitted = true;
+          } catch (error) {
+            sendRelayClose(clientId, 4003, "Untrusted peer");
+            teardownSecurePeer(clientId);
+            return;
+          }
+          options.onPeerAdmitted?.();
           replaceOlderPeerForSameDevice(peer);
           ensureBridgeEventSubscription();
           ensureBrokerMessageSubscription();
@@ -257,14 +285,14 @@ export function connectToRelay(
           );
           events?.onPaired?.({ relayUrl: eventRelayUrl, room: qrPayload.room, remotePublicKey });
           sendExistingSessions((json) => {
-            if (peer.transport.isReady()) {
+            if (peer.admitted && securePeers.get(peer.clientId) === peer && peer.transport.isReady()) {
               peer.transport.send(json);
             }
           });
         },
 
         onMessage: (message) => {
-          handleIncomingRPC(peer, message);
+          if (peer.admitted && securePeers.get(clientId) === peer) handleIncomingRPC(peer, message);
         },
 
         onError: (err) => {
@@ -279,7 +307,7 @@ export function connectToRelay(
           teardownSecurePeer(clientId);
         },
       },
-      pattern ? { pattern } : undefined,
+      { pattern, trustOnComplete: false },
     );
 
     peer.transport = transport;
@@ -288,10 +316,10 @@ export function connectToRelay(
   }
 
   function replaceOlderPeerForSameDevice(peer: RelayPeerState): void {
-    if (!peer.deviceId) return;
+    if (!peer.admitted || !peer.publicKey) return;
 
     for (const [otherClientId, otherPeer] of securePeers) {
-      if (otherClientId === peer.clientId || otherPeer.deviceId !== peer.deviceId) {
+      if (otherClientId === peer.clientId || !otherPeer.admitted || otherPeer.publicKey !== peer.publicKey) {
         continue;
       }
       sendRelayClose(otherClientId, 4001, "Replaced by newer connection");
@@ -303,6 +331,7 @@ export function connectToRelay(
     if (!securePeers.has(clientId)) {
       return;
     }
+    securePeers.get(clientId)!.admitted = false;
     securePeers.delete(clientId);
     maybeReleaseMobileSubscriptions();
   }
@@ -382,7 +411,7 @@ export function connectToRelay(
   function broadcastToMobileClients(json: string): void {
     if (secure) {
       for (const peer of securePeers.values()) {
-        if (peer.transport.isReady()) {
+        if (peer.admitted && securePeers.get(peer.clientId) === peer && peer.transport.isReady()) {
           peer.transport.send(json);
         }
       }
@@ -474,7 +503,7 @@ export function connectToRelay(
     try {
       req = JSON.parse(message);
     } catch {
-      if (peer.transport.isReady()) {
+      if (peer.admitted && securePeers.get(peer.clientId) === peer && peer.transport.isReady()) {
         peer.transport.send(
           JSON.stringify({ id: null, error: { code: -32700, message: "Parse error" } }),
         );
@@ -483,7 +512,7 @@ export function connectToRelay(
     }
 
     const send = (json: string) => {
-      if (peer.transport.isReady()) {
+      if (peer.admitted && securePeers.get(peer.clientId) === peer && peer.transport.isReady()) {
         peer.transport.send(json);
       }
     };
@@ -538,6 +567,7 @@ export function connectToRelay(
     eventUnsub = null;
     brokerWatchAbort?.abort();
     brokerWatchAbort = null;
+    for (const peer of securePeers.values()) peer.admitted = false;
     securePeers.clear();
     plaintextClients.clear();
     ws = null;

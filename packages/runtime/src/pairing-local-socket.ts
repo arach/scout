@@ -15,7 +15,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { tryLoadIdentity, bytesToHex } from "./pairing-security/identity.js";
+import { tryLoadIdentity, bytesToHex, type QRPayload } from "./pairing-security/identity.js";
 import { SecureTransport } from "./pairing-security/transport.js";
 import { resolveOpenScoutPairingHome } from "./support-paths.js";
 
@@ -201,4 +201,36 @@ export async function openPairingLocalChannel(
     },
     close: finish,
   };
+}
+
+/** Explicit local QR workflow control, authenticated with this host's own key.
+ * A phone's paired key cannot invoke the server-side control hook. */
+export async function requestLocalPairingOpportunity(
+  port: number, action: "open" | "cancel", windowId?: string,
+): Promise<{ windowId: string; payload: QRPayload } | null> {
+  let channel: PairingLocalChannel | undefined;
+  type Result = {windowId: string; payload: QRPayload} | null;
+  let settle!: (value: Result) => void, fail!: (error: Error) => void;
+  const id = `pairing-${crypto.randomUUID()}`;
+  const result = new Promise<Result>((resolve, reject) => { settle = resolve; fail = reject; });
+  // Attach rejection handling before the channel can synchronously close.
+  void result.catch(() => {});
+  let expired = false;
+  const timer = setTimeout(() => { expired = true; fail(new Error("Local pairing control timed out")); }, 5_000);
+  try {
+    channel = await openPairingLocalChannel(port, {
+      onMessage(text) {
+        try {
+          const response = JSON.parse(text);
+          if (response.id !== id) return;
+          if (response.error) fail(new Error(response.error.message));
+          else settle(response.result);
+        } catch { /* Unrelated bridge events are not control replies. */ }
+      },
+      onClose() { fail(new Error("Local pairing control disconnected")); },
+    }, {timeoutMs: 5_000, subscribeEvents: false, expectedMode: "secure"});
+    if (expired) throw new Error("Local pairing control timed out");
+    channel.send(JSON.stringify({id, method: "pairing/opportunity", params: {action, windowId}}));
+    return await result;
+  } finally { clearTimeout(timer); channel?.close(); }
 }

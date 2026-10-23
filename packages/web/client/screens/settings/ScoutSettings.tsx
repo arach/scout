@@ -1751,8 +1751,10 @@ function DevicesPage({ navigate }: { navigate: (route: Route) => void }) {
     setError(null);
     try {
       pairing.setData(await api<PairingState>("/api/pairing/control", { method: "POST", body: JSON.stringify({ action }) }));
+      return true;
     } catch (err) {
       setError(errorText(err, "The relay did not answer."));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -1804,10 +1806,14 @@ function DevicesPage({ navigate }: { navigate: (route: Route) => void }) {
           <a
             className="sq-button"
             href={routePath({ view: "settings", section: "pairing" })}
+            aria-disabled={busy !== null}
             onClick={(event) => {
               if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
               event.preventDefault();
-              navigate({ view: "settings", section: "pairing" });
+              if (busy !== null) return;
+              void control("start").then((opened) => {
+                if (opened) navigate({ view: "settings", section: "pairing" });
+              });
             }}
           >
             Show code

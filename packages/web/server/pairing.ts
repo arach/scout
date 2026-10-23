@@ -1,3 +1,4 @@
+import { requestLocalPairingOpportunity } from "@openscout/runtime/pairing-local-socket";
 import { pairingTrustOwner } from "@openscout/runtime/pairing-security/trust-owner";
 import { spawn } from "node:child_process";
 import {
@@ -1065,6 +1066,7 @@ export async function controlScoutWebPairingService(
         if (!await requestPairingActionFromSupervisor(action)) {
           await ensureScoutPairingRuntimeStarted();
         }
+        await requestLocalPairingOpportunity(resolveScoutPairingConfig().port, "open");
         break;
       case "stop":
         if (!await requestPairingActionFromSupervisor(action)) {

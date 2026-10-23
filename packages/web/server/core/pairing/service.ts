@@ -1,5 +1,6 @@
 import {
   pairingPaths,
+  requestLocalPairingOpportunity,
   isProcessRunning,
   readPairingRuntimeSnapshot,
   renderQRCode,
@@ -9,7 +10,6 @@ import {
   trustedPeerCount,
   loadOrCreateIdentity,
   bytesToHex,
-  PAIRING_QR_TTL_MS,
   type PairingPaths,
   type PairingQrPayload,
   type PairingRuntimeRelayEndpoint,
@@ -49,11 +49,11 @@ export type StartedScoutPairingSession = {
 
 type ActivePairingRuntimeSnapshot = PairingRuntimeSnapshot & {
   relay: string;
-  pairing: NonNullable<PairingRuntimeSnapshot["pairing"]>;
+
 };
 
 function isActivePairingRuntimeSnapshot(snapshot: PairingRuntimeSnapshot | null): snapshot is ActivePairingRuntimeSnapshot {
-  return Boolean(snapshot?.relay && snapshot.pairing);
+  return Boolean(snapshot?.relay);
 }
 
 function createStatusEvent(
@@ -80,8 +80,10 @@ export async function startScoutPairingSession(input: {
     && existingSnapshot.relay;
 
   if (existingRuntimeRunning) {
-    const pairing = existingSnapshot.pairing;
-    const payload = freshPairingPayload(pairing);
+    const opened = await requestLocalPairingOpportunity(config.port, "open");
+    if (!opened) throw new Error("Scout did not open a pairing opportunity.");
+    const payload = opened.payload;
+    const pairing = payload;
     const currentStatus: ScoutPairingStatusEvent["status"] = existingSnapshot.status === "paired"
       ? "paired"
       : existingSnapshot.status === "connected"
@@ -116,6 +118,7 @@ export async function startScoutPairingSession(input: {
       relayUrl: pairing.relay,
       managedRelay: false,
       async stop() {
+        await requestLocalPairingOpportunity(config.port, "cancel", opened.windowId);
         input.onEvent(createStatusEvent("closed", "Scout pair view closed."));
       },
     };
@@ -200,11 +203,12 @@ export async function startScoutPairingSession(input: {
       },
     });
 
-    const payload = runtime.qrPayload;
-    if (!payload) {
+    const advertised = runtime.qrPayload;
+    if (!advertised) {
       throw new Error("Scout did not produce a pairing QR payload.");
     }
 
+    const {payload} = runtime.openPairing();
     ready = true;
     emit({
       type: "pairing_ready",
@@ -243,17 +247,6 @@ export async function startScoutPairingSession(input: {
     relay?.stop();
     throw error;
   }
-}
-
-function freshPairingPayload(pairing: NonNullable<PairingRuntimeSnapshot["pairing"]>): PairingQrPayload {
-  return {
-    v: 1,
-    relay: pairing.relay,
-    ...(pairing.fallbackRelays?.length ? { fallbackRelays: pairing.fallbackRelays } : {}),
-    room: pairing.room,
-    publicKey: pairing.publicKey,
-    expiresAt: Date.now() + PAIRING_QR_TTL_MS,
-  };
 }
 
 function dedupeRelayUrls(relayUrls: string[]): string[] {

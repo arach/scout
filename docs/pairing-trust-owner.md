@@ -297,3 +297,9 @@ instrumentation fails. The negative controls use disposable mutated source
 copies, not production switches or edits to the checkout. The source census
 also tests a planted direct sink/default registration/adoption. It is an audit
 of the known persistence routes, not confinement of arbitrary filesystem code.
+
+## Explicit relay pairing
+
+New relay grants use a single-use, root/room/baseline-bound local opportunity.
+See [relay pairing opportunities](./relay-pairing-opportunities.md) for opening,
+expiry, cancellation, reconnect behavior and the limits of pairing revocation.
