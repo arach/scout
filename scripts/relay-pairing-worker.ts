@@ -46,6 +46,8 @@ const bridge = {
   onEvent: (fn: (e: unknown) => void) => {subscriptions++; bridgeEvents = fn; return () => {bridgeEvents = undefined;};},
 };
 let runtime: any, bridgePort = 0, workflowRoom: string | undefined;
+// The live-session baseline uses the production cutover before listeners.
+if (scenario === "live-revoke") { seed(); owner.migrateToCapsule("live-baseline-cutover"); }
 let connection: ReturnType<typeof connectToRelay>;
 if (scenario === "workflow") {
   bridgePort = await freePort();
@@ -111,7 +113,7 @@ async function denied(pattern: "XX" | "IK", keys = phone) {
 try {
   await Bun.sleep(40);
   if (scenario === "live-revoke") {
-    seed(); const current = await accepted("IK");
+    const current = await accepted("IK");
     const beforeDispatch = dispatches;
     current.data.length = 0;
     revoke(); // mutate returns only after its verified publication acknowledgement.

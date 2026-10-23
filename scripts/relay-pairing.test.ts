@@ -12,7 +12,7 @@ for (const flavor of ["web", "desktop"]) {
         cwd: process.cwd(), env: {...process.env, OPENSCOUT_PAIRING_HOME: root},
         stdin: "pipe", stdout: "pipe", stderr: "pipe",
       });
-      const timeout = setTimeout(() => child.kill(), 10_000);
+      const timeout = setTimeout(() => child.kill(), scenario === "live-revoke" ? 60_000 : 10_000);
       try {
         const output = (async () => {
           let text = "", changed = false;
@@ -50,7 +50,7 @@ for (const flavor of ["web", "desktop"]) {
         clearTimeout(timeout); child.kill(); await child.exited;
         rmSync(root, {recursive: true, force: true});
       }
-    }, 15_000);
+    }, 65_000);
   }
 }
 
