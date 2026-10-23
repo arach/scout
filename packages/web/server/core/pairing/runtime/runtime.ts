@@ -119,9 +119,14 @@ export async function startPairingRuntime(options?: {
   }
   function approvalPairing(action: "open" | "read" | "cancel", binding: PairingRequestBinding): LocalPairingOpportunity | null {
     let window = approvalWindows.get(binding.requestId);
+    // Cancel is terminal even if controller startup has not opened the window.
+    if (action === "cancel") {
+      spentApprovalRequests.add(binding.requestId);
+      if (window) closeApproval(window);
+      return null;
+    }
     if (window && window.publicKey !== binding.publicKey) throw new Error("Pairing request binding changed");
     if (!window && spentApprovalRequests.has(binding.requestId)) return null;
-    if (action === "cancel") { if (window) closeApproval(window); return null; }
     if (!window && action === "open") {
       if (approvalWindows.size >= 32) throw new Error("Too many pairing windows");
       const payload = Object.freeze({...qrPayload, room: crypto.randomUUID(), expiresAt: Date.now() + 300_000});

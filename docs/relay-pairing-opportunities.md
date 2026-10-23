@@ -160,6 +160,10 @@ its direct Noise channel. The server intercepts this before the application
 router and requires authenticated full-key equality with its own host identity.
 A paired phone key, claimed device ID, plaintext client, HTTP header or relayed
 RPC cannot open the opportunity. The QR control carries `open` or `cancel` and an optional cancellation ID.
+Cancellation marks the request ID spent even if its window has not opened yet.
+A delayed open cannot revive that ID within the same runtime. The HTTP route
+also keeps its denial recheck after controller startup.
+
 Request control carries `request-open`, `request-read` or `request-cancel`, a
 request ID and its optional expected full key. These are local composition
 inputs after host approval, never a grant accepted from a relayed RPC.

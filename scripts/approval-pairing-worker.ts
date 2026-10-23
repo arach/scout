@@ -358,6 +358,13 @@ try {
     const repeatBody = await repeat.json() as any;
     record({normalized: request.requesterPublicKey === key, prefixStatus: bad.status,
       notRedisclosed: repeatBody.token !== request.token});
+  } else if (scenario === "A-CANCEL-FIRST") {
+    const binding = {requestId: crypto.randomUUID(), publicKey: bytesToHex(intended.publicKey)};
+    const revision = owner.read().revision;
+    await requestLocalApprovalPairingOpportunity(bridgePort, "cancel", binding);
+    // Use the runtime control directly, without the HTTP route denial recheck.
+    const result = await requestLocalApprovalPairingOpportunity(bridgePort, "open", binding);
+    record({opened: Boolean(result && "payload" in result), noGrant: owner.read().revision === revision});
   } else if (scenario === "A-EXPIRY") {
     const request = await knock(); await approve(request); const invitation = await read(request); assert(invitation);
     const original = Date.now; Date.now = () => original() + 300001;
