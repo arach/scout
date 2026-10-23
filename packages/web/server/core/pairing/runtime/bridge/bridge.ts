@@ -55,8 +55,9 @@ export class Bridge {
   async createSession(
     adapterType: string,
     options?: Partial<AdapterConfig>,
+    beforeEffect?: () => void,
   ): Promise<Session> {
-    return this.registry.createSession(adapterType, options);
+    return this.registry.createSession(adapterType, options, beforeEffect);
   }
 
   /** Send a prompt to a session. */

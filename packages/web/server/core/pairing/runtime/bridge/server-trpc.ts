@@ -239,6 +239,7 @@ export function startBridgeServerTRPC(options: {
   }
   const ownPublicKeyHex = identity ? bytesToHex(identity.publicKey) : null;
   const domain = secure && identity ? transportDomainForBridge(bridge, bytesToHex(identity.publicKey)) : undefined;
+  const releaseDomain = domain?.retain();
   const activeTransports = new Set<SecureTransport>();
 
   // -------------------------------------------------------------------------
@@ -668,7 +669,7 @@ export function startBridgeServerTRPC(options: {
   // Bun.serve — combined HTTP + WebSocket
   // -------------------------------------------------------------------------
 
-  const server = Bun.serve<{ subscribeEvents: boolean }>({
+  const server = (() => { try { return Bun.serve<{ subscribeEvents: boolean }>({
     port,
 
     fetch(req, server) {
@@ -856,7 +857,7 @@ export function startBridgeServerTRPC(options: {
         }
       },
     },
-  });
+  }); } catch (error) { releaseDomain?.(); throw error; } })();
 
   const mode = secure ? "secure (Noise)" : "plaintext";
   const routerStatus = bridgeRouter ? "tRPC router loaded" : "legacy RPC fallback";
@@ -868,6 +869,7 @@ export function startBridgeServerTRPC(options: {
       for (const transport of activeTransports) transport.dispose();
       activeTransports.clear();
       server.stop(true);
+      releaseDomain?.();
     },
   };
 }

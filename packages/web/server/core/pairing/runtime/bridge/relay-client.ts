@@ -152,6 +152,7 @@ export function connectToRelay(
   const qrPayload = options.qrPayload
     ?? createQRPayload(identity.publicKey, eventRelayUrl, options.fallbackRelayUrls);
 
+  const releaseDomain = domain?.retain();
   const roomLabel = options.privateRoom ? "request-bound" : qrPayload.room;
   let ws: WebSocket | null = null;
   let eventUnsub: (() => void) | null = null;
@@ -626,6 +627,7 @@ export function connectToRelay(
   }
 
   function disconnect(): void {
+    releaseDomain?.();
     if (stopped) return;
     stopped = true;
 
@@ -656,7 +658,7 @@ export function connectToRelay(
     if (securePeers.size === 0) disconnect();
   }
 
-  connect();
+  try { connect(); } catch (error) { releaseDomain?.(); throw error; }
 
   return { qrPayload, disconnect, retire };
 }

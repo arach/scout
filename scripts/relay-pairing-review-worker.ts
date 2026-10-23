@@ -49,6 +49,7 @@ const relay = startRelay(port, {hostname: "127.0.0.1"});
 const relayURL = `ws://127.0.0.1:${port}`, httpURL = `http://127.0.0.1:${port}`;
 process.env.OPENSCOUT_PAIRING_PORT = String(bridgePort);
 writeFileSync(join(process.env.OPENSCOUT_PAIRING_HOME!, "config.json"), JSON.stringify({port: bridgePort, secure: true, sessions: []}));
+pairingTrustOwner().migrateToCapsule("registry-fixture-cutover");
 const { startPairingRuntime } = await import(pathToFileURL(resolve(base, "runtime.ts")).href);
 const carriers: WebSocket[] = [];
 const OriginalWebSocket = globalThis.WebSocket;
@@ -177,7 +178,9 @@ try {
     const secondWindow = await openWindow();
     const second = await connect(trusted, secondWindow.payload.room, "XX");
     const secondPaired = await probe(second), firstStillOnline = await probe(online);
-    record({secondPaired, firstStillOnline, firstClose: online.state.closed,
+    const reconnected = await connect(intended, await resolveRoom(), "IK");
+    const freshReconnectRPC = await probe(reconnected);
+    record({secondPaired, firstStillOnline, firstClose: online.state.closed, freshReconnectRPC,
       stableReconnectRoom: await resolveRoom() === initialRoom,
       manifestReconnectRoom: JSON.parse(second.data.find(text => text.includes("rpc-secret"))!).result.data.reconnectRoom,
       initialRoom, peers: owner.read().peers.length, windowClosed: !windowVisible});
@@ -194,14 +197,16 @@ try {
     const currentRPC = await probe(phone);
     const nextWindow = await openWindow();
     const survivesNextWindow = await probe(phone);
-    const nextPhone = await connect(trusted, nextWindow.payload.room, "XX");
+    const nextPhone = await connect(generateKeyPair(), nextWindow.payload.room, "XX");
     const nextPhonePaired = await probe(nextPhone);
     const carrier = carriers.find(socket => new URL(socket.url).searchParams.get("room") === opened.payload.room)!;
+    await observeUntil(() => phone.state.closed !== 0, 1000);
+    const authorityClose = phone.state.closed;
     const activeUntilEmpty = carrier.readyState === WebSocket.OPEN;
     phone.socket.close();
     const bridgeLeftAfterLastDevice = await observeUntil(() => carrier.readyState === WebSocket.CLOSED, 1000);
     record({untrustedClose: untrusted.state.closed, trustedNewConnectionClose: alreadyTrusted.state.closed,
-      currentRPC, survivesNextWindow, nextPhonePaired, activeUntilEmpty, bridgeLeftAfterLastDevice, windowClosed: !windowVisible});
+      currentRPC, survivesNextWindow, nextPhonePaired, authorityClose, activeUntilEmpty, bridgeLeftAfterLastDevice, windowClosed: !windowVisible});
   } else if (scenario === "T-QR-TRUSTED" || scenario === "T-QR-REGRANT") {
     grantTrusted();
     if (scenario === "T-QR-REGRANT") owner.mutate(owner.read().revision, crypto.randomUUID(), {type: "revoke", publicKey: trustedKey});

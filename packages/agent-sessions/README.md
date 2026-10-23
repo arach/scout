@@ -71,6 +71,14 @@ pending, creation rejects with `SessionRegistryError` code `CONFLICT` and does
 not construct an adapter. Close and shutdown join the owned metadata command;
 they do not leave a delayed harness start behind.
 
+Transport callers can pass a third argument, `beforeEffect: () => void`, to
+`createSession(adapterType, options, beforeEffect)`. The registry invokes this
+callback after branch discovery and before constructing the adapter. The callback
+must synchronously revalidate the caller's current authority. If the callback
+throws, no adapter is constructed or started. The callback is a trusted local
+function, not request data. The session package stores no transport identity and
+does not cancel work already accepted by an adapter.
+
 > `registry.decide()` resolves the adapter's pending approval. Call it *outside*
 > the `onEvent` broadcast loop (as above, via `queueMicrotask`) — deciding
 > synchronously while an approval event is still being broadcast can stall the

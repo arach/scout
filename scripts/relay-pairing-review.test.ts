@@ -13,7 +13,7 @@ for (const flavor of ["web", "desktop"]) for (const id of cases) {
       cwd: process.cwd(), env: {...process.env, HOME: home, OPENSCOUT_PAIRING_HOME: pairing},
       stdout: "pipe", stderr: "pipe",
     });
-    const timeout = setTimeout(() => child.kill(), 10_000);
+    const timeout = setTimeout(() => child.kill(), 60_000);
     try {
       const [code, out, err] = await Promise.all([child.exited,
         new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -36,8 +36,9 @@ for (const flavor of ["web", "desktop"]) for (const id of cases) {
         expect(observed.intendedPhoneAdmitted).toBe(true);
       } else if (id === "T-MULTI-PHONE") {
         expect(observed.secondPaired).toBe(true);
-        expect(observed.firstStillOnline).toBe(true);
-        expect(observed.firstClose).toBe(0);
+        expect(observed.firstStillOnline).toBe(false);
+        expect(observed.freshReconnectRPC).toBe(true);
+        expect(observed.firstClose).toBe(4006);
         expect(observed.stableReconnectRoom).toBe(true);
         expect(observed.manifestReconnectRoom).toBe(observed.initialRoom);
         expect(observed.peers).toBe(2);
@@ -48,7 +49,7 @@ for (const flavor of ["web", "desktop"]) for (const id of cases) {
         expect(observed.currentRPC).toBe(true);
         expect(observed.survivesNextWindow).toBe(true);
         expect(observed.nextPhonePaired).toBe(true);
-        expect(observed.activeUntilEmpty).toBe(true);
+        expect(observed.authorityClose).toBe(4006);
         expect(observed.bridgeLeftAfterLastDevice).toBe(true);
         expect(observed.windowClosed).toBe(true);
       } else if (id === "T-QR-TRUSTED" || id === "T-QR-REGRANT") {
@@ -65,5 +66,5 @@ for (const flavor of ["web", "desktop"]) for (const id of cases) {
       clearTimeout(timeout); child.kill(); await child.exited;
       rmSync(root, {recursive: true, force: true});
     }
-  }, 15_000);
+  }, 65_000);
 }

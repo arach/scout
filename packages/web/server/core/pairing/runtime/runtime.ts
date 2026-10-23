@@ -1,3 +1,4 @@
+import {disposeTransportDomainForBridge} from "@openscout/runtime/pairing-security/transport";
 import type { PairingRequestBinding, LocalApprovalPairingOpportunity } from "@openscout/runtime/pairing-local-socket";
 import { pairingTrustOwner, type PairingOpportunity } from "@openscout/runtime/pairing-security/trust-owner";
 import { homedir } from "node:os";
@@ -195,6 +196,7 @@ export async function startPairingRuntime(options?: {
   if (!primaryRelayUrl) {
     fileServer.stop();
     server.stop();
+    disposeTransportDomainForBridge(bridge);
     throw new Error("Pairing relay URL is not configured.");
   }
 
@@ -251,6 +253,7 @@ export async function startPairingRuntime(options?: {
     }
     fileServer.stop();
     server.stop();
+    disposeTransportDomainForBridge(bridge);
     throw error;
   }
 
@@ -268,6 +271,7 @@ export async function startPairingRuntime(options?: {
     cancelPairing,
     approvalPairing,
     async stop() {
+      disposeTransportDomainForBridge(bridge);
       cancelPairing();
       for (const window of approvalWindows.values()) { clearTimeout(window.timer); closeApproval(window); }
       approvalWindows.clear();
@@ -277,6 +281,7 @@ export async function startPairingRuntime(options?: {
       fileServer.stop();
       await bridge.shutdown();
       server.stop();
+    disposeTransportDomainForBridge(bridge);
     },
   };
 }

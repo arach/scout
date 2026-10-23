@@ -79,6 +79,7 @@ const liveTransports = new WeakMap<SecureTransport, LiveEntry>();
 const liveHandles = new WeakMap<object, LiveEntry>();
 const pilotBindings = new WeakMap<object, object>();
 const bridgeDomains = new WeakMap<object, TransportDomain>();
+const compositionBrand = Symbol.for("scout.transport.registry.composition/v1");
 export type TransportContext = {bridge?: object; transport?: SecureTransport; transportHandle?: object; pilotBinding?: object};
 
 /** Trusted bootstrap, not a wire context factory. This grants no paired identity. */
@@ -114,6 +115,13 @@ export class TransportDomain {
   private unobserve: () => void;
   private batchView?: TransportAuthorityView;
   private disposed = false;
+  private leases = 0;
+  /** Endpoints/retained carriers own explicit idempotent boot-domain leases. */
+  retain(): () => void {
+    if (this.disposed) throw Error("Transport domain disposed");
+    this.leases++; let released = false;
+    return () => { if (!released) { released = true; if (--this.leases === 0) this.dispose(); } };
+  }
   constructor(readonly bridge: object, readonly hostKey: string, readonly owner: PairingTrustOwner = pairingTrustOwner()) {
     this.rootId = owner.withTransportAuthority(v => v.rootId);
     this.unobserve = owner.observeTransportAuthority(view => this.reconcile(view));
@@ -200,14 +208,21 @@ export class TransportDomain {
     if (this.disposed) return; this.disposed = true;
     for (const e of this.entries) this.invalidate(e, 4003);
     clearInterval(this.timer); this.unobserve(); bridgeDomains.delete(this.bridge);
+    if ((this.bridge as any)[compositionBrand] === this) delete (this.bridge as any)[compositionBrand];
   }
 }
 export function transportDomainForBridge(bridge: object, hostKey: string, owner?: PairingTrustOwner): TransportDomain {
+  const loaded = (bridge as any)[compositionBrand];
+  if (loaded && !(loaded instanceof TransportDomain)) throw Error("Duplicate runtime transport registry");
   let domain = bridgeDomains.get(bridge);
-  if (!domain) {domain = new TransportDomain(bridge, hostKey, owner); bridgeDomains.set(bridge, domain);}
+  if (!domain) {domain = new TransportDomain(bridge, hostKey, owner); bridgeDomains.set(bridge, domain);
+    Object.defineProperty(bridge, compositionBrand, {value: domain, configurable: true});}
   if (domain.hostKey !== hostKey || (owner && domain.owner !== owner)) {domain.dispose(); throw Error("Transport domain composition mismatch");}
   return domain;
 }
+
+/** Trusted boot teardown, including retained rooms absent from window maps. */
+export function disposeTransportDomainForBridge(bridge: object): void { bridgeDomains.get(bridge)?.dispose(); }
 
 // ---------------------------------------------------------------------------
 // SecureTransport

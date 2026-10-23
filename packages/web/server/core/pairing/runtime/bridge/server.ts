@@ -178,10 +178,11 @@ export function startBridgeServer(
   }
 
   const domain = secure && identity ? transportDomainForBridge(bridge, bytesToHex(identity.publicKey)) : undefined;
+  const releaseDomain = domain?.retain();
   const activeTransports = new Set<SecureTransport>();
   // Per-socket state, keyed by the raw ServerWebSocket reference.
   const socketState = new WeakMap<ServerWebSocket<unknown>, SocketState>();
-  const server = Bun.serve({
+  const server = (() => { try { return Bun.serve({
     port,
     fetch(req, server) {
       const upgraded = server.upgrade(req);
@@ -327,7 +328,7 @@ export function startBridgeServer(
         state?.unsub?.();
       },
     },
-  });
+  }); } catch (error) { releaseDomain?.(); throw error; } })();
 
   const mode = secure ? "secure (Noise)" : "plaintext";
   console.log(`[bridge] listening on ws://localhost:${port} (${mode})`);
@@ -337,6 +338,7 @@ export function startBridgeServer(
       for (const transport of activeTransports) transport.dispose();
       activeTransports.clear();
       server.stop(true);
+      releaseDomain?.();
     },
   };
 }
@@ -386,7 +388,7 @@ async function handleRPCInner(
           name: p.name,
           cwd: p.cwd,
           options: p.options,
-        });
+        }, () => {requireTransportContext(rpcContext);});
         return { id: req.id, result: session };
       }
 
@@ -569,7 +571,7 @@ async function handleRPCInner(
           name,
           cwd,
           options: { resume: sessionFilename },
-        });
+        }, () => {requireTransportContext(rpcContext);});
         return { id: req.id, result: session };
       }
 
@@ -631,7 +633,7 @@ async function handleRPCInner(
         const session = await bridge.createSession(adapterType, {
           name,
           cwd: projectPath,
-        });
+        }, () => {requireTransportContext(rpcContext);});
         return { id: req.id, result: session };
       }
 

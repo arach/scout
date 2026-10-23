@@ -47,7 +47,8 @@ const bridge = {
 };
 let runtime: any, bridgePort = 0, workflowRoom: string | undefined;
 // The live-session baseline uses the production cutover before listeners.
-if (scenario === "live-revoke") { seed(); owner.migrateToCapsule("live-baseline-cutover"); }
+if (scenario === "live-revoke") seed();
+owner.migrateToCapsule("live-baseline-cutover");
 let connection: ReturnType<typeof connectToRelay>;
 if (scenario === "workflow") {
   bridgePort = await freePort();
@@ -132,13 +133,13 @@ try {
       phoneClose: current.state.closed, data: current.data}));
   } else if (scenario === "revoked") {
     seed(); const first = await accepted(); revoke();
-    // Already-connected revocation is the separate registry change. This fix
-    // must not let an unadmitted reconnect evict this still-connected peer.
+    // The registry now invalidates the admitted old handle after revoke. An
+    // unadmitted retry must remain denied and cannot resurrect either handle.
     const retry = await connect("IK"); await Bun.sleep(60);
     const retrusted = owner.read().peers.some(p => p.publicKey === key);
     console.log(JSON.stringify({flavor, scenario, retrusted, phoneClose: retry.state.closed, data: retry.data}));
     assert.equal(retrusted, false, "revoked phone was re-trusted by remembered-room reconnect");
-    assert.equal(retry.state.closed, 4003); assert.equal(retry.data.length, 0); assert.equal(first.state.closed, 0);
+    assert.equal(retry.state.closed, 4003); assert.equal(retry.data.length, 0); assert.equal(first.state.closed, 4003);
     await denied("XX");
   } else if (scenario === "lifecycle") {
     await denied("XX");

@@ -75,3 +75,20 @@ test("bounded pending controllers fail closed and are released on dispose",()=>s
  peers[0].dispose();expect(()=>new SecureTransport({send(){}},"responder",f.host,{}, {domain:f.domain})).not.toThrow();
  }finally{for(const p of peers)p.dispose();}
 }),60_000);
+
+test("one readAuthority and one managed gate per synchronous decision",()=>setup(f=>{
+ let holder:object|null=null, gates=0, views=0;
+ const unregister=f.owner.register({id:"live-decision-probe",currentHolder:()=>holder,withGate(_root:any,body:any){
+  if(holder)throw Error("nested managed gate");gates++;holder={};try{return body(holder);}finally{holder=null;}
+ }});
+ try {
+  f.owner.mutate(f.owner.read().revision,"manage-decision",{type:"manage"});
+  const original=f.owner.readAuthority.bind(f.owner);
+  f.owner.readAuthority=(ctx:any)=>{views++;return original(ctx);};
+  f.owner.read=()=>{throw Error("separate read forbidden");};
+  f.owner.pairingAuthorityStamp=()=>{throw Error("separate stamp forbidden");};
+  views=0;gates=0;
+  f.owner.withTransportAuthority((v:any)=>{expect(holder).not.toBeNull();expect(v.has(f.key)).toBe(true);});
+  expect(views).toBe(1);expect(gates).toBe(1);expect(holder).toBeNull();
+ }finally{unregister();}
+}),60_000);

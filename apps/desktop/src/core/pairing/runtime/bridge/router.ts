@@ -635,7 +635,7 @@ const sessionRouter = t.router({
         name: input.name,
         cwd: input.cwd,
         options: input.options,
-      });
+      }, () => {requireTransportContext(ctx);});
     }),
 
   list: procedure.query(({ ctx }) => {
@@ -701,7 +701,7 @@ const sessionRouter = t.router({
         name,
         cwd,
         options: { resume: sessionFilename },
-      });
+      }, () => {requireTransportContext(ctx);});
     }),
 });
 
@@ -1299,7 +1299,7 @@ const workspaceRouter = t.router({
       return ctx.bridge.createSession(adapterType, {
         name,
         cwd: projectPath,
-      });
+      }, () => {requireTransportContext(ctx);});
     }),
 });
 
