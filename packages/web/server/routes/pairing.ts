@@ -1,3 +1,4 @@
+import { PairingTrustError } from "@openscout/runtime/pairing-security/trust-owner";
 import type { Hono } from "hono";
 import {
   controlScoutWebPairingService,
@@ -279,10 +280,15 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
   });
   app.delete("/api/pairing/peers/:fingerprint", async (c) => {
     const fingerprint = c.req.param("fingerprint");
-    const removed = removeScoutPairingTrustedPeer(fingerprint);
-    if (!removed) {
-      return c.json({ error: "Peer not found" }, 404);
+    try {
+      const removed = removeScoutPairingTrustedPeer(fingerprint);
+      if (!removed) return c.json({ error: "Peer not found" }, 404);
+      return c.json({ ok: true });
+    } catch (error) {
+      if (error instanceof PairingTrustError && error.code === "ambiguous_prefix") {
+        return c.json({ error: "Peer prefix is ambiguous; use the full public key" }, 409);
+      }
+      return c.json({ error: "Pairing trust store is unavailable" }, 503);
     }
-    return c.json({ ok: true });
   });
 }

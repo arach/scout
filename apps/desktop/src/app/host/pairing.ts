@@ -1,3 +1,4 @@
+import { pairingTrustOwner } from "@openscout/runtime/pairing-security/trust-owner";
 import { spawn } from "node:child_process";
 import {
   existsSync,
@@ -8,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   extractPendingApprovalRequests,
@@ -597,7 +598,7 @@ function readScoutPairingTrustedPeerCount(trustedPeersPath: string): number {
   }
 
   try {
-    const payload = JSON.parse(readFileSync(trustedPeersPath, "utf8"));
+    const payload = pairingTrustOwner(dirname(trustedPeersPath)).read().peers;
     return Array.isArray(payload) ? payload.length : 0;
   } catch {
     return 0;
@@ -628,7 +629,7 @@ function readScoutPairingTrustedPeers(trustedPeersPath: string): ScoutPairingTru
   }
 
   try {
-    const payload = JSON.parse(readFileSync(trustedPeersPath, "utf8")) as ScoutPairingTrustedPeerRecord[];
+    const payload = pairingTrustOwner(dirname(trustedPeersPath)).read().peers;
     if (!Array.isArray(payload)) {
       return [];
     }
