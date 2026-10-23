@@ -137,7 +137,15 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
       const invitation = request.status === "approved"
         ? await controlScoutWebApprovalPairing("read", request, currentDirectory).catch(() => null)
         : null;
-      const requestLocation = invitation ? pickPairingQrLocation(JSON.stringify(invitation.payload), route) : null;
+      // Spent is known only within the controller's current lifetime. Do not
+      // touch this request into an endless approved poll or persist that hint.
+      if (invitation && "status" in invitation && invitation.status === "spent") {
+        return wantsJson
+          ? c.json({ status: "expired", token }, 410)
+          : c.text("Pairing request expired.", 410);
+      }
+      const requestLocation = invitation && "payload" in invitation
+        ? pickPairingQrLocation(JSON.stringify(invitation.payload), route) : null;
       if (requestLocation && request.status === "approved") {
         if (!pendingPairRequests.fulfill(token, "approved")) {
           // A consume that cannot win the shared CAS fails closed without
@@ -261,7 +269,7 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
     }
     try {
       const window = await controlScoutWebApprovalPairing(decision === "approve" ? "open" : "cancel", req, currentDirectory);
-      if (decision === "approve" && !window) {
+      if (decision === "approve" && (!window || "status" in window)) {
         return c.json({ error: "Pairing request window closed; make a new request" }, 409);
       }
       // Approval can wait for controller startup while another instance denies.
