@@ -22,7 +22,7 @@ import {
   type HandshakePattern,
   type Role,
 } from "./noise.ts";
-import { saveTrustedPeer, loadTrustedPeers, bytesToHex } from "./identity.ts";
+import { saveTrustedPeer, refreshTrustedPeer, loadTrustedPeers, bytesToHex } from "./identity.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -192,12 +192,8 @@ export class SecureTransport {
 
     if (trustedPeer) {
       const now = new Date().toISOString();
-      saveTrustedPeer({
-        ...existingPeer,
-        publicKey: remotePublicKeyHex,
-        pairedAt: existingPeer?.pairedAt ?? now,
-        lastSeen: now,
-      });
+      if (wasTrustedPeer) refreshTrustedPeer(remotePublicKeyHex, now);
+      else saveTrustedPeer({ publicKey: remotePublicKeyHex, pairedAt: now, lastSeen: now });
     }
 
     this.events.onReady?.(this.session.remoteStaticKey, {

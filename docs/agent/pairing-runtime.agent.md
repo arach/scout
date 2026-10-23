@@ -265,3 +265,12 @@ whole registry.
 Run `bun run test:memory` for connection timeout/admission/coalescing, shared
 watch lifecycle, MCP disconnect cancellation, and scoped flight polling tests.
 These test files also run through the existing `test:unit` checkpoint suite.
+
+## Canonical trust persistence
+
+Runtime and retained desktop trust saves, reconnect refreshes and web peer
+revocation use the runtime pairing trust owner. Its revision CAS, persisted
+mutation outcomes, generation/projection protocol and dormant typed managed
+adapter are specified in [pairing-trust-owner.md](../pairing-trust-owner.md).
+Ambiguous display-prefix DELETE refuses with 409; a persisted revoke names the
+full key. Pairing trust is not operator-decision entitlement.

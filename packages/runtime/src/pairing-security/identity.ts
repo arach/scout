@@ -8,6 +8,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { generateKeyPair, type KeyPair } from "./noise.js";
+import { randomUUID } from "node:crypto";
+import { pairingTrustOwner, type TrustedPeer } from "./trust-owner.js";
+export type { TrustedPeer } from "./trust-owner.js";
 import { resolveOpenScoutPairingHome } from "../support-paths.js";
 
 // ---------------------------------------------------------------------------
@@ -21,9 +24,6 @@ function pairingDir(): string {
 }
 function identityFile(): string {
   return join(pairingDir(), "identity.json");
-}
-function trustedPeersFile(): string {
-  return join(pairingDir(), "trusted-peers.json");
 }
 
 // ---------------------------------------------------------------------------
@@ -100,24 +100,19 @@ function createAndSaveIdentity(): KeyPair {
 // Trusted peers — phones that have completed a handshake
 // ---------------------------------------------------------------------------
 
-export interface TrustedPeer {
-  publicKey: string;   // hex
-  name?: string;
-  pairedAt: string;    // ISO-8601
-  lastSeen?: string;
-}
-
 export function loadTrustedPeers(): Map<string, TrustedPeer> {
-  if (!existsSync(trustedPeersFile())) return new Map();
-  const data: TrustedPeer[] = JSON.parse(readFileSync(trustedPeersFile(), "utf8"));
-  return new Map(data.map((p) => [p.publicKey, p]));
+  return new Map(pairingTrustOwner().read().peers.map(peer => [peer.publicKey, peer]));
 }
 
+/** Explicit pairing grant. Concurrent mutation refuses rather than losing data. */
 export function saveTrustedPeer(peer: TrustedPeer): void {
-  const peers = loadTrustedPeers();
-  peers.set(peer.publicKey, peer);
-  mkdirSync(pairingDir(), { recursive: true });
-  writeFileSync(trustedPeersFile(), JSON.stringify([...peers.values()], null, 2), { mode: 0o600 });
+  const owner = pairingTrustOwner(), revision = owner.read().revision;
+  owner.mutate(revision, randomUUID(), {type: "grant", peer});
+}
+
+/** Reconnect validates membership, then best-effort updates display-only lastSeen. */
+export function refreshTrustedPeer(publicKey: string, lastSeen: string): void {
+  pairingTrustOwner().refresh(publicKey, lastSeen);
 }
 
 export function isTrustedPeer(publicKeyHex: string): boolean {

@@ -1,3 +1,4 @@
+import { pairingTrustOwner } from "./pairing-security/trust-owner.js";
 /**
  * Sealed push content: the Mac encrypts an agent notification for one paired
  * phone so it can ride inside the push. The relay and APNs carry it without
@@ -162,7 +163,7 @@ export function findTrustedPhoneKeyForDevice(
   const path = join(pairingDir, "trusted-peers.json");
   if (!existsSync(path)) return null;
   try {
-    const peers = JSON.parse(readFileSync(path, "utf8")) as Array<{ publicKey?: unknown }>;
+    const peers = pairingTrustOwner(pairingDir).read().peers;
     const matches = peers
       .map((peer) => (typeof peer.publicKey === "string" ? peer.publicKey.toLowerCase() : ""))
       .filter((key) => key.startsWith(prefix));

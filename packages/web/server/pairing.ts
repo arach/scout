@@ -1,3 +1,4 @@
+import { pairingTrustOwner } from "@openscout/runtime/pairing-security/trust-owner";
 import { spawn } from "node:child_process";
 import {
   closeSync,
@@ -581,7 +582,7 @@ function readScoutPairingTrustedPeerCount(trustedPeersPath: string): number {
   }
 
   try {
-    const payload = JSON.parse(readFileSync(trustedPeersPath, "utf8"));
+    const payload = pairingTrustOwner(dirname(trustedPeersPath)).read().peers;
     return Array.isArray(payload) ? payload.length : 0;
   } catch {
     return 0;
@@ -612,7 +613,7 @@ function readScoutPairingTrustedPeers(trustedPeersPath: string): ScoutPairingTru
   }
 
   try {
-    const payload = JSON.parse(readFileSync(trustedPeersPath, "utf8")) as ScoutPairingTrustedPeerRecord[];
+    const payload = pairingTrustOwner(dirname(trustedPeersPath)).read().peers;
     if (!Array.isArray(payload)) {
       return [];
     }
@@ -643,31 +644,7 @@ function readScoutPairingTrustedPeers(trustedPeersPath: string): ScoutPairingTru
 }
 
 export function removeScoutPairingTrustedPeer(fingerprint: string): boolean {
-  const paths = resolveScoutPairingPaths();
-  if (!existsSync(paths.trustedPeersPath)) {
-    return false;
-  }
-
-  try {
-    const payload = JSON.parse(readFileSync(paths.trustedPeersPath, "utf8")) as ScoutPairingTrustedPeerRecord[];
-    if (!Array.isArray(payload)) {
-      return false;
-    }
-
-    const before = payload.length;
-    const filtered = payload.filter(
-      (entry) => typeof entry?.publicKey === "string" && entry.publicKey.slice(0, 16) !== fingerprint,
-    );
-
-    if (filtered.length === before) {
-      return false;
-    }
-
-    writeFileSync(paths.trustedPeersPath, JSON.stringify(filtered, null, 2), "utf8");
-    return true;
-  } catch {
-    return false;
-  }
+  return pairingTrustOwner(resolveScoutPairingPaths().rootDir).revokePrefix(fingerprint);
 }
 
 /** How many trailing bytes of the bridge log are ever read for the tail view. */
