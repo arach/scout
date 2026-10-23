@@ -441,6 +441,7 @@ export class PairingTrustOwner {
   /** Verified decision baseline for a trusted workflow crossing process startup.
    * This is not a grant; only a matching live opportunity can admit a peer. */
   pairingAuthorityStamp(): string {
+    this.root(true);
     return this.operation(undefined, root => this.pairingOpportunityStamp(root!, this.readyState(root!)));
   }
   private pairingOpportunityStamp(root: PairingRootIdentity, state: State): string {
