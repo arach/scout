@@ -1,13 +1,14 @@
+import { reservations, clearEscapedSetupPin, setupPinEscaped, type ApparatusControl } from "./reservations.ts";
 /** Product-free numeric backend spike; corrected in-tree reclaim instrument is shared. */
 import { spawn } from "node:child_process";
 import { closeSync, fstatSync, mkdirSync, mkdtempSync, readSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pair, flags, clearCloseOnExecForNegativeControl } from "./pair.ts";
-import { createExtensionChannelCandidate, ChannelIoError } from "../../packages/runtime/src/extension-channel-io.ts";
+import { createExtensionChannelCandidate, prepareExtensionChannelCodeForWitness, ChannelIoError } from "../../packages/runtime/src/extension-channel-io.ts";
 import { checkReclaimedDescriptors, type DescriptorForm, type WitnessEvent } from "../../packages/cli/src/cli/extension-descriptor-witness.ts";
 import { INHERITED_DESCRIPTOR_LAYOUTS, MAX_INHERITED_DESCRIPTOR_SLOT } from "../../packages/runtime/src/inherited-descriptors.ts";
-export type AsyncWitnessOptions = { io?: "async"; mode?: "normal" | "timeout" | "cancel" | "crash" | "read-timeout" | "read-cancel" };
+export type AsyncWitnessOptions = { apparatus?: ApparatusControl; io?: "async"; mode?: "normal" | "timeout" | "cancel" | "crash" | "read-timeout" | "read-cancel" };
 type AnyFault = Fault | "cancel-double-close";
 type Pair = ReturnType<typeof pair> | ReturnType<typeof createExtensionChannelCandidate>;
 
@@ -19,7 +20,7 @@ function identity(fd: number) {
   try { const s = fstatSync(fd); return { dev: s.dev, ino: s.ino, file: s.isFile(), fifo: s.isFIFO(), socket: s.isSocket() }; } catch { return null; }
 }
 function same(fd: number, expected: ReturnType<typeof identity>) { return expected !== null && JSON.stringify(identity(fd)) === JSON.stringify(expected); }
-async function gc() { for (let n = 0; n < 8; n++) { Bun.gc(true); await Bun.sleep(5); } }
+async function gc() { for (let n = 0; n < 8; n++) { await Bun.sleep(5); Bun.gc(true); } }
 /** Keep the entire spawn frame out of the reclaim caller's stack. A weak
  * reference is the only subprocess observation allowed to escape this helper. */
 async function exchange(input: {
@@ -87,13 +88,17 @@ async function exchange(input: {
       const reused = [channel.parent.fd].filter(fd => previous.includes(fd));
       if (!reused.length) throw Error("second spawn did not reuse a former descriptor number");
       event({ event: "second-spawn-reuse", reused });
-      if (fault === "second-spawn-close") closeSync(reused[0]!);
+      if (fault === "second-spawn-close" || options?.apparatus === "reservation-stale-close") {
+        closeSync(reused[0]!);
+        if(options?.apparatus === "reservation-stale-close") event({event:"reservation-stale-close",iteration,fd:reused[0]});
+      }
     }
     await gc();
     if (!same(channel.parent.fd, expected[0]!)) throw Error("replacement spawn descriptor lost");
     event({ event: "live-copy-survived", iteration, parent: channel.parent.fd, gcRounds: 8 });
+    reservations!.audit();
     // The mapping source's reclaimed number is challenged while the child is active.
-    await checkReclaimedDescriptors({ former: [ports[1]!], directory, emit: e => event({ iteration, phase: "source-close", ...e }) });
+    await checkReclaimedDescriptors({ former: [ports[1]!], directory, victims: reservations!.victims([ports[1]!]), reserveFormerAll: reservations!.handoff, audit: ()=>reservations!.audit(), emit: e => event({ iteration, phase: "source-close", ...e }) });
     const until = Date.now() + 3000;
     while (!output.includes("\n") && child.exitCode === null && Date.now() < until) await Bun.sleep(5);
     const mapped = output.split("\n").filter(Boolean).map(line => JSON.parse(line)).find(e => e.event === "mapped");
@@ -174,9 +179,28 @@ async function exchange(input: {
 async function exchanges(home: string, form: DescriptorForm, event: (e: WitnessEvent) => void, fault?: AnyFault, options?: AsyncWitnessOptions, observe?: (native: object) => WeakRef<object>) {
   let previous: number[] = [];
   const pending: Array<{iteration: number; ref: WeakRef<object>}> = [];
+  // Negative-control seed guarantees a live input for the setup-pin helper.
+  // It is removed IN that helper; only an escaped helper pin remains afterward.
+  const controlSeed: {native?:object} = {};
+  const measured = options?.apparatus==="retained-setup-pin" && observe ? (native:object)=>{
+    const ref=observe(native);
+    if(options?.apparatus==="retained-setup-pin" && pending.length===0) controlSeed.native=native;
+    return ref;
+  } : observe;
   // Eight EOF exchanges plus an independent reap-before-parent-close intervention.
   for (let iteration = 0; iteration < 9; iteration++) {
-    const reapFirst = iteration === 8, channel = options?.io === "async" ? createExtensionChannelCandidate(form) : pair(form === "credential");
+    const reapFirst = iteration === 8;
+    const channel = reservations!.allocate(()=>options?.io === "async" ? createExtensionChannelCandidate(form) : pair(form === "credential"),
+      pending.map(entry=>entry.ref),iteration,event,options?.apparatus,()=>{
+        if(options?.apparatus==="retained-setup-pin" && iteration===1) {
+          if(!controlSeed.native) throw Error("channel reservation control setup failed");
+          controlSeed.native=undefined;
+          event({event:"setup-control-seed-cleared",iteration});
+        }
+      });
+    event({event:"setup-frame-unwound",iteration,pinCleared:!setupPinEscaped()});
+    const restoreClose=reservations!.observeClose(channel,event,options?.apparatus);
+    reservations!.verifyGuardFlags(flags);
     const ports = [channel.parent.fd, channel.child.fd], expected = ports.map(identity);
     const directory = join(home, String(iteration)); mkdirSync(directory);
     let handedOff = false;
@@ -185,15 +209,16 @@ async function exchanges(home: string, form: DescriptorForm, event: (e: WitnessE
       if (ports.some(fd => fd <= MAX_INHERITED_DESCRIPTOR_SLOT || flags(fd) !== 1)) throw Error("CLOEXEC copy discipline failed");
       event({ event: "copy-discipline", iteration, ports, flags: ports.map(flags), ceiling: MAX_INHERITED_DESCRIPTOR_SLOT });
       if ("nonblocking" in channel && channel.nonblocking() !== 1) throw Error("parent endpoint was not nonblocking");
-      const ref = await exchange({form, iteration, channel, expected, previous, home, directory, event, fault, options, observe});
+      const ref = await exchange({form, iteration, channel, expected, previous, home, directory, event, fault, options, observe:measured});
       pending.push({iteration, ref});
       // Return the last runtime-owned endpoint STILL OPEN. The entire spawn and
       // loop stack has unwound before its native collection is required below.
-      if (reapFirst) { handedOff = true; return {pending, channel, ports, expected}; }
+      if (reapFirst) { handedOff = true; return {pending, channel, ports, expected, restoreClose}; }
       const reclaimed = join(directory, "parent"); mkdirSync(reclaimed);
-      await checkReclaimedDescriptors({ former: fault === "cancel-double-close" ? [ports[0]!] : ports, directory: reclaimed, staleClose: fault === "stale-second-close" || fault === "cancel-double-close", emit: e => event({ iteration, phase: "parent-close", ...e }) });
+      await checkReclaimedDescriptors({ former: fault === "cancel-double-close" ? [ports[0]!] : ports, directory: reclaimed, victims: reservations!.victims(ports), reserveFormerAll: reservations!.handoff, audit: ()=>reservations!.audit(), staleClose: fault === "stale-second-close" || fault === "cancel-double-close", emit: e => event({ iteration, phase: "parent-close", ...e }) });
       event({event: "exchange", iteration, mode: options?.mode ?? (fault === "cancel-double-close" ? "cancel" : "eof"), parent: ports[0], source: ports[1], code: 0});
     } finally {
+      if(!handedOff) restoreClose();
       // Faults run only in isolated processes. Never close a recycled number.
       if (!handedOff && same(channel.parent.fd, expected[0]!)) channel.parent.close();
       if (same(channel.child.fd, expected[1]!)) channel.child.close();
@@ -208,12 +233,16 @@ export async function numericWitness(form: DescriptorForm, emit: (e: WitnessEven
   const home = mkdtempSync(join(tmpdir(), "scout-numeric-"));
   const event = (e: WitnessEvent) => emit({ io: options?.io ?? "blocking-spike", mode: options?.mode ?? "normal", form, target: INHERITED_DESCRIPTOR_LAYOUTS.extensionApi2[form], ...e });
   let last: Awaited<ReturnType<typeof exchanges>> | undefined;
+  let success=false;
+  if(!reservations) throw Error("numeric spike requires descriptor reservations");
+  reservations.begin(event);
   // Polling WeakRef.deref can itself keep the target alive until the end of a
   // job. The async witness observes collection without touching its targets.
   const tracker = {seen: new Set<WeakRef<object>>(), registry: null as FinalizationRegistry<WeakRef<object>> | null};
   tracker.registry = new FinalizationRegistry(ref => tracker.seen.add(ref));
   const observe = (native: object) => { const ref = new WeakRef(native); tracker.registry!.register(native, ref); return ref; };
   try {
+    reservations.prepare(prepareExtensionChannelCodeForWitness,flags,event,options?.apparatus);
     last = await exchanges(home, form, event, fault, options, options?.io === "async" ? observe : undefined);
     if (fault === "finalizer-close") closeSync(last.channel.parent.fd);
     // Reclaim the numeric SOURCE before collecting the last native subprocess;
@@ -221,7 +250,7 @@ export async function numericWitness(form: DescriptorForm, emit: (e: WitnessEven
     const sourceVictim = join(home, "last-source"); mkdirSync(sourceVictim);
     let collectionRounds = 0;
     try {
-      await checkReclaimedDescriptors({former: [last.ports[1]!], directory: sourceVictim, collected: () => last!.pending.every(entry => options?.io === "async" ? tracker.seen.has(entry.ref) : entry.ref.deref() === undefined), emit: e => {
+      await checkReclaimedDescriptors({former: [last.ports[1]!], directory: sourceVictim, victims: reservations.victims([last.ports[1]!]), reserveFormerAll: reservations.handoff, collected: () => last!.pending.every(entry => options?.io === "async" ? tracker.seen.has(entry.ref) : entry.ref.deref() === undefined), emit: e => {
         if (e.event === "collection-observed") collectionRounds = e.gcRounds as number;
         event({phase: "reap-first-source-victim", ...e});
       }});
@@ -245,20 +274,23 @@ export async function numericWitness(form: DescriptorForm, emit: (e: WitnessEven
     event({event: "reap-before-close-survived", iteration: 8, parent: last.ports[0], gcRounds: collectionRounds});
     last.channel.parent.close();
     const reclaimed = join(home, "last-parent"); mkdirSync(reclaimed);
-    await checkReclaimedDescriptors({former: last.ports, directory: reclaimed, emit: e => event({iteration: 8, phase: "parent-close", ...e})});
+    await checkReclaimedDescriptors({former: last.ports, directory: reclaimed, victims: reservations.victims(last.ports), reserveFormerAll: reservations.handoff, audit: ()=>reservations!.audit(), emit: e => event({iteration: 8, phase: "parent-close", ...e})});
     event({event: "exchange", iteration: 8, mode: "reap-first", parent: last.ports[0], source: last.ports[1], code: 0});
     const final = join(home, "final"); mkdirSync(final);
-    await checkReclaimedDescriptors({former: last.ports, directory: final, emit: e => event({phase: "all-native-finalized", ...e})});
+    await checkReclaimedDescriptors({former: last.ports, directory: final, victims: reservations.victims(last.ports), reserveFormerAll: reservations.handoff, audit: ()=>reservations!.audit(), emit: e => event({phase: "all-native-finalized", ...e})});
+    success=true;
     event({event: "complete", eofExchanges: options?.mode && options.mode !== "normal" || fault === "cancel-double-close" ? 0 : 8, modeExchanges: 8, reapFirstExchanges: 1, reuse: true});
   } finally {
+    last?.restoreClose();
     if (last && same(last.channel.parent.fd, last.expected[0]!)) last.channel.parent.close();
+    clearEscapedSetupPin();reservations.end(success);
     retainedForNegativeControl = undefined;
     rmSync(home, {recursive: true, force: true});
   }
 }
 if (import.meta.main) {
   const form = process.argv[2] as DescriptorForm, fault = (process.argv[3] === "none" ? undefined : process.argv[3]) as AnyFault | undefined;
-  const options: AsyncWitnessOptions | undefined = process.argv[4] === "async" ? {io: "async", mode: process.argv[5] as AsyncWitnessOptions["mode"]} : undefined;
+  const options: AsyncWitnessOptions | undefined = process.argv[4] === "async" ? {io: "async", mode: process.argv[5] as AsyncWitnessOptions["mode"], apparatus: process.argv[6] as ApparatusControl | undefined} : undefined;
   if (form !== "context" && form !== "credential") throw Error("choose context or credential");
   console.log(JSON.stringify({ event: "host", platform: process.platform, arch: process.arch, version: Bun.version, revision: Bun.revision, requestedDfgJit: process.env.BUN_JSC_useDFGJIT ?? "default" }));
   try { await numericWitness(form, e => console.log(JSON.stringify(e)), fault, options); }

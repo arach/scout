@@ -119,3 +119,17 @@ test("checkpoint uses the fixed expected ledger rather than deriving approval fr
   const count=readFenceInventory(process.cwd()).size;
   expect(verifyFenceInventory(`Sync exec fence passed (${count} allowlisted symbol/file pairs).`)).toBe(count);
 });
+
+test("preloaded proof tests select the test command, never the package test script",async()=>{
+  const root=mkdtempSync(join(tmpdir(),"checkpoint-preload-"));
+  try {
+    writeFileSync(join(root,"package.json"),JSON.stringify({scripts:{test:"echo WRONG_PACKAGE_SCRIPT; exit 9"}}));
+    writeFileSync(join(root,"preload.ts"),"globalThis.__checkpointPreloaded=true;");
+    writeFileSync(join(root,"selected.test.ts"),"import {test,expect} from 'bun:test'; test('explicit-preload-selection',()=>expect(globalThis.__checkpointPreloaded).toBe(true));");
+    writeFileSync(join(root,"unselected.test.ts"),"throw Error('WRONG_UNSELECTED_FILE');");
+    const child=Bun.spawn([process.execPath,"test","--preload","./preload.ts","./selected.test.ts"],{cwd:root,env:{...process.env,CLAUDECODE:undefined,FORCE_COLOR:undefined},stdout:"pipe",stderr:"pipe"});
+    const [code,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
+    expect(code).toBe(0);expect(out+err).toContain("explicit-preload-selection");
+    expect(out+err).not.toContain("WRONG_");expect(out+err).toMatch(/1 pass/);
+  }finally{rmSync(root,{recursive:true,force:true});}
+});

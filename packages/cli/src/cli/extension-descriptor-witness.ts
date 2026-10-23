@@ -6,14 +6,15 @@ import { join } from "node:path";
 import type { Duplex, Writable } from "node:stream";
 import { INHERITED_DESCRIPTOR_LAYOUTS, MAX_INHERITED_DESCRIPTOR_SLOT } from "@openscout/runtime/inherited-descriptors";
 
-type Identity = { dev: number; ino: number; file: boolean; socket: boolean; fifo: boolean };
+export type ReclaimIdentity = { dev: number; ino: number; file: boolean; socket: boolean; fifo: boolean };
+export type ReclaimVictim = {fd:number; identity:ReclaimIdentity};
 export type DescriptorForm = "context" | "credential";
 export type WitnessEvent = Record<string, unknown>;
-function identity(fd: number): Identity | null {
+function identity(fd: number): ReclaimIdentity | null {
   try { const s = fstatSync(fd); return { dev: s.dev, ino: s.ino, file: s.isFile(), socket: s.isSocket(), fifo: s.isFIFO() }; }
   catch { return null; }
 }
-function same(a: Identity | null, b: Identity | null) {
+function same(a: ReclaimIdentity | null, b: ReclaimIdentity | null) {
   return a !== null && b !== null && a.dev === b.dev && a.ino === b.ino && a.file === b.file && a.socket === b.socket && a.fifo === b.fifo;
 }
 
@@ -22,11 +23,17 @@ export async function checkReclaimedDescriptors(input: {
   former: number[]; directory: string; emit?: (event: WitnessEvent) => void; staleClose?: boolean;
   /** Test-control ownership handoff, only AFTER every reclaim/GC identity check passes. */
   reserveFormer?: (fd: number) => void;
+  /** Fresh AFTER-close victims owned by the reservation scaffold, borrowed here. */
+  victims?: readonly ReclaimVictim[];
+  reserveFormerAll?: (victims: ReclaimVictim[]) => void;
+  audit?: () => void;
   // Optional bounded finalizer observation: keep the reclaimed victims OPEN
   // until collection is observed, rather than assuming GC rounds imply it.
   collected?: () => boolean;
 }) {
-  const files: Array<{ fd: number; identity: Identity }> = [];
+  const borrowed = new Set(input.victims?.map(file=>file.fd));
+  const files: ReclaimVictim[] = [...input.victims ?? []];
+  if(files.some(file=>!file.identity.file || !same(file.identity,identity(file.fd)))) throw Error("former pipe number was not reclaimed");
   try {
     const target = Math.max(0, ...input.former);
     for (let n = 0; n < 256; n++) {
@@ -40,10 +47,11 @@ export async function checkReclaimedDescriptors(input: {
     if (input.staleClose) closeSync(files.find(file => input.former.includes(file.fd))!.fd);
     let collectionObserved = false;
     for (let round = 0; round < (input.collected ? 64 : 8); round++) {
-      Bun.gc(true); await Bun.sleep(5);
+      await Bun.sleep(5); Bun.gc(true);
       const losses = files.filter(file => !same(file.identity, identity(file.fd)));
       input.emit?.({ event: "reclaim-check", round, losses });
       if (losses.length) throw Error(`reclaimed descriptor lost: ${losses.map(file => file.fd).join(",")}`);
+      input.audit?.();
       if (round >= 7 && input.collected?.()) {
         input.emit?.({event: "collection-observed", gcRounds: round + 1});
         collectionObserved = true;
@@ -51,13 +59,16 @@ export async function checkReclaimedDescriptors(input: {
       }
     }
     if (input.collected && !collectionObserved) throw Error("native subprocess collection was not observed within 64 GC rounds");
+    if(input.reserveFormerAll) {
+      input.reserveFormerAll(input.former.map(fd=>files.find(file=>file.fd===fd)!));
+    }
     if (input.reserveFormer) {
       const index = files.findIndex(file => input.former.includes(file.fd));
       if (index < 0) throw Error("no reclaimed former descriptor to reserve");
       input.reserveFormer(files[index]!.fd); files.splice(index, 1);
     }
   } finally {
-    for (const file of files) if (same(file.identity, identity(file.fd))) closeSync(file.fd);
+    for (const file of files) if (!borrowed.has(file.fd) && same(file.identity, identity(file.fd))) closeSync(file.fd);
   }
 }
 
@@ -106,7 +117,7 @@ export async function runDescriptorReclaimWitness(input: {
           if (input.fault === "second-spawn-close") closeSync(reused[0]!);
         }
         // Exercise stale ownership while the replacement child is still using the same number.
-        Bun.gc(true); await Bun.sleep(5); Bun.gc(true);
+        await Bun.sleep(5); Bun.gc(true); Bun.gc(true);
         if (active.some(port => !same(port.identity, identity(port.fd)))) throw Error("replacement spawn descriptor lost");
         if (duplex) reader!.on("data", chunk => {
           request += chunk;
