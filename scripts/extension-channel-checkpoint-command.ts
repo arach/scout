@@ -1,4 +1,5 @@
 import { statSync } from "node:fs";
+export { verifyFenceInventory } from "./extension-channel-fence-inventory.ts";
 
 /** Bun bare test arguments are filters. Validate files before using explicit paths. */
 export function checkpointFiles(...paths: string[]): string[] {
