@@ -45,7 +45,7 @@ const bridge = {
   listSessions: () => [{sessionId: "session-secret"}],
   onEvent: (fn: (e: unknown) => void) => {subscriptions++; bridgeEvents = fn; return () => {bridgeEvents = undefined;};},
 };
-let runtime: any, bridgePort = 0;
+let runtime: any, bridgePort = 0, workflowRoom: string | undefined;
 let connection: ReturnType<typeof connectToRelay>;
 if (scenario === "workflow") {
   bridgePort = await freePort();
@@ -57,6 +57,7 @@ if (scenario === "workflow") {
   connection = runtime.relayConnection;
 } else {
   connection = connectToRelay(url, host, bridge as any, {
+    kind: "pairing",
     admitNewPeer: (k, room, live) => opportunity?.admit(k, room, live) ?? false,
     onPeerAdmitted: () => {opportunity?.cancel(); opportunity = undefined;},
   });
@@ -67,7 +68,7 @@ async function until(check: () => boolean, label: string) {
   while (!check()) {if (Date.now() > end) throw Error(`timeout ${label}`); await Bun.sleep(5);}
 }
 async function connect(pattern: "XX" | "IK", keys: KeyPair = phone, direct = false) {
-  const ws = new WebSocket(direct ? `ws://127.0.0.1:${bridgePort}?events=0` : `${url}?room=${(runtime?.qrPayload ?? connection.qrPayload).room}&role=client`);
+  const ws = new WebSocket(direct ? `ws://127.0.0.1:${bridgePort}?events=0` : `${url}?room=${(workflowRoom ?? connection.qrPayload.room)}&role=client`);
   sockets.push(ws);
   const data: string[] = [], state = {ready: false, closed: 0, reason: ""}; let transport: SecureTransport;
   ws.addEventListener("message", e => transport.receive(typeof e.data === "string" ? e.data : new Uint8Array(e.data as ArrayBuffer)));
@@ -157,6 +158,7 @@ try {
     const fresh = await requestLocalPairingOpportunity(bridgePort, "open"); assert(fresh);
     assert.notEqual(fresh.payload.room, opened.payload.room);
     await requestLocalPairingOpportunity(bridgePort, "cancel", opened.windowId); // stale cancel cannot cancel a newer view
+    workflowRoom = fresh.payload.room;
     await accepted(); await denied("XX", other);
     const direct = await connect("XX", phone, true);
     direct.transport.send(JSON.stringify({id: "forged-control", method: "pairing/opportunity", params: {action: "open"}}));

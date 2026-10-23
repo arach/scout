@@ -252,18 +252,8 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
     if (!req) {
       return c.json({ error: "unknown or expired pairing request" }, 404);
     }
-    if (decision === "approve") {
-      // Bring pair mode up so the payload is ready for the device's next poll.
-      // The runtime spins up asynchronously; the device keeps polling /pair.
-      try {
-        await controlScoutWebPairingService("start", currentDirectory);
-      } catch (error) {
-        console.error(
-          "[openscout-web pairing] failed to start pair mode on approval:",
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-    }
+    // Approval authorizes retrieval only during an explicitly opened window.
+    // It must not create pairing consent or expose a reconnect room.
     shellStateCache.invalidate();
     return c.json({ request: req });
   });

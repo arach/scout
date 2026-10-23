@@ -45,7 +45,6 @@ const KNOWN_COPY_DRIFT = {
     "history.snapshot",
     "mobile.askSession",
     "mobile.commsMarkRead",
-    "mobile.endpoints",
     "mobile.heartrate",
     "mobile.meshStatus",
     "mobile.sessionUpdate",

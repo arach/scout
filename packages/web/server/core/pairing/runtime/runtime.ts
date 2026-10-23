@@ -97,23 +97,29 @@ export async function startPairingRuntime(options?: {
 
   let qrPayload: QRPayload;
   let relayConnections: RelayConnection[] = [];
+  let pairingConnections: RelayConnection[] = [];
+  const retiredConnections = new Set<RelayConnection>();
+  const reconnectRoom = crypto.randomUUID();
   let opportunity: PairingOpportunity | null = null;
   let opportunityTimer: ReturnType<typeof setTimeout> | undefined;
   function cancelPairing(windowId?: string) {
     if (windowId && opportunity?.id !== windowId) return;
     opportunity?.cancel(); opportunity = null;
     clearTimeout(opportunityTimer);
+    for (const connection of pairingConnections) {
+      retiredConnections.add(connection);
+      connection.retire(() => retiredConnections.delete(connection));
+    }
+    pairingConnections = [];
     options?.onPairingOpportunity?.(null);
   }
   function openPairing() {
     cancelPairing();
-    // A fresh QR gets a fresh room; an old room is not the new invitation.
-    // Relay resolve remains routing, not proof of a pairing scan.
+    // Pairing is unindexed; the stable reconnect room never changes.
     const payload = Object.freeze({...qrPayload, room: crypto.randomUUID(), expiresAt: Date.now() + 300_000});
     opportunity = pairingTrustOwner().openPairingOpportunity(payload.room, payload.expiresAt);
-    for (const connection of relayConnections) connection.disconnect();
     qrPayload = payload;
-    try { relayConnections = connectRelays(); }
+    try { pairingConnections = connectRelays("pairing", payload); }
     catch (error) { cancelPairing(); throw error; }
     opportunityTimer = setTimeout(() => cancelPairing(), 300_000);
     options?.onPairingOpportunity?.(payload);
@@ -145,21 +151,31 @@ export async function startPairingRuntime(options?: {
   }
 
   qrPayload = createQRPayload(identity.publicKey, primaryRelayUrl, advertisedRelayUrls.slice(1));
-  function connectRelays(): RelayConnection[] {
+  function connectRelays(kind: "pairing" | "reconnect", payload: QRPayload): RelayConnection[] {
     const connections: RelayConnection[] = [];
     try {
       for (const endpoint of relayEndpoints) connections.push(connectToRelay(endpoint.relayUrl.trim(), identity, bridge, {
         secure: true,
         publicRelayUrl: advertisedRelayUrl(endpoint),
-        qrPayload,
+        kind,
+        reconnectRoom,
+        qrPayload: payload,
         events: options?.relayEvents,
-        onPeerAdmitted: () => cancelPairing(),
-        admitNewPeer: (key, room, live) => {
-          const current = opportunity;
-          if (!current) return false;
-          try { return current.admit(key, room, live); }
-          finally { cancelPairing(current.id); }
-        },
+        ...(kind === "pairing" ? {
+          onPeerAdmitted: () => cancelPairing(),
+          admitNewPeer: (key: string, room: string, live: () => boolean) => {
+            const current = opportunity;
+            if (!current) return false;
+            try {
+              const admitted = current.admit(key, room, live);
+              if (!admitted) cancelPairing(current.id);
+              return admitted;
+            } catch (error) {
+              cancelPairing(current.id);
+              throw error;
+            }
+          },
+        } : {}),
       }));
       return connections;
     } catch (error) {
@@ -168,7 +184,7 @@ export async function startPairingRuntime(options?: {
     }
   }
   try {
-    relayConnections = connectRelays();
+    relayConnections = connectRelays("reconnect", {...qrPayload, room: reconnectRoom});
   } catch (error) {
     for (const relayConnection of relayConnections) {
       relayConnection.disconnect();
@@ -186,13 +202,13 @@ export async function startPairingRuntime(options?: {
     identity,
     config,
     get relayConnection() { return relayConnections[0] ?? null; },
-    get relayConnections() { return relayConnections; },
+    get relayConnections() { return [...relayConnections, ...pairingConnections, ...retiredConnections]; },
     get qrPayload() { return qrPayload; },
     openPairing,
     cancelPairing,
     async stop() {
       cancelPairing();
-      for (const relayConnection of relayConnections) {
+      for (const relayConnection of [...relayConnections, ...pairingConnections, ...retiredConnections]) {
         relayConnection.disconnect();
       }
       fileServer.stop();

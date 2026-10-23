@@ -4,7 +4,7 @@ import { buildPairingRendezvousNode, startPairingRendezvousPublisher } from "./r
 import type { PairingRuntimeSnapshot } from "./runtime-state.ts";
 
 describe("pairing runtime OSN rendezvous", () => {
-  test("builds a mobile pairing entrypoint from the live runtime snapshot", () => {
+  test("never publishes the open window invitation", () => {
     const node = buildPairingRendezvousNode(makeSnapshot(), {
       env: {
         OPENSCOUT_MESH_ID: "openscout",
@@ -21,20 +21,7 @@ describe("pairing runtime OSN rendezvous", () => {
       advertiseScope: "mesh",
       lastSeenAt: 30_000,
     });
-    expect(node.meshEntrypoints).toEqual([
-      {
-        kind: "mobile_pairing",
-        relay: "wss://mesh.oscout.net/v1/relay",
-        fallbackRelays: ["wss://backup.oscout.net/v1/relay"],
-        room: "room-1",
-        publicKey: "a".repeat(64),
-        expiresAt: 70_000,
-        lastSeenAt: 12_000,
-        metadata: {
-          source: "openscout-pairing-runtime",
-        },
-      },
-    ]);
+    expect(node.meshEntrypoints).toEqual([]);
   });
 
   test("does not start a publisher unless rendezvous is configured", () => {

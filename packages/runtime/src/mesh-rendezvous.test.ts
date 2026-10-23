@@ -138,7 +138,17 @@ describe("mesh rendezvous publisher", () => {
     expect(presence?.entrypoints.map((entrypoint) => entrypoint.kind)).toEqual(["iroh", "http"]);
   });
 
-  test("extracts live mobile pairing entrypoint from pairing runtime snapshot", () => {
+  test("filters mobile_pairing even when supplied by another node builder", () => {
+    const node = makeNode();
+    node.meshEntrypoints = [...(node.meshEntrypoints ?? []), { kind: "mobile_pairing",
+      relay: "wss://relay.example.test", room: "private-invitation", publicKey: "a".repeat(64),
+      expiresAt: Date.now() + 60_000 }];
+    const presence = buildMeshRendezvousPresence(node);
+    expect(presence?.entrypoints.map(entry => entry.kind)).toEqual(["iroh"]);
+    expect(JSON.stringify(presence)).not.toContain("private-invitation");
+  });
+
+  test("never extracts a pairing invitation for rendezvous", () => {
     expect(mobilePairingMeshEntrypointFromSnapshot({
       updatedAt: 12_000,
       pairing: {
@@ -150,18 +160,7 @@ describe("mesh rendezvous publisher", () => {
           fallbackRelays: ["wss://relay.tailnet.ts.net:43131"],
         }),
       },
-    }, 10_000)).toEqual({
-      kind: "mobile_pairing",
-      relay: "wss://relay.oscout.net",
-      fallbackRelays: ["wss://relay.tailnet.ts.net:43131"],
-      room: "room-1",
-      publicKey: "a".repeat(64),
-      expiresAt: 70_000,
-      lastSeenAt: 12_000,
-      metadata: {
-        source: "openscout-pairing-runtime",
-      },
-    });
+    }, 10_000)).toBeUndefined();
 
     expect(mobilePairingMeshEntrypointFromSnapshot({
       pairing: {

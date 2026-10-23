@@ -99,6 +99,8 @@ export interface BridgeContext {
   deviceId?: string;
   secureTransport?: boolean;
   trustedPeer?: boolean;
+  reconnectRoom?: string;
+  relayUrls?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -688,6 +690,14 @@ const sessionRouter = t.router({
 // -- Mobile -----------------------------------------------------------------
 
 const mobileRouter = t.router({
+  endpoints: procedure.query(({ ctx }) => {
+    if (!ctx.secureTransport || !ctx.trustedPeer || !ctx.deviceId) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "Trusted encrypted mobile transport required" });
+    }
+    return { version: 1, source: "bridge-rpc", protected: true,
+      endpoints: { relayUrls: ctx.relayUrls ?? [] },
+      relay: { reconnectRoom: ctx.reconnectRoom ?? null } };
+  }),
   // This legacy bridge has no receipt-owned native-session input adapter.
   // Keep the versioned method fail-closed rather than falling back to typing.
   askSessionDurable: procedure
