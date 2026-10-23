@@ -1,3 +1,5 @@
+import { loadScoutCoreReport, resolveScoutCoreReportTarget } from "../../lib/core/setup/readiness.ts";
+import { loadHarnessCatalogSnapshot } from "@openscout/runtime/harness-catalog";
 import { DOCTOR_HELP } from "../../../bin/lifecycle-preflight.mjs";
 import { DOCTOR_CHECK_NAMES, runDoctorCheck, renderDoctorCheck, renderDoctorAssessment } from "../doctor-checks.ts";
 import type { ScoutCommandContext } from "../context.ts";
@@ -20,10 +22,10 @@ import {
 import { deriveOpenScoutInstanceLayout } from "@openscout/runtime/instance";
 import { resolveBrokerControlUrl } from "@openscout/runtime/local-config";
 
-const DOCTOR_JSON_SCHEMA = "scout.doctor.v1" as const;
+const DOCTOR_JSON_SCHEMA = "scout.doctor.core/v1" as const;
 
 function writeDoctorJsonLine(context: ScoutCommandContext, payload: Record<string, unknown>): void {
-  context.output.writeText(`${JSON.stringify({ schema: DOCTOR_JSON_SCHEMA, instance: doctorInstanceSummary(), ...payload })}\n`);
+  context.output.writeText(`${JSON.stringify({ schema: DOCTOR_JSON_SCHEMA, scope: "core", instance: doctorInstanceSummary(), ...payload })}\n`);
 }
 
 /** Which OpenScout instance (OPENSCOUT_INSTANCE / --instance) doctor is checking. */
@@ -49,7 +51,7 @@ export async function runDoctorCommand(context: ScoutCommandContext, args: strin
   const options = parseDoctorCommandOptions(args, defaultScoutContextDirectory(context));
   const outputJson = context.output.mode === "json" || options.json;
   if (!outputJson && !options.detail && !options.fix) {
-    context.output.writeText("Scout doctor — checking local readiness (6s per check)…");
+    context.output.writeText("Scout doctor — checking core readiness (6s per check)…");
     context.output.writeText(renderDoctorInstanceLine());
     const checks = await Promise.all(DOCTOR_CHECK_NAMES.map(async name => {
       const check = await runDoctorCheck(name, { cwd: options.currentDirectory, env: context.env });
@@ -108,35 +110,9 @@ export async function runDoctorCommand(context: ScoutCommandContext, args: strin
     return;
   }
 
-  writeDoctorJsonLine(context, {
-    phase: "start",
-    repoRoot,
-    currentDirectory: options.currentDirectory,
-  });
-
-  const report = await loadScoutDoctorReport({
-    currentDirectory: options.currentDirectory,
-    repoRoot,
-    env: context.env,
-    onProjectInventoryEntry: (entry) => {
-      writeDoctorJsonLine(context, { phase: "project", project: entry });
-    },
-    onProjectInventoryError: (error) => {
-      writeDoctorJsonLine(context, { phase: "project_error", error });
-    },
-  });
-
-  const native = await loadNativeScoutdDoctorReport({
-    fix: options.fix,
-    yes: options.yes,
-    env: context.env,
-  });
-  writeDoctorJsonLine(context, { phase: "native", nativeDaemon: native });
-  writeDoctorJsonLine(context, {
-    phase: "complete",
-    report: {
-      ...report,
-      nativeDaemon: native,
-    },
-  });
+  writeDoctorJsonLine(context, { phase: "start", target: resolveScoutCoreReportTarget(context.env) });
+  const catalog = await loadHarnessCatalogSnapshot({ localOnly: true });
+  const report = await loadScoutCoreReport({ env: context.env, catalog });
+  const native = options.fix ? await loadNativeScoutdDoctorReport({ fix: true, yes: options.yes, env: context.env }) : null;
+  writeDoctorJsonLine(context, { phase: "complete", report, ...(native ? { nativeDaemon: native } : {}) });
 }

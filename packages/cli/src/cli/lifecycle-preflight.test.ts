@@ -16,6 +16,9 @@ test("source CLI validates before broker maintenance, including global flags and
       mock.module(${JSON.stringify(resolve(import.meta.dir, "broker-update.ts"))}, () => ({
         brokerUpdateDebugEnabled: () => false,
         ensureBrokerUptodate: async () => { throw new Error("VALIDATION REACHED MAINTENANCE"); },
+      }));
+      mock.module(${JSON.stringify(resolve(import.meta.dir, "../lib/core/setup/service.ts"))}, () => ({
+        runScoutSetup: async () => { throw new Error("VALIDATION REACHED CORE SETUP"); },
       }));`);
     const run = (args: string[]) => spawnSync(process.execPath, ["--preload", preload, resolve(import.meta.dir, "main.ts"), ...args], {
       cwd: dir, encoding: "utf8", timeout: 10_000,
@@ -40,9 +43,12 @@ test("source CLI validates before broker maintenance, including global flags and
       expect(result.stderr).toMatch(/unexpected|missing|invalid/);
     }
     expect(readdirSync(home)).toEqual([]);
-    for (const args of [["up", ".", "--json"], ["--json", "up", "."], ["app", "restart", "--timeout=90s"], ["setup", "--source-root=."]]) {
+    for (const args of [["up", ".", "--json"], ["--json", "up", "."], ["app", "restart", "--timeout=90s"]]) {
       expect(run(args).stderr).toContain("VALIDATION REACHED MAINTENANCE");
     }
+    const setup = run(["setup", "--source-root=."]);
+    expect(setup.stderr).toContain("VALIDATION REACHED CORE SETUP");
+    expect(setup.stderr).not.toContain("VALIDATION REACHED MAINTENANCE");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }, 30_000);
 

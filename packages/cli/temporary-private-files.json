@@ -197,18 +197,6 @@
       ]
     },
     {
-      "source": "apps/desktop/src/core/setup/local-edge-dependencies.ts",
-      "packagedDestinations": [
-        "package/dist/main.mjs"
-      ]
-    },
-    {
-      "source": "apps/desktop/src/core/setup/terminal-pty-dependencies.ts",
-      "packagedDestinations": [
-        "package/dist/main.mjs"
-      ]
-    },
-    {
       "source": "apps/desktop/src/server/db-queries.ts",
       "packagedDestinations": [
         "package/dist/main.mjs"
@@ -4592,6 +4580,9 @@
     "package/dist/update-helper.mjs",
     "package/package.json"
   ],
-  "removedSources": [],
+  "removedSources": [
+    "apps/desktop/src/core/setup/local-edge-dependencies.ts",
+    "apps/desktop/src/core/setup/terminal-pty-dependencies.ts"
+  ],
   "removedOutputs": []
 }

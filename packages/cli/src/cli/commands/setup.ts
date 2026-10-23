@@ -1,4 +1,4 @@
-import { assessSetupCompletion } from "@openscout/runtime/onboarding";
+import { assessScoutSetupCompletion } from "../../lib/core/setup/readiness.ts";
 import { SETUP_HELP } from "../../../bin/lifecycle-preflight.mjs";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -188,17 +188,15 @@ export async function runSetupCommand(context: ScoutCommandContext, args: string
     },
   );
   const report = await runScoutSetup(options);
-  const completion = assessSetupCompletion({ ...report,
-    defaultHarness: report.setup.settings.agents.defaultHarness,
+  const completion = assessScoutSetupCompletion({ ...report,
     failures: [
       ...report.scoutSkill.entries.filter((entry) => entry.status === "error")
         .map((entry) => entry.error ?? `Skill install failed: ${entry.id}`),
       ...(report.claudeStatusline.status === "error"
         ? [report.claudeStatusline.error ?? "Claude statusline install failed"] : []),
     ],
-  }, { interactive: context.isTty && Boolean(process.stdin.isTTY) && context.output.mode !== "json",
-    ssh: Boolean(context.env.SSH_CONNECTION || context.env.SSH_TTY) });
-  context.output.writeValue({ ...report, ...completion }, (value) => renderScoutSetupReport(value, completion));
+  });
+  context.output.writeValue({ schema: "scout.setup.v2", ...report, ...completion }, (value) => renderScoutSetupReport(value, completion));
   if (completion.outcome === "failed") process.exitCode = 1;
   // An offer only; setup never downloads it.
   if (context.output.mode !== "json" && scoutTuiNeedsDownload({ env: context.env, cwd: options.currentDirectory })) {

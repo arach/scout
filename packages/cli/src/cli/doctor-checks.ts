@@ -1,13 +1,13 @@
+import { loadScoutCoreReport } from "../lib/core/setup/readiness.ts";
+import { assessCoreSetupCompletion } from "@openscout/runtime/core-report";
 import type { ScoutCommandContext } from "./context.ts";
-import { getRuntimeBrokerServiceStatus } from "../lib/app/host/runtime-service-client.ts";
-import { loadScoutLocalEdgeDoctorReport } from "../lib/core/setup/service.ts";
-import { inspectScoutTerminalPtyDependencies } from "../../../../apps/desktop/src/core/setup/terminal-pty-dependencies.ts";
+import type { getRuntimeBrokerServiceStatus } from "../lib/app/host/runtime-service-client.ts";
 import { loadSystemProbeDoctorReport } from "@openscout/runtime/system-probes";
 import { loadHarnessCatalogSnapshot } from "@openscout/runtime/harness-catalog";
 import { loadNativeScoutdDoctorReport, type NativeScoutdDoctorReport } from "./scoutd.ts";
 import { spawn } from "node:child_process";
 
-export const DOCTOR_CHECK_NAMES = ["broker", "native", "runtimes", "local-edge", "terminal", "probes"] as const;
+export const DOCTOR_CHECK_NAMES = ["broker", "native", "runtimes", "probes"] as const;
 export type DoctorCheckName = typeof DOCTOR_CHECK_NAMES[number];
 export type DoctorCheck = {
   name: DoctorCheckName;
@@ -63,38 +63,22 @@ export function doctorNativeCheck(report: NativeScoutdDoctorReport): DoctorCheck
 /** Internal read-only worker. Never routes through startup maintenance. */
 export async function collectDoctorCheck(name: DoctorCheckName, context: ScoutCommandContext): Promise<DoctorCheck> {
   switch (name) {
-    case "broker": return doctorBrokerCheck(await getRuntimeBrokerServiceStatus());
+    case "broker": {
+      const completion = assessCoreSetupCompletion({ report: await loadScoutCoreReport({ env: context.env }) });
+      return { name, state: completion.outcome === "failed" ? "impaired" : completion.outcome === "complete" ? "working" : "inconclusive",
+        detail: brief(completion.headline + " " + completion.report.service.checks.filter(check => check.state !== "working").map(check => check.detail).join(" ")),
+        ...(completion.outcome === "complete" ? {} : { next: NEXT_DETAIL }) };
+    }
     case "native": {
       const report = await loadNativeScoutdDoctorReport({ env: context.env });
       return doctorNativeCheck(report);
     }
     case "runtimes": {
-      const catalog = await loadHarnessCatalogSnapshot();
-      const ready = catalog.entries.filter(entry => entry.readinessReport.ready);
-      return { name, state: ready.length ? "working" : "impaired",
-        detail: `${ready.length} of ${catalog.entries.length} runtimes ready.`,
+      const catalog = await loadHarnessCatalogSnapshot({ localOnly: true });
+      const ready = catalog.entries.filter(entry => entry.readinessReport.binaryPath);
+      return { name, state: ready.length ? "working" : "inconclusive",
+        detail: `${ready.length} of ${catalog.entries.length} coding-agent executables found; sign-in and execution readiness not checked.`,
         ...(!ready.length ? { next: "scout runtimes" } : {}),
-      };
-    }
-    case "local-edge": {
-      const report = await loadScoutLocalEdgeDoctorReport(context.env);
-      const dnsTimedOut = [report.dns.portal, report.dns.node].some(host => host.error?.includes("timed out"));
-      const knownImpairment = !["ready", "installed"].includes(report.dependency.status)
-        || (!report.listeners.http.listening && !report.listeners.https.listening)
-        || (report.listeners.https.listening && !["trusted", "installed"].includes(report.dependency.trust.status));
-      if (dnsTimedOut && !knownImpairment) return {
-        name, state: "inconclusive", detail: "Local hostname resolution timed out; web routing is unconfirmed.", next: NEXT_DETAIL,
-      };
-      return { name, state: report.state === "ready" ? "working" : "impaired",
-        detail: report.state === "ready" ? "Local web routing is ready." : "Local web routing or HTTPS trust is not ready.",
-        ...(report.state !== "ready" ? { next: NEXT_DETAIL } : {}),
-      };
-    }
-    case "terminal": {
-      const report = inspectScoutTerminalPtyDependencies({ env: context.env });
-      return { name, state: report.status === "ready" ? "working" : "impaired",
-        detail: report.status === "ready" ? "Terminal dependencies passed their smoke test." : `Terminal dependencies: ${report.status}.`,
-        ...(report.status !== "ready" ? { next: report.installCommand ?? NEXT_DETAIL } : {}),
       };
     }
     case "probes": {
@@ -187,6 +171,7 @@ export function renderDoctorAssessment(checks: DoctorCheck[]): string {
     `Works: ${working.map(check => check.name).join(", ") || "none confirmed"}.`,
     ...(impaired.length ? [`Impaired: ${impaired.map(check => check.name).join(", ")}.`] : []),
     ...(unknown.length ? [`Inconclusive: ${unknown.map(check => check.name).join(", ")} (not a confirmed failure).`] : []),
+    "Scope: core only; private app readiness was not checked. Core availability is the broker row, not the optional diagnostics.",
     `Next: ${next ?? "scout who — find agents to work with."}`,
     "Inventory and paths: scout doctor --detail. Machine-readable: scout doctor --json.",
   ].join("\n");

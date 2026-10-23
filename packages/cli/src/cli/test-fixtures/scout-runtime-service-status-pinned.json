@@ -1,0 +1,49 @@
+{
+  "label": "app.openscout",
+  "mode": "dev",
+  "launchAgentPath": "/Users/example/Library/LaunchAgents/app.openscout.plist",
+  "bootoutCommand": "launchctl bootout gui/501/app.openscout",
+  "brokerUrl": "http://127.0.0.1:43123",
+  "brokerSocketPath": "/Users/example/.openscout/run/broker.sock",
+  "supportDirectory": "/Users/example/Library/Application Support/OpenScout",
+  "runtimeDirectory": "/Users/example/.openscout/run",
+  "controlHome": "/Users/example/.openscout/control",
+  "stdoutLogPath": "/Users/example/Library/Logs/OpenScout/scoutd-stdout.log",
+  "stderrLogPath": "/Users/example/Library/Logs/OpenScout/scoutd-stderr.log",
+  "installed": true,
+  "loaded": true,
+  "pid": 4242,
+  "launchdState": "running",
+  "lastExitStatus": null,
+  "usesLaunchAgent": true,
+  "reachable": true,
+  "lastLogLine": "scoutd fixture log line",
+  "runtimeFreshness": {
+    "state": "pinned",
+    "intentional": true,
+    "basis": "explicit_pin",
+    "artifactCommit": "1111111111111111111111111111111111111111",
+    "expectedCommit": "1111111111111111111111111111111111111111",
+    "pin": "1111111111111111111111111111111111111111",
+    "pinReason": "bisecting a regression",
+    "manifestPath": "/opt/openscout/dist/build-manifest.json",
+    "version": "0.2.78",
+    "builtAt": "2026-08-01T12:00:00.000Z",
+    "sourceDirty": false,
+    "detail": "Running the explicitly pinned runtime build (bisecting a regression).",
+    "reasonCode": null,
+    "actualBuiltAt": "2026-08-01T12:00:00.000Z",
+    "expectedBuiltAt": null
+  },
+  "serviceAdapter": "macos-scoutd",
+  "instance": "fixture-update",
+  "health": {
+    "ok": true,
+    "reachable": true,
+    "checkedAt": 100,
+    "error": null,
+    "build": {
+      "version": "9.9.9"
+    }
+  }
+}

@@ -30,7 +30,7 @@ import { resolveOpenScoutSetupContextRoot } from "@openscout/runtime/setup";
 import {
   ensureScoutLocalEdgeTrust,
   type ScoutLocalEdgeTrustReport,
-} from "../../../../../apps/desktop/src/core/setup/local-edge-dependencies.ts";
+} from "@openscout/runtime/local-edge";
 import { loadScoutBrokerContext, resolveScoutBrokerUrl } from "../../lib/core/broker/service.ts";
 import type { ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";

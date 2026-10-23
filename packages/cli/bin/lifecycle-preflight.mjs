@@ -217,7 +217,7 @@ export const NODE_DOCTOR_HELP = [
   "Usage: scout doctor [--json] [--context-root <path>] [--fix [--yes]]",
   "", "Node headless CLI:",
   "Inspect the headless broker and harness readiness.",
-  "--json    One headless report JSON object (not Bun's v1 NDJSON stream).",
+  "--json    One headless report JSON object (not Bun's core/v1 NDJSON stream).",
   "--fix     Repair is not run by the Node headless CLI; use Bun or service help.",
   "--yes     Requires --fix.",
   "--detail  Available only in the Bun CLI.",
@@ -228,15 +228,15 @@ export const DOCTOR_HELP = [
     "Usage: scout doctor [--detail | --json] [--context-root <path>] [--fix [--yes]]",
     "", "Bun CLI:", "Default: concise checks as they finish, with a 6-second deadline per check.",
     "FAIL means observed impairment; ? means inconclusive, not confirmed failure.",
-    "--detail  Full legacy report, including project inventory and internal paths.",
-    "--json    Compatible scout.doctor.v1 NDJSON stream; ends with phase complete.",
-    "Detail and v1 JSON retain the legacy full-scan wait behavior.",
-    "--fix     Explicit native repair request; uses the full legacy report.",
+    "--detail  Full core report, including project inventory and internal paths.",
+    "--json    Core-only scout.doctor.core/v1 NDJSON stream; ends with phase complete.",
+    "Detailed output retains the full-scan wait behavior. Private app readiness is not checked.",
+    "--fix     Explicit native core-daemon repair request; never installs app artifacts.",
     "--yes     Non-interactive confirmation for --fix.",
     "--help    Show this help without checking or maintaining services.",
   ].join("\n") + "\n\n" + NODE_DOCTOR_HELP;
 
-export const SETUP_HELP = "Usage: scout setup [--source-root <path>] [--default-harness <name>] [--context-root <path>] [--json]\n\nConfigure project discovery and install/start the local broker.\nRepeat --source-root to add workspace roots. Prompts for a root in an interactive terminal.\nUse scout doctor to inspect readiness without requesting setup." + "\n\n" + QUICK_LINKS;
+export const SETUP_HELP = "Usage: scout setup [--source-root <path>] [--default-harness <name>] [--context-root <path>] [--json]\n\nConfigure project discovery and install/start the local broker. Private app readiness is not required.\nRepeat --source-root to add workspace roots. Prompts for a root in an interactive terminal.\nUse scout doctor to inspect readiness without requesting setup." + "\n\n" + QUICK_LINKS;
 
 function flagValue(args, index, flag) {
   const inline = args[index].startsWith(flag + "=");
