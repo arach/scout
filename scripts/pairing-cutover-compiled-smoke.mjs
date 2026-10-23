@@ -15,6 +15,13 @@ try {
   assert.equal(owner.pairingAuthorityStamp(), stamp);
   assert.deepEqual(owner.migrateToCapsule("compiled-cut"), receipt);
   assert.ok(!readdirSync(root).includes(".pairing-cutover"));
+  // Compiled operation witness; real process-death evidence lives in the Bun suite.
+  owner.operation(undefined, identity => {for(let i=0;i<8;i++)owner.claimCapsuleSlot(identity);});
+  assert.throws(() => owner.mutate(1, "stranded", {type: "revoke", publicKey: peer.publicKey}), /capsule_staging_capacity/);
+  const reclaimed = owner.reclaimCapsuleStaging("compiled-recovery", {quiescent: true});
+  assert.equal(reclaimed.moved.filter(item => item.kind === "claim").length, 8);
+  assert.equal(owner.read().revision, 1);
+  assert.deepEqual(owner.reclaimCapsuleStaging("compiled-recovery", {quiescent: true}), reclaimed);
   const revoked = owner.mutate(1, "revoke", {type: "revoke", publicKey: peer.publicKey});
   assert.deepEqual(owner.mutate(1, "revoke", {type: "revoke", publicKey: peer.publicKey}), revoked);
   assert.equal(owner.read().peers.length, 0);
@@ -27,5 +34,5 @@ try {
   writeFileSync(join(root, "trusted-peers.owner.1.json"), legacy, {mode: 0o600});
   assert.throws(() => owner.read(), /capsule_unexpected_history/);
   console.log(JSON.stringify({node: process.version, compiledOwner: true, realMigration: true,
-    stampPreserved: true, exactRetry: true, realRevoke: true, freshCorruptionAndResurrectionRefusal: true}));
-} finally {rmSync(root, {recursive: true, force: true});}
+    stampPreserved: true, quiescentReclamation: true, exactRetry: true, realRevoke: true, freshCorruptionAndResurrectionRefusal: true}));
+} finally {rmSync(root, {recursive: true, force: true});rmSync(root+".pairing-reclamation", {recursive: true, force: true});}
