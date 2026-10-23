@@ -431,11 +431,25 @@ describe("broker daemon durability routes", () => {
     await broker.postJson(harness.baseUrl, "/v1/agents", agent);
     await broker.postJson(harness.baseUrl, "/v1/agents", agent);
 
-    const lines = readFileSync(join(harness.controlHome, "broker-journal.jsonl"), "utf8")
+    const journal = readFileSync(join(harness.controlHome, "broker-journal.jsonl"), "utf8");
+    const journalLines = journal
       .trim()
       .split("\n")
-      .filter(Boolean)
-      .flatMap(decodeJournalLine).map((entry) => entry as { kind: string; actor?: { id?: string }; agent?: { id?: string } });
+      .filter(Boolean);
+    const lines = journalLines.flatMap((line, lineIndex) => {
+      try {
+        return decodeJournalLine(line);
+      } catch (error) {
+        console.error("Journal decode failed (zero-based line index):", JSON.stringify({
+          lineIndex,
+          totalLineCount: journalLines.length,
+          lineByteLength: Buffer.byteLength(line, "utf8"),
+          fileEndsWithNewline: journal.endsWith("\n"),
+          first200Bytes: Buffer.from(line, "utf8").subarray(0, 200).toString("utf8"),
+        }));
+        throw error;
+      }
+    }).map((entry) => entry as { kind: string; actor?: { id?: string }; agent?: { id?: string } });
 
     expect(lines.filter((entry) => entry.kind === "actor.upsert" && entry.actor?.id === agent.id)).toHaveLength(1);
     expect(lines.filter((entry) => entry.kind === "agent.upsert" && entry.agent?.id === agent.id)).toHaveLength(1);
