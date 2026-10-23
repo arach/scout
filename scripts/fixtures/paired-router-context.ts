@@ -24,13 +24,13 @@ export function pairedRouterFixture() {
       generations: 2, keys: 1, publicKeys: [key], migrate: true,
     });
     return {
-      bind<T extends { bridge: object }>(context: T) {
+      bind<T extends { bridge: object }>(context: T, options: { local?: boolean } = {}) {
         const domain = new TransportDomain(context.bridge, bytesToHex(host.publicKey), owner);
         domains.add(domain);
         const close = () => { try { domain.dispose(); } finally { domains.delete(domain); } };
         try {
           fixtureHost(domain, host);
-          const peer = liveTransport(domain, phone);
+          const peer = liveTransport(domain, options.local ? host : phone, options);
           const ctx = peer.server.bindContext({
             deviceId: key.slice(0, 16), secureTransport: true, trustedPeer: true, ...context,
           });

@@ -87,6 +87,22 @@ function createCaller(
 }
 
 describe("mobile reconnect coordinates", () => {
+  test.each(["paired-without-device-id", "local-service"] as const)(
+    "mobile.endpoints refuses a live %s context at its paired-device gate", async (kind) => {
+      const { bridge } = createBridgeStub();
+      const fixture = transports.bind({ bridge, cwd: "/tmp/scout",
+        deviceId: kind === "local-service" ? "local-reader" : undefined,
+      }, { local: kind === "local-service" });
+      disposeCallers.push(fixture.dispose);
+      const caller = bridgeRouter.createCaller(fixture.ctx);
+      // Prove the opaque transport passed the real outer live guard first.
+      expect(await caller.sync.status()).toMatchObject({ sessionCount: 2 });
+      await expect(caller.mobile.endpoints()).rejects.toMatchObject({
+        code: "UNAUTHORIZED", message: "Trusted encrypted mobile transport required",
+      });
+    },
+  );
+
   test("requires a trusted encrypted transport and reports its reconnect room", async () => {
     const { bridge } = createBridgeStub();
     await expect(bridgeRouter.createCaller({ bridge, cwd: "/tmp/scout" }).mobile.endpoints())

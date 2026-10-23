@@ -176,6 +176,22 @@ describe("bridgeRouter sync compatibility", () => {
       .rejects.toThrow("Endpoint discovery requires an encrypted trusted mobile transport");
   });
 
+  test.each(["paired-without-device-id", "local-service"] as const)(
+    "mobile.endpoints refuses a live %s context at its paired-device gate", async (kind) => {
+      const { bridge } = createBridgeStub();
+      const fixture = transports.bind({ bridge, cwd: "/tmp/scout",
+        deviceId: kind === "local-service" ? "local-reader" : undefined,
+      }, { local: kind === "local-service" });
+      disposeCallers.push(fixture.dispose);
+      const caller = bridgeRouter.createCaller(fixture.ctx);
+      // Prove the opaque transport passed the real outer live guard first.
+      expect(await caller.sync.status()).toMatchObject({ sessionCount: 2 });
+      await expect(caller.mobile.endpoints()).rejects.toMatchObject({
+        code: "UNAUTHORIZED", message: "Endpoint discovery requires an encrypted trusted mobile transport",
+      });
+    },
+  );
+
   test("mobile.endpoints returns current service coordinates on the protected transport", async () => {
     const previousHome = process.env.OPENSCOUT_HOME;
     const previousBrokerHost = process.env.OPENSCOUT_BROKER_HOST;
