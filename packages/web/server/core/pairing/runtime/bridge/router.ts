@@ -1361,6 +1361,7 @@ const mobileRouter = t.router({
         input,
         resolveMobileCurrentDirectory(),
         ctx.deviceId,
+        () => { requireTransportContext(ctx); },
       );
     }),
 

@@ -48,6 +48,10 @@ function validateWorktreeBranch(branch: string): void {
  * (or `requestedBranch` when given). An existing worktree at that path is
  * reused as-is.
  *
+ * `beforeEffect` is a caller-owned synchronous re-admission callback, invoked
+ * before directory creation and each git mutation, including a resumed retry.
+ * It carries no permission snapshot; a refusal propagates without fallback.
+ *
  * Returns the workspace descriptor, or `null` when the project isn't a git repo
  * (or both `git worktree add` attempts fail) — callers then run the agent in the
  * project root, exactly as before.
@@ -56,6 +60,7 @@ export async function createAgentWorkspace(
   projectRoot: string,
   agentName: string,
   requestedBranch?: string,
+  beforeEffect?: () => void,
 ): Promise<CreateAgentWorkspaceResult | null> {
   if (!(await isGitRepo(projectRoot))) {
     return null;
@@ -71,20 +76,25 @@ export async function createAgentWorkspace(
     return { path: workspacePath, branch };
   }
 
+  beforeEffect?.(); // workspace-directory admission, after repository discovery
   await mkdir(workspaceDir, { recursive: true });
+
+  beforeEffect?.(); // new-branch admission, after asynchronous directory creation
 
   try {
     // Create the worktree on a new branch based on current HEAD.
     await execSystemFile("git", ["worktree", "add", "-b", branch, "--", workspacePath], { cwd: projectRoot, timeoutMs: 10_000 });
     return { path: workspacePath, branch };
   } catch {
-    // Branch might already exist — retry attaching to it without -b.
-    try {
-      await execSystemFile("git", ["worktree", "add", workspacePath, "--", branch], { cwd: projectRoot, timeoutMs: 10_000 });
-      return { path: workspacePath, branch };
-    } catch {
-      // If both fail, fall back to no worktree.
-      return null;
-    }
+    // Branch might already exist. Admission failure must not be swallowed as a
+    // git failure or trigger a fallback; retry admission is outside both catches.
+  }
+  beforeEffect?.(); // existing-branch retry admission, after the failed attempt
+  try {
+    await execSystemFile("git", ["worktree", "add", workspacePath, "--", branch], { cwd: projectRoot, timeoutMs: 10_000 });
+    return { path: workspacePath, branch };
+  } catch {
+    // If both git operations fail, fall back to no worktree.
+    return null;
   }
 }

@@ -781,7 +781,7 @@ async function handleRPCInner(
         };
         return {
           id: req.id,
-          result: await createScoutSession(p, resolveMobileCurrentDirectory(), rpcContext.deviceId),
+          result: await createScoutSession(p, resolveMobileCurrentDirectory(), rpcContext.deviceId, () => { requireTransportContext(rpcContext); }),
         };
       }
 

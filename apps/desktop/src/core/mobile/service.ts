@@ -1099,6 +1099,7 @@ export async function createScoutSession(
   input: CreateScoutSessionInput,
   currentDirectory?: string,
   deviceId?: string,
+  beforeEffect?: () => void,
 ): Promise<ScoutMobileSessionHandle> {
   // The mobile client passes a projectRoot path as workspaceId. Valid current
   // directories stay on the hot path; missing/legacy paths take the guarded
@@ -1132,7 +1133,7 @@ export async function createScoutSession(
   let agentCwd = workspace.root;
   let worktreeCreated = false;
   if (input.worktree) {
-    const worktreeResult = await createGitWorktree(workspace.root, agentName, input.branch);
+    const worktreeResult = await createGitWorktree(workspace.root, agentName, input.branch, beforeEffect);
     if (worktreeResult) {
       agentCwd = worktreeResult.path;
       worktreeCreated = true;
@@ -1390,8 +1391,9 @@ async function createGitWorktree(
   projectRoot: string,
   agentName: string,
   requestedBranch?: string,
+  beforeEffect?: () => void,
 ): Promise<{ path: string; branch: string } | null> {
-  const result = await createAgentWorkspace(projectRoot, agentName, requestedBranch);
+  const result = await createAgentWorkspace(projectRoot, agentName, requestedBranch, beforeEffect);
   if (!result) return null;
   return { path: result.path, branch: result.branch };
 }
