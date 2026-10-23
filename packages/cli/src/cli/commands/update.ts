@@ -30,7 +30,7 @@ import {
   readOwnedSuitePids,
   readSuiteStatus,
   summarizeBridgeClients,
-  readRuntimeIdentityFromDoctorStream,
+  readRuntimeIdentityFromScoutdStatus,
   resolveMachineReferences,
   scoutNodeIdsFor,
   summarizeMachineUpdateRun,
@@ -47,6 +47,21 @@ import { LAUNCH_AGENT_LABEL as MESH_BRIDGE_LAUNCH_AGENT_LABEL } from "./mesh-bri
 
 const HELP_FLAGS = new Set(["--help", "-h", "help"]);
 const PROBE_TIMEOUT_MS = 20_000;
+
+// Fixed code only, never caller command/instance interpolation. The target's
+// existing Node or Bun performs the same ECMAScript trim as Scout selection;
+// shell :- would treat whitespace-only values as an explicit instance and
+// could query prod instead of the target's client pointer. Runtime still owns
+// instance-name normalization and isolation. The existing SSH process-group
+// timeout covers this read-only wrapper and its service-status child.
+const REMOTE_RUNTIME_STATUS_JS = [
+  'const env = process.env;',
+  'env.OPENSCOUT_INSTANCE = env.OPENSCOUT_INSTANCE?.trim() || env.OPENSCOUT_CLIENT_INSTANCE?.trim() || "prod";',
+  'const result = require("node:child_process").spawnSync("openscout-runtime", ["service", "status", "--json"], { env, stdio: "inherit" });',
+  'process.exit(result.status ?? 1);',
+].join(" ");
+const REMOTE_RUNTIME_STATUS_SHELL =
+  `js=$(command -v node || command -v bun) || exit 127; exec "$js" -e '${REMOTE_RUNTIME_STATUS_JS}'`;
 
 export type ScoutUpdateDependencies = {
   loadMachines?: () => Promise<{ machines: MachineRecord[] }>;
@@ -305,15 +320,15 @@ function readJsonStdout(stdout: string): unknown {
  * Read one machine's versions.
  *
  * Every command here is read-only. `scout install --check` reports the app
- * version, `scout doctor scoutd --json` the runtime, and `scout --version` the
+ * version, `openscout-runtime service status --json` the runtime, and `scout --version` the
  * CLI — which the app version does not imply, because the CLI is a separate
  * package that can lag behind its own app.
  */
 function createDefaultProbe(exec: SshExec, options: { sshUser: string | null }) {
   const aliases = readSshConfigAliases();
   return async function probe(machine: MachineRecord): Promise<MachineUpdateReading> {
-    // Local and remote differ only in argv: the same never-a-shell runner spawns
-    // `scout …` here or `ssh host scout …` there.
+    // Share target resolution and the argv-only local runner. OpenSSH runs
+    // remote commands through the target's login shell, not the local shell.
     const wrap = machine.isSelf
       ? (command: string[]) => command
       : (() => {
@@ -341,11 +356,25 @@ function createDefaultProbe(exec: SshExec, options: { sshUser: string | null }) 
     if (app.failure) return emptyReading(app.failure);
     const appPayload = readJsonStdout(app.stdout) as { installed?: unknown } | null;
 
-    // `scout doctor --json` is the only surface that carries scoutd's runtime
-    // verdict; `scout app status --json` reports the app process tree and has
-    // no runtimeFreshness at all.
-    const runtime = await read(["scout", "doctor", "--json"]);
-    const identity = readRuntimeIdentityFromDoctorStream(runtime.stdout);
+    // Doctor reports core readiness, not artifact ownership. Read the existing
+    // service-status contract through the same local/SSH instance context.
+    // Missing or malformed freshness is unknown, never an implicit unpin or a
+    // version guessed from broker health (or a private diagnostic fallback).
+    const runtimeCommand = ["openscout-runtime", "service", "status", "--json"];
+    const runtime = await read(machine.isSelf ? runtimeCommand : [
+      // Select explicit instance -> client pointer -> prod on the target.
+      // Both quote layers contain fixed program text, not caller data.
+      "/bin/sh", "-c", "'" + REMOTE_RUNTIME_STATUS_SHELL.replace(/'/g, "'\\''") + "'",
+    ]);
+    const status = readJsonStdout(runtime.stdout) as { runtimeFreshness?: {
+      version?: unknown; intentional?: unknown; state?: unknown;
+    } } | null;
+    const freshness = status?.runtimeFreshness;
+    const identity = readRuntimeIdentityFromScoutdStatus(
+      freshness && (freshness.version === null || typeof freshness.version === "string" && freshness.version.trim())
+      && typeof freshness.intentional === "boolean"
+      && typeof freshness.state === "string" && freshness.state.trim() ? { runtimeFreshness: freshness } : null,
+    );
 
     const cli = await read(["scout", "--version"]);
 

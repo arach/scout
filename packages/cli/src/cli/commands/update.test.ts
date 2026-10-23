@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { MachineRecord } from "@openscout/protocol";
 
 import { createScoutCommandContext, type ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
-import { emptyReading, type MachineUpdateReading } from "../machine-update.ts";
+import { emptyReading, readRuntimeIdentityFromDoctorStream, type MachineUpdateReading } from "../machine-update.ts";
 import { readSshConfigAliases, resolveMachineSshDestination, runUpdateCommand } from "./update.ts";
 
 const NOW = Date.now();
@@ -114,6 +117,337 @@ function probeFor(readings: Record<string, Partial<MachineUpdateReading>>) {
     ...readings[target.name],
   });
 }
+
+function fixtureText(name: string): string {
+  return readFileSync(new URL(`../test-fixtures/${name}`, import.meta.url), "utf8");
+}
+
+const coreDoctorStream = fixtureText("scout-doctor-core.ndjson");
+const pinnedServiceStatus = JSON.parse(fixtureText("scout-runtime-service-status-pinned.json"));
+const REMOTE_RUNTIME_STATUS_JS = [
+  'const env = process.env;',
+  'env.OPENSCOUT_INSTANCE = env.OPENSCOUT_INSTANCE?.trim() || env.OPENSCOUT_CLIENT_INSTANCE?.trim() || "prod";',
+  'const result = require("node:child_process").spawnSync("openscout-runtime", ["service", "status", "--json"], { env, stdio: "inherit" });',
+  'process.exit(result.status ?? 1);',
+].join(" ");
+const REMOTE_RUNTIME_STATUS_SHELL =
+  `js=$(command -v node || command -v bun) || exit 127; exec "$js" -e '${REMOTE_RUNTIME_STATUS_JS}'`;
+const remoteRuntimeCommand = ["/bin/sh", "-c", "'" + REMOTE_RUNTIME_STATUS_SHELL.replace(/'/g, "'\\''") + "'"];
+
+/** Exercise the real default probe, not dependencies.probe. Every executable
+ * boundary is a fixture; neither a local service nor an SSH host is contacted. */
+function defaultProbeFixture(
+  service: (remote: boolean, read: number) => { stdout: string; stderr?: string; exitCode?: number },
+  version: (remote: boolean) => string = () => "0.2.100",
+) {
+  const calls: string[][] = [];
+  const reads = { local: 0, remote: 0 };
+  const exec = async ({ argv }: { argv: string[]; timeoutMs: number }) => {
+    calls.push(argv);
+    const remote = argv[0] === "ssh";
+    const remoteCommand = remote ? argv.slice(2) : argv;
+    const command = remoteCommand.join(" ") === remoteRuntimeCommand.join(" ")
+      ? ["openscout-runtime", "service", "status", "--json"] : remoteCommand;
+    let stdout: string;
+    if (command.join(" ") === "openscout-runtime service status --json") {
+      const result = service(remote, ++reads[remote ? "remote" : "local"]);
+      return { stderr: "", exitCode: 0, ...result };
+    } else if (command.join(" ") === "scout doctor --json") {
+      stdout = coreDoctorStream;
+    } else if (command.join(" ") === "scout install --check --json") {
+      stdout = JSON.stringify({ installed: version(remote) });
+    } else if (command.join(" ") === "scout --version") {
+      stdout = `${version(remote)}\n`;
+    } else if (command.join(" ") === "scout app status --json") {
+      stdout = fixtureText("scout-app-status-healthy.json");
+    } else if (command.join(" ") === "ps -axo pid=,ppid=,etime=,args=") {
+      stdout = "";
+    } else {
+      throw Error(`Unexpected fixture executable: ${JSON.stringify(argv)}`);
+    }
+    return { stdout, stderr: "", exitCode: 0 };
+  };
+  return { exec, calls, reads };
+}
+
+describe("scout update — runtime service probe", () => {
+  for (const isSelf of [true, false]) {
+    test(`default ${isSelf ? "local" : "remote"} probe preserves a hold after core-only doctor JSON`, async () => {
+      // Captured from #100's real doctor command against an isolated /health
+      // fixture. It deliberately carries no artifact freshness or hold verdict.
+      expect(readRuntimeIdentityFromDoctorStream(coreDoctorStream)).toEqual({
+        runtimeVersion: null, runtimeIntentional: null, runtimeState: null, runtimeCommit: null,
+      });
+      const target = machine({ name: "FixturePeer", isSelf, hostNames: ["c100-fixture.invalid"], scoutNodeId: "node-fixture" });
+      const { context, text } = harness();
+      const { install, calls: installs } = fakeInstall();
+      const fixture = defaultProbeFixture(() => ({ stdout: JSON.stringify(pinnedServiceStatus) }));
+      await runUpdateCommand(context, [target.name, "--json"], {
+        loadMachines: async () => ({ machines: [target] }), install, exec: fixture.exec,
+      });
+      expect(JSON.parse(text()).machines[0]).toMatchObject({
+        state: "source-owned", execution: "none", reading: {
+          runtimeVersion: "0.2.78", runtimeIntentional: true, runtimeState: "pinned",
+          runtimeCommit: "1111111111111111111111111111111111111111",
+        },
+      });
+      expect(installs).toEqual([["--check"]]);
+      expect(fixture.calls).toContainEqual(isSelf
+        ? ["openscout-runtime", "service", "status", "--json"]
+        : ["ssh", "c100-fixture.invalid", ...remoteRuntimeCommand]);
+      expect(fixture.calls.some(argv => argv.includes("doctor") || argv.includes("--fix"))).toBe(false);
+      expect(process.exitCode).toBe(0);
+    });
+  }
+
+  const unknownCases = [
+    ["missing runtime command", { stdout: "", stderr: "openscout-runtime: command not found", exitCode: 127 }],
+    ["refused status even with plausible stdout", { stdout: JSON.stringify(pinnedServiceStatus), exitCode: 69 }],
+    ["invalid JSON", { stdout: "not JSON" }],
+    ["core-only doctor stream", { stdout: coreDoctorStream }],
+    ...[null, [], true, 42, "0.2.100"].map((value, index) =>
+      [`non-object status ${index}`, { stdout: JSON.stringify(value) }] as const),
+    ["absent freshness despite a health/build version", { stdout: JSON.stringify({
+      health: { build: { version: "0.2.100" } }, scoutdState: { runtimeBuild: { version: "0.2.100" } },
+    }) }],
+    ...[
+      null,
+      { state: "current", version: "0.2.100" },
+      { state: "current", version: "0.2.100", intentional: "false" },
+      { state: "current", version: 100, intentional: false },
+      { version: "0.2.100", intentional: false },
+      { state: "current", intentional: false },
+      { state: "", version: "0.2.100", intentional: false },
+      { state: "  ", version: "0.2.100", intentional: false },
+      { state: "current", version: "", intentional: false },
+      { state: "current", version: "  ", intentional: false },
+      { state: "current", version: "0.2.100", intentional: null },
+      { state: "current", version: "0.2.100", intentional: 0 },
+    ].map((runtimeFreshness, index) => [`invalid freshness ${index}`, { stdout: JSON.stringify({ runtimeFreshness }) }] as const),
+  ] as const;
+  for (const [name, response] of unknownCases) {
+    test(`${name} leaves both machines unreadable and installs nothing`, async () => {
+      const targets = [true, false].map(isSelf => machine({
+        name: isSelf ? "FixtureSelf" : "FixturePeer", isSelf, hostNames: ["c100-fixture.invalid"],
+      }));
+      const { context, text } = harness();
+      const { install, calls: installs } = fakeInstall();
+      const fixture = defaultProbeFixture(() => response);
+      let remoteInstalls = 0;
+      await runUpdateCommand(context, [...targets.map(target => target.name), "--json"], {
+        loadMachines: async () => ({ machines: targets }), install, exec: fixture.exec,
+        remoteInstall: async () => { remoteInstalls++; throw Error("Unexpected install"); },
+      });
+      for (const plan of JSON.parse(text()).machines) {
+        expect(plan).toMatchObject({ state: "unreadable", execution: "none", reading: {
+          runtimeVersion: null, runtimeIntentional: null, runtimeState: null, runtimeCommit: null,
+        } });
+      }
+      expect(installs).toEqual([["--check"]]);
+      expect(remoteInstalls).toBe(0);
+      expect(fixture.reads).toEqual({ local: 1, remote: 1 });
+      expect(fixture.calls.some(argv => argv.includes("doctor") || argv.includes("--fix"))).toBe(false);
+      expect(process.exitCode).toBe(1);
+    });
+  }
+
+  for (const isSelf of [true, false]) for (const intentional of [true, false]) {
+    test(`a nullable ${isSelf ? "local" : "remote"} service version retains the explicit hold observation: ${intentional}`, async () => {
+      const target = machine({ name: "FixtureSelf", isSelf, hostNames: ["c100-fixture.invalid"] });
+      const { context, text } = harness();
+      const { install, calls: installs } = fakeInstall();
+      const fixture = defaultProbeFixture(() => ({ stdout: JSON.stringify({
+        runtimeFreshness: { ...pinnedServiceStatus.runtimeFreshness, version: null,
+          intentional, state: intentional ? "pinned" : "unverified" },
+        // Only the public runtimeFreshness contract supplies the version.
+        scoutdState: { runtimeBuild: { version: "0.2.100" } },
+        health: { build: { version: "0.2.100" } },
+      }) }));
+      await runUpdateCommand(context, [target.name, "--json"], {
+        loadMachines: async () => ({ machines: [target] }), install, exec: fixture.exec,
+      });
+      expect(JSON.parse(text()).machines[0]).toMatchObject({
+        state: intentional ? "source-owned" : "unreadable", execution: "none",
+        reading: { runtimeVersion: null, runtimeIntentional: intentional,
+          runtimeState: intentional ? "pinned" : "unverified" },
+      });
+      expect(installs).toEqual([["--check"]]);
+      expect(process.exitCode).toBe(intentional ? 0 : 1);
+    });
+  }
+
+  test("local and remote probes keep their own runtime versions and hold observations", async () => {
+    const targets = [
+      machine({ name: "FixtureSelf", isSelf: true }),
+      machine({ name: "FixturePeer", hostNames: ["c100-fixture.invalid"] }),
+    ];
+    const { context, text } = harness();
+    const { install } = fakeInstall();
+    const fixture = defaultProbeFixture(remote => ({ stdout: JSON.stringify({ ...pinnedServiceStatus,
+      instance: remote ? "remote-selected-instance" : "local-selected-instance",
+      runtimeFreshness: { ...pinnedServiceStatus.runtimeFreshness,
+        version: remote ? "0.2.99" : "0.2.98", intentional: remote, state: remote ? "pinned" : "current",
+      },
+    }) }));
+    await runUpdateCommand(context, [...targets.map(target => target.name), "--check", "--json"], {
+      loadMachines: async () => ({ machines: targets }), install, exec: fixture.exec,
+    });
+    const plans = JSON.parse(text()).machines;
+    expect(plans[0]).toMatchObject({ label: "FixtureSelf", state: "update-available",
+      reading: { runtimeVersion: "0.2.98", runtimeIntentional: false } });
+    expect(plans[1]).toMatchObject({ label: "FixturePeer", state: "source-owned",
+      reading: { runtimeVersion: "0.2.99", runtimeIntentional: true } });
+    expect(fixture.calls.filter(argv => argv.some(arg => arg.includes("openscout-runtime")))).toEqual([
+      ["openscout-runtime", "service", "status", "--json"],
+      ["ssh", "c100-fixture.invalid", ...remoteRuntimeCommand],
+    ]);
+  });
+
+  for (const runtime of ["node", "bun"] as const) for (const selection of [
+    { env: { OPENSCOUT_INSTANCE: "remote-explicit", OPENSCOUT_CLIENT_INSTANCE: "remote-pointer" }, expected: "remote-explicit" },
+    { env: { OPENSCOUT_CLIENT_INSTANCE: "remote-pointer" }, expected: "remote-pointer" },
+    { env: {}, expected: "prod" },
+    { env: { OPENSCOUT_INSTANCE: " \t\n", OPENSCOUT_CLIENT_INSTANCE: "remote-pointer" }, expected: "remote-pointer" },
+    { env: { OPENSCOUT_INSTANCE: "\uFEFF\u00a0", OPENSCOUT_CLIENT_INSTANCE: "remote-pointer" }, expected: "remote-pointer" },
+    { env: { OPENSCOUT_INSTANCE: "", OPENSCOUT_CLIENT_INSTANCE: " \t\n" }, expected: "prod" },
+  ]) {
+    test.skipIf(runtime === "node" && !Bun.which("node"))(`remote service probe preserves the target's instance selection via ${runtime}: ${selection.expected}`, async () => {
+      const root = mkdtempSync(join(tmpdir(), "update-remote-instance-"));
+      try {
+        symlinkSync(runtime === "node" ? Bun.which("node")! : process.execPath, join(root, runtime));
+        symlinkSync(process.execPath, join(root, "fixture-js"));
+        const executable = join(root, "openscout-runtime");
+        writeFileSync(executable, `#!/bin/sh\nexec "\${0%/*}/fixture-js" -e 'console.log(JSON.stringify({runtimeFreshness:{version:"0.2.78",intentional:true,state:"pinned"},instance:process.env.OPENSCOUT_INSTANCE}))'\n`);
+        chmodSync(executable, 0o755);
+        const target = machine({ name: "FixturePeer", hostNames: ["c100-fixture.invalid"] });
+        const { context, text } = harness();
+        const { install, calls: installs } = fakeInstall();
+        const fixture = defaultProbeFixture(() => { throw Error("Must exercise the target-shell fixture"); });
+        context.env.OPENSCOUT_INSTANCE = "caller-must-not-leak";
+        context.env.OPENSCOUT_CLIENT_INSTANCE = "caller-pointer-must-not-leak";
+        const observedInstances: string[] = [];
+        await runUpdateCommand(context, [target.name, "--json"], {
+          loadMachines: async () => ({ machines: [target] }), install,
+          exec: async input => {
+            if (!input.argv.some(arg => arg.includes("openscout-runtime"))) return fixture.exec(input);
+            expect(input.argv.slice(0, 2)).toEqual(["ssh", "c100-fixture.invalid"]);
+            // Model only OpenSSH's target-shell boundary, in an owned local
+            // process with a fake runtime executable. No SSH or service runs.
+            const child = Bun.spawn(["/bin/sh", "-c", input.argv.slice(2).join(" ")], {
+              env: { HOME: root, PATH: root, ...selection.env },
+              stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 5_000,
+            });
+            const [exitCode, stdout, stderr] = await Promise.all([
+              child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+            ]);
+            expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
+            observedInstances.push(JSON.parse(stdout).instance);
+            return { exitCode, stdout, stderr };
+          },
+        });
+        expect(observedInstances).toEqual([selection.expected]);
+        expect(JSON.parse(text()).machines[0].state).toBe("source-owned");
+        expect(installs).toEqual([["--check"]]);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    });
+  }
+
+  for (const missing of ["interpreter", "runtime"] as const) {
+    test(`the target shell refuses a missing ${missing} without a private or doctor fallback`, async () => {
+      const root = mkdtempSync(join(tmpdir(), "update-missing-runtime-"));
+      try {
+        if (missing === "runtime") symlinkSync(process.execPath, join(root, "bun"));
+        const target = machine({ name: "FixturePeer", hostNames: ["c100-fixture.invalid"] });
+        const { context, text } = harness();
+        const { install, calls: installs } = fakeInstall();
+        const fixture = defaultProbeFixture(() => { throw Error("Unexpected fake status read"); });
+        let statusReads = 0;
+        await runUpdateCommand(context, [target.name, "--json"], {
+          loadMachines: async () => ({ machines: [target] }), install,
+          exec: async input => {
+            if (!input.argv.some(arg => arg.includes("openscout-runtime"))) return fixture.exec(input);
+            statusReads++;
+            const child = Bun.spawn(["/bin/sh", "-c", input.argv.slice(2).join(" ")], {
+              env: { HOME: root, PATH: root, OPENSCOUT_CLIENT_INSTANCE: "remote-pointer" },
+              stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 5_000,
+            });
+            const [exitCode, stdout, stderr] = await Promise.all([
+              child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+            ]);
+            expect(exitCode).not.toBe(0);
+            return { exitCode, stdout, stderr };
+          },
+        });
+        expect(statusReads).toBe(1);
+        expect(installs).toEqual([["--check"]]);
+        expect(JSON.parse(text()).machines[0]).toMatchObject({ state: "unreadable", execution: "none",
+          reading: { runtimeVersion: null, runtimeIntentional: null } });
+        expect(fixture.calls.some(argv => argv.includes("doctor") || argv.includes("--fix"))).toBe(false);
+        expect(process.exitCode).toBe(1);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    });
+  }
+
+  for (const isSelf of [true, false]) {
+    test(`the ${isSelf ? "local" : "remote candidate"} installer is followed by a fresh service-status probe`, async () => {
+      const target = machine({ name: "FixturePeer", isSelf, hostNames: ["c100-fixture.invalid"], scoutNodeId: "node-fixture" });
+      const { context, text } = harness();
+      const { install: lookup, calls: installs } = fakeInstall();
+      let installed = false;
+      const fixture = defaultProbeFixture(() => ({ stdout: JSON.stringify({ ...pinnedServiceStatus,
+        runtimeFreshness: { ...pinnedServiceStatus.runtimeFreshness,
+          version: installed && isSelf ? "0.2.101" : "0.2.100", intentional: false, state: "current",
+        },
+      }) }), () => installed ? "0.2.101" : "0.2.100");
+      const artifact = isSelf ? [] : ["--candidate", "/fixture/candidate", "--dmg", "/fixture/Scout.dmg"];
+      let remoteInstalls = 0;
+      await runUpdateCommand(context, [target.name, "--json", ...artifact], {
+        loadMachines: async () => ({ machines: [target] }), exec: fixture.exec,
+        install: async (ctx, args) => { await lookup(ctx, args); if (!args.includes("--check")) installed = true; },
+        remoteInstall: async options => {
+          expect(options.target.destination).toBe("c100-fixture.invalid");
+          remoteInstalls++; installed = true; return { schema: "openscout.remote-native-update.v1" };
+        },
+      });
+      expect(installed).toBe(true);
+      expect(fixture.reads).toEqual(isSelf ? { local: 2, remote: 0 } : { local: 0, remote: 2 });
+      expect(remoteInstalls).toBe(isSelf ? 0 : 1);
+      expect(installs).toEqual(isSelf ? [["--check"], []] : [["--check", ...artifact]]);
+      expect(JSON.parse(text()).machines[0]).toMatchObject({
+        state: isSelf ? "up-to-date" : "update-available",
+        reading: { runtimeVersion: isSelf ? "0.2.101" : "0.2.100", runtimeIntentional: false },
+      });
+      expect(JSON.parse(text()).status).toBe(isSelf ? "components-updated" : "partial");
+      expect(process.exitCode).toBe(isSelf ? 0 : 1);
+      // Keep the existing result scope; component equality is not bridge proof.
+      expect(JSON.parse(text()).unverified.length).toBeGreaterThan(0);
+    });
+  }
+
+  for (const isSelf of [true, false]) test(`a failed ${isSelf ? "local" : "remote candidate"} post-install service read stays partial instead of reusing the old verdict`, async () => {
+    const target = machine({ name: "FixtureSelf", isSelf, hostNames: ["c100-fixture.invalid"], scoutNodeId: "node-fixture" });
+    const { context, text } = harness();
+    const { install: lookup } = fakeInstall();
+    let installed = false;
+    const fixture = defaultProbeFixture((_remote, read) => read === 1
+      ? { stdout: JSON.stringify({ runtimeFreshness: { version: "0.2.100", intentional: false, state: "current" } }) }
+      : { stdout: "", exitCode: 127 }, () => installed ? "0.2.101" : "0.2.100");
+    const artifact = isSelf ? [] : ["--candidate", "/fixture/candidate", "--dmg", "/fixture/Scout.dmg"];
+    let remoteInstalls = 0;
+    await runUpdateCommand(context, [target.name, "--json", ...artifact], {
+      loadMachines: async () => ({ machines: [target] }), exec: fixture.exec,
+      install: async (ctx, args) => { await lookup(ctx, args); if (!args.includes("--check")) installed = true; },
+      remoteInstall: async () => { installed = true; remoteInstalls++; return { schema: "openscout.remote-native-update.v1" }; },
+    });
+    expect(installed).toBe(true);
+    expect(remoteInstalls).toBe(isSelf ? 0 : 1);
+    expect(fixture.reads).toEqual(isSelf ? { local: 2, remote: 0 } : { local: 0, remote: 2 });
+    expect(JSON.parse(text())).toMatchObject({ status: "partial", machines: [{
+      state: "unreadable", reading: { runtimeVersion: null, runtimeIntentional: null },
+    }] });
+    expect(process.exitCode).toBe(1);
+  });
+});
 
 describe("scout update — local compatibility", () => {
   test("with no machine name it delegates every argument to the installer", async () => {
