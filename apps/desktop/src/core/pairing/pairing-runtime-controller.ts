@@ -1,5 +1,4 @@
 import {
-  PAIRING_QR_TTL_MS,
   resolvedPairingConfig,
 } from "./runtime/config.ts";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -20,7 +19,6 @@ import {
   bytesToHex,
   loadOrCreateIdentity,
   trustedPeerCount,
-  type PairingQrPayload,
 } from "./runtime/security.ts";
 import {
   startPairingRuntime,
@@ -28,7 +26,6 @@ import {
   type StartedPairingRuntime,
 } from "./runtime/runtime.ts";
 
-const SCOUT_PAIR_REFRESH_LEEWAY_MS = 30_000;
 const SCOUT_PAIR_RESTART_DELAY_MS = 2_000;
 const SCOUT_PAIR_PARENT_WATCH_INTERVAL_MS = 5_000;
 const BONJOUR_SERVICE_TYPE = "_oscout-pair._tcp";
@@ -36,7 +33,6 @@ const BONJOUR_SERVICE_TYPE = "_oscout-pair._tcp";
 type PairingRuntimeControllerState = {
   current: PairingRuntimeSnapshot;
   restartTimer: ReturnType<typeof setTimeout> | null;
-  refreshTimer: ReturnType<typeof setTimeout> | null;
   parentWatchTimer: ReturnType<typeof setInterval> | null;
   intentionalStop: boolean;
   shuttingDown: boolean;
@@ -73,7 +69,6 @@ export async function runPairingRuntimeController(): Promise<void> {
       },
     )),
     restartTimer: null,
-    refreshTimer: null,
     parentWatchTimer: null,
     intentionalStop: false,
     shuttingDown: false,
@@ -190,6 +185,13 @@ async function startControlledPairingRuntime(state: PairingRuntimeControllerStat
 
     state.runtime = await startPairingRuntime({
       relayEndpoints,
+      onPairingOpportunity(payload) {
+        writeCurrent(state, {pairing: payload ? {
+          relay: payload.relay, fallbackRelays: payload.fallbackRelays,
+          room: payload.room, publicKey: payload.publicKey, expiresAt: payload.expiresAt,
+          qrArt: renderQRCode(payload), qrValue: JSON.stringify(payload),
+        } : null});
+      },
       relayEvents: {
         onConnecting(detail) {
           emitStatus("connecting", `Connecting to ${detail?.relayUrl ?? activeRelayUrl}`);
@@ -215,26 +217,18 @@ async function startControlledPairingRuntime(state: PairingRuntimeControllerStat
 
     writeCurrent(state, {
       status: "connecting",
-      statusLabel: "Pairing Ready",
-      statusDetail: `Relay room ${payload.room} is waiting for Scout.`,
+      statusLabel: "Connected",
+      statusDetail: "Trusted peers can reconnect. Start pairing to show a new QR.",
       connectedPeerFingerprint: null,
       relay: activeRelayUrl,
-      pairing: {
-        relay: payload.relay,
-        ...(payload.fallbackRelays?.length ? { fallbackRelays: payload.fallbackRelays } : {}),
-        room: payload.room,
-        publicKey: payload.publicKey,
-        expiresAt: payload.expiresAt,
-        qrArt: renderQRCode(payload),
-        qrValue: JSON.stringify(payload),
-      },
+      // Daemon startup/restart is reconnect-only. Local QR control opens a window.
+      pairing: null,
       childPid: null,
     }, {
       identityFingerprint: publicKeyHex.slice(0, 16),
       trustedPeerCount: trustedPeerCount(),
     });
 
-    schedulePairingRefresh(state, payload);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     writeCurrent(state, {
@@ -285,55 +279,8 @@ function scheduleRestart(state: PairingRuntimeControllerState): void {
   }, SCOUT_PAIR_RESTART_DELAY_MS);
 }
 
-function schedulePairingRefresh(state: PairingRuntimeControllerState, payload: PairingQrPayload): void {
-  clearRefreshTimer(state);
-  const delayMs = Math.max(1_000, payload.expiresAt - Date.now() - SCOUT_PAIR_REFRESH_LEEWAY_MS);
-  state.refreshTimer = setTimeout(() => {
-    state.refreshTimer = null;
-    if (state.current.pairing) {
-      refreshPairingPayload(state);
-      return;
-    }
-    void startControlledPairingRuntime(state);
-  }, Math.min(delayMs, PAIRING_QR_TTL_MS));
-}
-
-function refreshPairingPayload(state: PairingRuntimeControllerState): void {
-  const pairing = state.current.pairing;
-  if (!pairing) {
-    void startControlledPairingRuntime(state);
-    return;
-  }
-
-  const payload = refreshedPairingPayload(pairing);
-  writeCurrent(state, {
-    pairing: {
-      relay: payload.relay,
-      ...(payload.fallbackRelays?.length ? { fallbackRelays: payload.fallbackRelays } : {}),
-      room: payload.room,
-      publicKey: payload.publicKey,
-      expiresAt: payload.expiresAt,
-      qrArt: renderQRCode(payload),
-      qrValue: JSON.stringify(payload),
-    },
-  });
-  schedulePairingRefresh(state, payload);
-}
-
-function refreshedPairingPayload(pairing: NonNullable<PairingRuntimeSnapshot["pairing"]>): PairingQrPayload {
-  return {
-    v: 1,
-    relay: pairing.relay,
-    ...(pairing.fallbackRelays?.length ? { fallbackRelays: pairing.fallbackRelays } : {}),
-    room: pairing.room,
-    publicKey: pairing.publicKey,
-    expiresAt: Date.now() + PAIRING_QR_TTL_MS,
-  };
-}
-
 function clearRuntimeControllerTimers(state: PairingRuntimeControllerState): void {
   clearRestartTimer(state);
-  clearRefreshTimer(state);
 }
 
 function startParentProcessWatch(state: PairingRuntimeControllerState, onMissingParent: () => void): void {
@@ -375,13 +322,6 @@ function clearRestartTimer(state: PairingRuntimeControllerState): void {
   if (state.restartTimer) {
     clearTimeout(state.restartTimer);
     state.restartTimer = null;
-  }
-}
-
-function clearRefreshTimer(state: PairingRuntimeControllerState): void {
-  if (state.refreshTimer) {
-    clearTimeout(state.refreshTimer);
-    state.refreshTimer = null;
   }
 }
 

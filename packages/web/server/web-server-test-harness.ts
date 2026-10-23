@@ -109,6 +109,7 @@ export const stubs = {
   queryTerminalSessionsResult: [] as Array<Record<string, unknown>>,
   queryDiscoveredTerminalSessionsResult: [] as Array<Record<string, unknown>>,
   brokerDiagnosticsResult: makeBrokerDiagnostics() as Record<string, unknown>,
+  controlPairingCalls: 0,
   pairingStateResult: makePairingState() as Record<string, unknown>,
   getPairingStateCalls: 0,
   refreshPairingStateCalls: 0,
@@ -277,7 +278,7 @@ mock.module("./terminal-session-discovery.ts", () => ({
 export const realScoutPairing = realScoutPairingModule;
 mock.module("./pairing.ts", () => ({
   ...realScoutPairing,
-  controlScoutWebPairingService: async () => stubs.pairingStateResult,
+  controlScoutWebPairingService: async () => { stubs.controlPairingCalls++; return stubs.pairingStateResult; },
   interruptScoutWebPairingTurn: async (input: Record<string, unknown>) => {
     interruptPairingCalls.push(input);
     if (stubs.interruptPairingFailure) throw new Error("Controlled interrupt uncertainty");
@@ -1127,6 +1128,7 @@ export function installWebServerTestHooks(): void {
     queryAgentsLimits.length = 0;
     stubs.queryTerminalSessionsResult = [];
     stubs.queryDiscoveredTerminalSessionsResult = [];
+    stubs.controlPairingCalls = 0;
     stubs.pairingStateResult = makePairingState();
     stubs.getPairingStateCalls = 0;
     stubs.refreshPairingStateCalls = 0;

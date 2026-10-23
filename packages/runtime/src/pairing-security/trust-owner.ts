@@ -41,6 +41,13 @@ type Generation = {
   managed: Marker | null; mutation: SavedOutcome; adoption?: ProjectionAdoption | null;
   projectionStage?: string;
 };
+/** A local, single-use pairing opportunity. Never accepted from request data. */
+export interface PairingOpportunity {
+  readonly id: string;
+  readonly expiresAt: number;
+  cancel(): void;
+  admit(publicKey: string, room: string, isLive: () => boolean): boolean;
+}
 export type TrustSnapshot = Readonly<{ revision: number; peers: readonly TrustedPeer[] }>;
 type State = { revision: number; peers: TrustedPeer[]; hash: string; peersHash: string;
   managed: Marker | null; outcomes: Record<string, SavedOutcome>; bytes: number;
@@ -430,7 +437,48 @@ export class PairingTrustOwner {
       if (root) this.recordLastSeen(root, snapshot.peers, publicKey, lastSeen);
     } catch { /* Authority succeeded; advisory metadata is optional. */ }
   }
+  /** Trusted local workflow only. Opening a window does not write authority.
+   * Any intervening authority change cancels it; advisory lastSeen is excluded. */
+  openPairingOpportunity(room: string, expiresAt: number): PairingOpportunity {
+    if (typeof room !== "string" || !room || room.length > 256 || !Number.isFinite(expiresAt) || expiresAt <= Date.now()
+      || expiresAt - Date.now() > 300_000) refuse("invalid_pairing_opportunity");
+    this.root(true);
+    const stamp = (root: PairingRootIdentity, state: State) => hash(JSON.stringify([
+      root.id, state.revision, state.hash, state.projectionHash, state.managed,
+    ]));
+    const baseline = this.operation(undefined, root => stamp(root!, this.readyState(root!)));
+    const deadline = performance.now() + (expiresAt - Date.now());
+    const id = randomUUID(); let closed = false, consumed = false;
+    const valid = () => !closed && !consumed && Date.now() < expiresAt && performance.now() < deadline;
+    return Object.freeze({ id, expiresAt,
+      toJSON(): never { return refuse("opportunity_not_serializable"); },
+      cancel() { closed = true; },
+      admit: (publicKey: string, logicalRoom: string, isLive: () => boolean) => {
+        try {
+          fullKey(publicKey);
+          if (logicalRoom !== room || !isLive() || !valid()) { closed = true; return false; }
+          return this.operation(undefined, (root, invocation) => {
+            const state = this.readyState(root!);
+            if (!isLive() || !valid() || stamp(root!, state) !== baseline) { closed = true; return false; }
+            // Consume before publication, including failed/uncertain publication.
+            consumed = true;
+            const peer = {publicKey, pairedAt: new Date().toISOString()};
+            const context = invocation ? this.contextFor(invocation) : undefined;
+            this.mutateGuarded(state.revision, id, {type: "grant", peer}, context, () => {
+              const current = this.readyState(root!);
+              if (!isLive() || closed || Date.now() >= expiresAt || performance.now() >= deadline
+                || stamp(root!, current) !== baseline) refuse("pairing_opportunity_closed");
+            });
+            return true;
+          });
+        } catch (error) { closed = true; throw error; }
+      },
+    });
+  }
   mutate(expectedRevision: number, mutationId: string, raw: TrustMutation, context?: PairingTrustContext): TrustOutcome {
+    return this.mutateGuarded(expectedRevision, mutationId, raw, context);
+  }
+  private mutateGuarded(expectedRevision: number, mutationId: string, raw: TrustMutation, context?: PairingTrustContext, beforePublish?: () => void): TrustOutcome {
     // Snapshot untrusted caller-owned objects before adapter callbacks or I/O.
     const mutation = structuredClone(raw);
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || !/^[a-zA-Z0-9._:-]{1,128}$/.test(mutationId)) refuse("invalid_mutation");
@@ -488,6 +536,7 @@ export class PairingTrustOwner {
         if (before.revision !== expectedRevision || before.hash !== state.hash || before.projectionHash !== state.projectionHash) refuse("revision_conflict");
         if (invocation) { this.validateInvocation(invocation, root); invocation.used = true; }
         // Exclusive immutable generation name is the unmanaged CAS. No new lock.
+        beforePublish?.();
         try { linkSync(stagedGeneration, join(root.path, `${PREFIX}${outcome.revision}.json`)); }
         catch (e) { if ((e as NodeJS.ErrnoException).code === "EEXIST") refuse("revision_conflict"); throw e; }
         reserved = true;
