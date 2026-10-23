@@ -47,3 +47,21 @@ test("a changed projection immediately before publication cannot slip into a gra
  })).toThrow("pairing_opportunity_closed");
  expect(owner.read().revision).toBe(0);expect(owner.read().peers.map(p=>p.publicKey)).toEqual([other]);
 });
+
+test("request full-key binding refuses mismatches without consumption, including trusted peers", () => {
+ const owner=setup();owner.mutate(0,"seed-other",{type:"grant",peer:{publicKey:other,pairedAt:"2026-01-01"}});
+ const w=owner.openPairingOpportunity("request",Date.now()+1000,key);
+ expect(w.admit(other,"request",()=>true)).toBe(false);expect(w.isOpen()).toBe(true);
+ expect(w.admit(key,"request",()=>true)).toBe(true);expect(w.isOpen()).toBe(false);
+ expect(()=>owner.openPairingOpportunity("request",Date.now()+1000,key.slice(0,16))).toThrow();
+ const trusted=owner.openPairingOpportunity("request",Date.now()+1000,key), revision=owner.read().revision;
+ expect(trusted.admit(key,"request",()=>true)).toBe(true);expect(owner.read().revision).toBe(revision);
+});
+test("request validity observes authority change, expiry, and late trusted-key revocation", async () => {
+ const owner=setup();const w=owner.openPairingOpportunity("request",Date.now()+1000,key);
+ owner.mutate(0,"other",{type:"grant",peer:{publicKey:other,pairedAt:"2026-01-01"}});
+ expect(w.isOpen()).toBe(false);expect(w.admit(key,"request",()=>true)).toBe(false);
+ const exp=owner.openPairingOpportunity("request",Date.now()+10,key);await Bun.sleep(20);expect(exp.isOpen()).toBe(false);
+ const trusted=owner.openPairingOpportunity("request",Date.now()+1000,other);let checks=0;
+ expect(trusted.admit(other,"request",()=>{if(++checks===2)owner.mutate(owner.read().revision,"revoke",{type:"revoke",publicKey:other});return true;})).toBe(false);
+});

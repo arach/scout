@@ -1694,3 +1694,32 @@ describe("pending pair request store test isolation", () => {
     });
   });
 });
+
+
+describe("request Noise key binding", () => {
+  test("preserves immutable full-key metadata across store instances", () => {
+    const statePath = pairRequestStatePath(tempConfigHome());
+    const phone = createPendingPairRequestStore({statePath}), host = createPendingPairRequestStore({statePath});
+    try {
+      const request = phone.create({requesterIp: "192.0.2.1", requesterPublicKey: "a".repeat(64)});
+      expect(host.get(request.token)?.requesterPublicKey).toBe("a".repeat(64));
+      host.decide(request.token, "approve");
+      expect(phone.get(request.token)?.requesterPublicKey).toBe("a".repeat(64));
+      expect(phone.fulfill(request.token, "approved")?.requesterPublicKey).toBe("a".repeat(64));
+    } finally {phone.dispose();host.dispose();}
+  });
+  test("normalizes full keys, never rebinds a token, and does not redisclose approved tokens", () => {
+    const store = createPendingPairRequestStore();
+    try {
+      const first = store.create({requesterIp: "192.0.2.1", requesterPublicKey: "A".repeat(64)});
+      expect(first.requesterPublicKey).toBe("a".repeat(64));
+      expect(store.create({requesterIp: "192.0.2.1", requesterPublicKey: "a".repeat(64)}).token).toBe(first.token);
+      const other = store.create({requesterIp: "192.0.2.1", requesterPublicKey: "b".repeat(64)});
+      expect(other.token).not.toBe(first.token);
+      store.decide(first.token, "approve");
+      expect(store.create({requesterIp: "192.0.2.1", requesterPublicKey: "a".repeat(64)}).token).not.toBe(first.token);
+      expect(store.get(first.token)?.requesterPublicKey).toBe("a".repeat(64));
+      expect(() => store.create({requesterPublicKey: "a".repeat(16)})).toThrow("full Noise public key");
+    } finally { store.dispose(); }
+  });
+});

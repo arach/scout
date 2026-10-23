@@ -1,3 +1,4 @@
+import type { PairingOpportunityControlAction, PairingRequestBinding } from "@openscout/runtime/pairing-local-socket";
 // Bridge server — Hono + tRPC edition.
 //
 // Drop-in replacement for server.ts.  Exports `startBridgeServerTRPC` with the
@@ -228,7 +229,7 @@ export function startBridgeServerTRPC(options: {
   secure?: boolean;
   identity?: KeyPair;
   /** Trusted bootstrap hook; intercepted before the remotely callable router. */
-  pairingControl?: (action: "open" | "cancel", windowId?: string) => unknown;
+  pairingControl?: (action: PairingOpportunityControlAction, windowId?: string, binding?: PairingRequestBinding) => unknown;
 }): { stop: () => void } {
   const { bridge, port, secure = false, identity } = options;
   const ownPublicKeyHex = identity ? bytesToHex(identity.publicKey) : null;
@@ -295,12 +296,17 @@ export function startBridgeServerTRPC(options: {
           const frame = JSON.stringify(value);
           if (state.transport) state.transport.send(frame); else ws.send(frame);
         };
-        const {action, windowId} = request.params ?? {};
-        if (!state.localService || !options.pairingControl || !["open", "cancel"].includes(action)
+        const {action, windowId, binding} = request.params ?? {};
+        const requestAction = ["request-open", "request-read", "request-cancel"].includes(action);
+        const validBinding = binding && typeof binding.requestId === "string"
+          && /^[a-zA-Z0-9._:-]{1,128}$/.test(binding.requestId)
+          && (binding.publicKey === undefined || (typeof binding.publicKey === "string" && /^[a-f0-9]{64}$/.test(binding.publicKey)));
+        if (!state.localService || !options.pairingControl || !["open", "cancel", "request-open", "request-read", "request-cancel"].includes(action)
+          || (requestAction && !validBinding)
           || (windowId !== undefined && typeof windowId !== "string")) {
           sendControl({id: request.id, error: {code: -32001, message: "Local pairing control requires the host identity"}});
         } else {
-          try { sendControl({id: request.id, result: options.pairingControl(action, windowId)}); }
+          try { sendControl({id: request.id, result: options.pairingControl(action, windowId, binding)}); }
           catch (error) { log.error("pairing", `Local pairing control failed: ${String(error)}`); sendControl({id: request.id, error: {code: -32000, message: "Pairing authority unavailable"}}); }
         }
         return;

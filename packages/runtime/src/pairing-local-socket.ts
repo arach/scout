@@ -205,9 +205,24 @@ export async function openPairingLocalChannel(
 
 /** Explicit local QR workflow control, authenticated with this host's own key.
  * A phone's paired key cannot invoke the server-side control hook. */
-export async function requestLocalPairingOpportunity(
-  port: number, action: "open" | "cancel", windowId?: string,
-): Promise<{ windowId: string; payload: QRPayload } | null> {
+export type PairingOpportunityControlAction = "open" | "cancel" | "request-open" | "request-read" | "request-cancel";
+export type PairingRequestBinding = { requestId: string; publicKey?: string };
+export type LocalPairingOpportunity = { windowId: string; payload: QRPayload };
+
+export function requestLocalPairingOpportunity(port: number, action: "open" | "cancel", windowId?: string) {
+  return requestLocalPairingControl(port, {action, windowId});
+}
+
+/** Same own-key control, isolated from the QR surface and keyed by request. */
+export function requestLocalApprovalPairingOpportunity(
+  port: number, action: "open" | "read" | "cancel", binding: PairingRequestBinding,
+) {
+  return requestLocalPairingControl(port, {action: `request-${action}`, binding});
+}
+
+async function requestLocalPairingControl(
+  port: number, params: {action: PairingOpportunityControlAction; windowId?: string; binding?: PairingRequestBinding},
+): Promise<LocalPairingOpportunity | null> {
   let channel: PairingLocalChannel | undefined;
   type Result = {windowId: string; payload: QRPayload} | null;
   let settle!: (value: Result) => void, fail!: (error: Error) => void;
@@ -230,7 +245,7 @@ export async function requestLocalPairingOpportunity(
       onClose() { fail(new Error("Local pairing control disconnected")); },
     }, {timeoutMs: 5_000, subscribeEvents: false, expectedMode: "secure"});
     if (expired) throw new Error("Local pairing control timed out");
-    channel.send(JSON.stringify({id, method: "pairing/opportunity", params: {action, windowId}}));
+    channel.send(JSON.stringify({id, method: "pairing/opportunity", params}));
     return await result;
   } finally { clearTimeout(timer); channel?.close(); }
 }

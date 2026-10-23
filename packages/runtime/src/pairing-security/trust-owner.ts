@@ -46,6 +46,7 @@ export interface PairingOpportunity {
   readonly id: string;
   readonly expiresAt: number;
   cancel(): void;
+  isOpen(): boolean;
   admit(publicKey: string, room: string, isLive: () => boolean): boolean;
 }
 export type TrustSnapshot = Readonly<{ revision: number; peers: readonly TrustedPeer[] }>;
@@ -439,7 +440,8 @@ export class PairingTrustOwner {
   }
   /** Trusted local workflow only. Opening a window does not write authority.
    * Any intervening authority change cancels it; advisory lastSeen is excluded. */
-  openPairingOpportunity(room: string, expiresAt: number): PairingOpportunity {
+  openPairingOpportunity(room: string, expiresAt: number, expectedPublicKey?: string): PairingOpportunity {
+    if (expectedPublicKey !== undefined) fullKey(expectedPublicKey);
     if (typeof room !== "string" || !room || room.length > 256 || !Number.isFinite(expiresAt) || expiresAt <= Date.now()
       || expiresAt - Date.now() > 300_000) refuse("invalid_pairing_opportunity");
     this.root(true);
@@ -453,15 +455,31 @@ export class PairingTrustOwner {
     return Object.freeze({ id, expiresAt,
       toJSON(): never { return refuse("opportunity_not_serializable"); },
       cancel() { closed = true; },
+      isOpen: () => {
+        if (!valid()) { closed = true; return false; }
+        try {
+          const current = this.operation(undefined, root => stamp(root!, this.readyState(root!)));
+          if (current !== baseline) closed = true;
+          return valid();
+        } catch { closed = true; return false; }
+      },
       admit: (publicKey: string, logicalRoom: string, isLive: () => boolean) => {
         try {
           fullKey(publicKey);
+          // A different key cannot consume a named request's opportunity.
+          if (expectedPublicKey !== undefined && publicKey !== expectedPublicKey) return false;
           if (logicalRoom !== room || !isLive() || !valid()) { closed = true; return false; }
           return this.operation(undefined, (root, invocation) => {
             const state = this.readyState(root!);
             if (!isLive() || !valid() || stamp(root!, state) !== baseline) { closed = true; return false; }
             // Consume before publication, including failed/uncertain publication.
             consumed = true;
+            // A trusted scan still consumes, but creates no authority generation.
+            if (state.peers.some(peer => peer.publicKey === publicKey)) {
+              if (!isLive() || closed || Date.now() >= expiresAt || performance.now() >= deadline
+                || stamp(root!, this.readyState(root!)) !== baseline) { closed = true; return false; }
+              return true;
+            }
             const peer = {publicKey, pairedAt: new Date().toISOString()};
             const context = invocation ? this.contextFor(invocation) : undefined;
             this.mutateGuarded(state.revision, id, {type: "grant", peer}, context, () => {

@@ -40,7 +40,7 @@ trusted relay transport, including when called from the pairing connection.
 
 Each explicit pairing action joins a fresh **pairing room** on every configured
 relay, without the bridge-key query parameter. Only the QR invitation carries
-that room; discovery by bridge key cannot obtain it. Any admission in this room
+that Show-code room; discovery by bridge key cannot obtain it. Any admission in this room
 closes the window, including an already-paired phone scanning the QR. A revoked
 phone that physically scans the new QR and pairs is a deliberate regrant.
 An automatic revoked-phone retry resolves only the reconnect room and gets
@@ -70,10 +70,73 @@ roomless entrypoint is not compatible. This change adds no new entrypoint kind.
 **Known effect:** the phone's network pairing list is empty for these hosts.
 Existing non-pairing mesh presence is unchanged.
 
-The approval-gated `/pair` route can deliver only the current explicit window's
-pairing payload, never a reconnect-room payload. Approval does not open a window.
-An approved request outside a window keeps polling without a payload; approval
-during a window permits one retrieval of that window's invitation.
+## Request-bound approval windows
+
+Approving a named request on the authenticated host is an explicit local pairing
+action. It starts the reconnect-only controller if necessary, then opens a
+private pairing window for that request. It does not press Show code or read an
+existing QR. The approved response is the possession channel in place of a QR.
+
+A device can add the optional `x-scout-device-public-key` header to its first
+`GET /pair` request. The value is its full 32-byte Noise static public key as
+64 hexadecimal characters. The host normalizes hex case and rejects malformed
+values or prefixes with HTTP 400. Older phones omit the header unchanged.
+The request store keeps this key immutable for that token, including across
+server instances. Different keys do not share pending requests. A fresh knock
+never retrieves an already-approved token by IP or public key.
+
+For a keyed request, the canonical owner's `openPairingOpportunity` captures the
+expected full key. Its admission check rejects another full key **without
+consuming or cancelling** the window. This applies to already-trusted keys too;
+the relay cannot bypass request authorization through its trusted-key fast path.
+A trusted matching key consumes the window without a new authority generation.
+With no supplied key, the one-time approved response binds delivery and the
+first admitted key consumes the window. Neither an IP address nor a display
+label proves a Noise identity.
+
+### Coexisting windows
+
+One Show-code window and up to 32 request windows can coexist. Separate approvals
+use separate rooms. Opening, reading or cancelling one request never replaces
+the QR or another request window. Show code replaces only the previous QR
+window. Admission retires only its own room under the same retire-until-empty
+policy. **An actual trust-authority change invalidates every older opportunity**,
+including a grant made by another window. Independence does not permit stale
+baselines: after such a change an unconsumed request needs a new explicit
+approval/request, not an automatic retry. A trusted admission with no generation
+change does not invalidate the other windows.
+
+The lifetime is at most five minutes from first opening, using both clocks.
+Repeated approval calls for the same live token are idempotent and do not rotate
+the room or extend the deadline. Cancellation, consumption or invalidation retains a spent request ID for
+the runtime lifetime. Payloads and timers are collected at the fixed deadline,
+but a retry cannot reopen that token; the host gets HTTP
+409 and must use a new request. Expired request-store rows cannot retrieve a
+payload even if the runtime's deadline has not elapsed. A delivered invitation
+remains usable until admission, cancellation, authority change or the fixed
+window deadline. Fulfillment is not admission.
+
+### Delivery and the host view
+
+Only a poll for that live approved token can read its private window over the
+host-own-key local control channel. The route consumes the token through the
+existing shared-store `fulfill(..., "approved")` CAS **before** returning the
+invitation redirect. Pending, denied, expired, fulfilled or different tokens
+get no room from that request. Denial cancels its runtime window, including when approval was waiting for
+controller startup. Concurrent
+polls have one fulfillment winner. Polls and state reads never open a window.
+A bridge/control failure returns no payload and never falls back to the QR.
+
+Approval rooms do not enter `onPairingOpportunity`, the runtime's QR payload,
+controller status events, pairing state, rendezvous, `/resolve` or `/healthz`.
+The host's existing QR card stays unchanged, or stays hidden if no Show-code
+window is open. The request-list API shows the approval and optional full key, not
+the room. Stop/shutdown closes all windows. Runtime restart loses private
+windows rather than reconstructing permission from approved cache rows.
+
+Approval before a later revocation does not authorize the revoked key to use
+that window. A fresh explicit approval of the named key **after** revocation is
+a deliberate regrant, just as physically scanning a fresh QR is.
 
 Controller/daemon startup and restart (including the maintenance Restart button)
 are reconnect-only. Only the explicit Show code / Start pairing action opens a window. There is no
@@ -85,13 +148,16 @@ pairing action can deliberately pair the same key after revocation.
 
 ## Trusted local control
 
-The runtime exposes typed `openPairing` and `cancelPairing` composition methods.
+The runtime exposes typed `openPairing`, `cancelPairing` and request-scoped
+`approvalPairing` composition methods.
 A running controller receives local `pairing/opportunity` JSON-RPC control on
 its direct Noise channel. The server intercepts this before the application
 router and requires authenticated full-key equality with its own host identity.
 A paired phone key, claimed device ID, plaintext client, HTTP header or relayed
-RPC cannot open the opportunity. The local request contains only `open` or
-`cancel` and an optional cancellation ID, never a principal or a grant.
+RPC cannot open the opportunity. The QR control carries `open` or `cancel` and an optional cancellation ID.
+Request control carries `request-open`, `request-read` or `request-cancel`, a
+request ID and its optional expected full key. These are local composition
+inputs after host approval, never a grant accepted from a relayed RPC.
 
 This is the existing trusted same-user/local-build boundary, not a sandbox
 against a hostile process holding the host's private key. Local service
@@ -154,3 +220,8 @@ QR rooms, deliberate regrant by scan, and retirement for both relay clients.
 `packages/runtime/src/pairing-security/pairing-opportunity.test.ts` covers owner
 baselines, guarded publication and managed-gate use. These are not physical
 phone UI or complete credential-revocation tests.
+
+`bun test scripts/approval-pairing.test.ts` covers shared HTTP route/store logic
+through the actual own-key control and both relay clients, with instrumented
+application sinks. It verifies keyed and legacy admission, private delivery,
+coexisting windows, denial/replay/expiry, and authority cancellation.

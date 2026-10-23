@@ -110,6 +110,8 @@ export const stubs = {
   queryDiscoveredTerminalSessionsResult: [] as Array<Record<string, unknown>>,
   brokerDiagnosticsResult: makeBrokerDiagnostics() as Record<string, unknown>,
   controlPairingCalls: 0,
+  approvalPairingCalls: [] as Array<{action: string; request: {token: string; requesterPublicKey?: string | null}}>,
+  approvalPairingWindows: new Map<string, {windowId: string; payload: Record<string, unknown>}>(),
   pairingStateResult: makePairingState() as Record<string, unknown>,
   getPairingStateCalls: 0,
   refreshPairingStateCalls: 0,
@@ -278,6 +280,17 @@ mock.module("./terminal-session-discovery.ts", () => ({
 export const realScoutPairing = realScoutPairingModule;
 mock.module("./pairing.ts", () => ({
   ...realScoutPairing,
+  controlScoutWebApprovalPairing: async (action: string, request: {token: string; requesterPublicKey?: string | null}) => {
+    stubs.approvalPairingCalls.push({action, request});
+    if (action === "cancel") { stubs.approvalPairingWindows.delete(request.token); return null; }
+    if (action === "open" && !stubs.approvalPairingWindows.has(request.token)) {
+      stubs.approvalPairingWindows.set(request.token, {windowId: crypto.randomUUID(), payload: {
+        v: 1, relay: "wss://relay.example.test", room: `request-${request.token}`,
+        publicKey: "b".repeat(64), expiresAt: Date.now() + 300000,
+      }});
+    }
+    return stubs.approvalPairingWindows.get(request.token) ?? null;
+  },
   controlScoutWebPairingService: async () => { stubs.controlPairingCalls++; return stubs.pairingStateResult; },
   interruptScoutWebPairingTurn: async (input: Record<string, unknown>) => {
     interruptPairingCalls.push(input);
@@ -1129,6 +1142,8 @@ export function installWebServerTestHooks(): void {
     stubs.queryTerminalSessionsResult = [];
     stubs.queryDiscoveredTerminalSessionsResult = [];
     stubs.controlPairingCalls = 0;
+    stubs.approvalPairingCalls.length = 0;
+    stubs.approvalPairingWindows.clear();
     stubs.pairingStateResult = makePairingState();
     stubs.getPairingStateCalls = 0;
     stubs.refreshPairingStateCalls = 0;
