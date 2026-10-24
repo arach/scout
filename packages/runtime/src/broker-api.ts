@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "./effect-admission.js";
 import { existsSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 
@@ -897,7 +898,7 @@ export async function maybePostJsonToActiveScoutBrokerService<T>(
   baseUrl: string,
   path: string,
   body: unknown,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; beforeEffect?: () => void } = {},
 ): Promise<ActiveScoutBrokerServiceResult<T>> {
   const service = getActiveServiceForBaseUrl(baseUrl);
   if (!service) {
@@ -905,6 +906,7 @@ export async function maybePostJsonToActiveScoutBrokerService<T>(
   }
 
   const url = new URL(path, normalizeBaseUrl(baseUrl));
+  admitSynchronousEffect(options.beforeEffect); // final in-process broker submission
 
   if (url.pathname === "/v1/commands") {
     return handled(await service.executeCommand(body as ControlCommand) as T);

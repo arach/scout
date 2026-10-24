@@ -996,6 +996,7 @@ async function brokerReadJson<T>(baseUrl: string, path: string, signal?: AbortSi
 }
 
 type BrokerPostJsonOptions<T> = {
+  beforeEffect?: () => void;
   acceptErrorJson?: (value: unknown) => value is T;
   signal?: AbortSignal;
 };
@@ -1010,7 +1011,7 @@ async function brokerPostJson<T>(
     baseUrl,
     path,
     body,
-    { signal: options.signal },
+    { signal: options.signal, beforeEffect: options.beforeEffect },
   );
   if (direct.handled) {
     return direct.value;
@@ -1021,6 +1022,7 @@ async function brokerPostJson<T>(
     body,
     acceptErrorJson: options.acceptErrorJson,
     signal: options.signal,
+    beforeEffect: options.beforeEffect,
     socketPath: resolveBrokerSocketPathForBaseUrl(baseUrl),
   });
 }
@@ -1036,12 +1038,13 @@ function isScoutDeliverResponse(value: unknown): value is ScoutDeliverResponse {
 async function brokerPostDeliver(
   baseUrl: string,
   body: unknown,
+  beforeEffect?: () => void,
 ): Promise<ScoutDeliverResponse> {
   return brokerPostJson<ScoutDeliverResponse>(
     baseUrl,
     scoutBrokerPaths.v1.deliver,
     body,
-    { acceptErrorJson: isScoutDeliverResponse },
+    { acceptErrorJson: isScoutDeliverResponse, beforeEffect },
   );
 }
 
@@ -2291,6 +2294,7 @@ async function ensureBrokerActor(
   snapshot: ScoutBrokerSnapshot,
   actorId: string,
   displayName?: string,
+  beforeEffect?: () => void,
 ): Promise<void> {
   const resolvedDisplayName = actorId === OPERATOR_ID
     ? displayName?.trim() || resolveOperatorName()
@@ -2308,7 +2312,7 @@ async function ensureBrokerActor(
         labels: existingActor.labels ?? ["scout"],
         metadata: existingActor.metadata ?? { source: "scout-cli" },
       };
-      await brokerPostJson(baseUrl, scoutBrokerPaths.v1.actors, actor);
+      await brokerPostJson(baseUrl, scoutBrokerPaths.v1.actors, actor, {beforeEffect});
       snapshot.actors[actorId] = actor;
     }
     return;
@@ -2321,7 +2325,7 @@ async function ensureBrokerActor(
     labels: ["scout"],
     metadata: { source: "scout-cli" },
   };
-  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.actors, actor);
+  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.actors, actor, {beforeEffect});
   snapshot.actors[actorId] = actor;
 }
 
@@ -2329,11 +2333,11 @@ async function syncBrokerBinding(
   baseUrl: string,
   snapshot: ScoutBrokerSnapshot,
   binding: Awaited<ReturnType<typeof inferLocalAgentBinding>>,
-  options: { includeEndpoint?: boolean } = {},
+  options: { includeEndpoint?: boolean; beforeEffect?: () => void } = {},
 ): Promise<void> {
   if (!binding) return;
-  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.actors, binding.actor);
-  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.agents, binding.agent);
+  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.actors, binding.actor, {beforeEffect: options.beforeEffect});
+  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.agents, binding.agent, {beforeEffect: options.beforeEffect});
   snapshot.actors[binding.actor.id] = binding.actor;
   snapshot.agents[binding.agent.id] = binding.agent;
   if (options.includeEndpoint ?? true) {
@@ -2341,6 +2345,7 @@ async function syncBrokerBinding(
       baseUrl,
       scoutBrokerPaths.v1.endpoints,
       binding.endpoint,
+      {beforeEffect: options.beforeEffect},
     );
     snapshot.endpoints[binding.endpoint.id] = binding.endpoint;
   }
@@ -2409,9 +2414,10 @@ async function syncBrokerAgentRegistration(
     actor: ScoutBrokerActorRecord;
     agent: ScoutBrokerAgentRecord;
   },
+  beforeEffect?: () => void,
 ): Promise<void> {
-  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.actors, registration.actor);
-  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.agents, registration.agent);
+  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.actors, registration.actor, {beforeEffect});
+  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.agents, registration.agent, {beforeEffect});
   snapshot.actors[registration.actor.id] = registration.actor;
   snapshot.agents[registration.agent.id] = registration.agent;
 }
@@ -2419,6 +2425,7 @@ async function syncBrokerAgentRegistration(
 export async function registerScoutLocalAgentBinding(input: {
   agentId: string;
   broker?: ScoutBrokerContext | null;
+  beforeEffect?: () => void;
 }): Promise<ScoutLocalAgentBindingSyncResult | null> {
   const broker = input.broker ?? (await loadScoutBrokerContext());
   const nodeId = broker?.node.id ?? process.env.OPENSCOUT_NODE_ID ?? "local";
@@ -2428,7 +2435,7 @@ export async function registerScoutLocalAgentBinding(input: {
     return null;
   }
   if (broker) {
-    await syncBrokerBinding(broker.baseUrl, broker.snapshot, binding);
+    await syncBrokerBinding(broker.baseUrl, broker.snapshot, binding, {beforeEffect: input.beforeEffect});
   }
   return {
     binding,
@@ -2492,13 +2499,14 @@ async function resolveConversationActorId(
   actorId: string,
   currentDirectory: string,
   displayName?: string,
+  beforeEffect?: () => void,
 ): Promise<string> {
   const normalized = actorId.trim() || OPERATOR_ID;
   if (snapshot.agents[normalized] || snapshot.actors[normalized]) {
     return normalized;
   }
   if (normalized === OPERATOR_ID) {
-    await ensureBrokerActor(baseUrl, snapshot, normalized, displayName);
+    await ensureBrokerActor(baseUrl, snapshot, normalized, displayName, beforeEffect);
     return normalized;
   }
 
@@ -2507,14 +2515,14 @@ async function resolveConversationActorId(
     ensureCurrentProjectConfig: true,
   });
   if (!configured) {
-    await ensureBrokerActor(baseUrl, snapshot, normalized, displayName);
+    await ensureBrokerActor(baseUrl, snapshot, normalized, displayName, beforeEffect);
     return normalized;
   }
 
   const { inferLocalAgentBinding } = await import("@openscout/runtime/local-agents");
   const binding = await inferLocalAgentBinding(configured.agentId, nodeId);
   if (binding) {
-    await syncBrokerBinding(baseUrl, snapshot, binding);
+    await syncBrokerBinding(baseUrl, snapshot, binding, {beforeEffect});
     return binding.actor.id;
   }
 
@@ -2525,6 +2533,7 @@ async function resolveConversationActorId(
     baseUrl,
     snapshot,
     scoutBrokerAgentRegistrationFromConfig(configured, nodeId),
+    beforeEffect,
   );
   return configured.agentId;
 }
@@ -2548,6 +2557,7 @@ async function ensureTargetRelayAgentRegistered(
   nodeId: string,
   agentId: string,
   currentDirectory: string,
+  beforeEffect?: () => void,
 ): Promise<boolean> {
   const existingAgent = snapshot.agents[agentId];
   if (isReusableBrokerRegisteredTargetAgent(existingAgent)) {
@@ -2568,12 +2578,14 @@ async function ensureTargetRelayAgentRegistered(
       baseUrl,
       snapshot,
       scoutBrokerAgentRegistrationFromConfig(configured, nodeId),
+      beforeEffect,
     );
     return true;
   }
 
   await syncBrokerBinding(baseUrl, snapshot, binding, {
     includeEndpoint: binding.endpoint.state !== "waiting",
+    beforeEffect,
   });
   return Boolean(binding);
 }
@@ -3171,6 +3183,7 @@ async function ensureBrokerDirectConversationBetween(
   nodeId: string,
   sourceId: string,
   targetId: string,
+  beforeEffect?: () => void,
 ): Promise<ScoutDirectSessionResult> {
   const conversationId =
     targetId === SCOUT_AGENT_ID && sourceId === OPERATOR_ID
@@ -3230,7 +3243,7 @@ async function ensureBrokerDirectConversationBetween(
     },
   };
 
-  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.conversations, definition);
+  await brokerPostJson(baseUrl, scoutBrokerPaths.v1.conversations, definition, {beforeEffect});
   snapshot.conversations[definition.id] = definition;
 
   return {
@@ -3952,6 +3965,7 @@ export async function openScoutPeerSession(input: {
   currentDirectory?: string;
   sourceName?: string;
   targetName?: string;
+  beforeEffect?: () => void;
 }): Promise<ScoutPeerSessionResult> {
   const broker = await requireScoutBrokerContext();
   const currentDirectory = input.currentDirectory ?? process.cwd();
@@ -3962,6 +3976,7 @@ export async function openScoutPeerSession(input: {
     input.sourceId,
     currentDirectory,
     input.sourceName,
+    input.beforeEffect,
   );
   const targetId = await resolveConversationActorId(
     broker.baseUrl,
@@ -3970,6 +3985,7 @@ export async function openScoutPeerSession(input: {
     input.targetId,
     currentDirectory,
     input.targetName,
+    input.beforeEffect,
   );
 
   if (broker.snapshot.agents[targetId]) {
@@ -3979,6 +3995,7 @@ export async function openScoutPeerSession(input: {
       broker.node.id,
       targetId,
       currentDirectory,
+      input.beforeEffect,
     );
     if (!targetReady) {
       throw new Error(`Agent ${input.targetId} is not available.`);
@@ -3991,6 +4008,7 @@ export async function openScoutPeerSession(input: {
     broker.node.id,
     sourceId,
     targetId,
+    input.beforeEffect,
   );
 
   return {
@@ -4038,6 +4056,7 @@ export async function sendScoutDirectMessage(input: {
   executionHarness?: AgentHarness;
   source?: string;
   deviceId?: string;
+  beforeEffect?: () => void;
 }): Promise<ScoutDirectMessageResult> {
   const broker = await requireScoutBrokerContext();
   const createdAt = Date.now();
@@ -4084,7 +4103,7 @@ export async function sendScoutDirectMessage(input: {
       destinationId: input.agentId,
       ...(input.deviceId ? { deviceId: input.deviceId } : {}),
     },
-  });
+  }, input.beforeEffect);
   if (delivery.kind !== "delivery") {
     throw new ScoutDirectDeliveryUnavailableError(delivery);
   }

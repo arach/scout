@@ -42,7 +42,7 @@
     "test:cli": "bun run --cwd packages/cli test:happy",
     "test:unit:source": "bun run test:unit:source:core && bun run test:unit:source:owners",
     "test:unit:source:core": "bun run test:remote-target-programs && bun run --cwd packages/protocol test && bun run --cwd packages/agent-sessions test && bun run --cwd packages/runtime test && bun run --cwd packages/cli test:source && bun run --cwd apps/desktop test && bun run --cwd packages/web test && bun run --cwd packages/session-trace test && bun run --cwd packages/session-trace-react test && node --test scripts/ship-release.test.mjs scripts/bundle-scout-web.test.mjs scripts/check-packed-dependencies.test.mjs && bun run --cwd packages/mesh-extension test",
-    "test:unit:source:owners": "bun run test:pairing-capsule && bun run test:credential-ownership && bun run test:process-launch-fences",
+    "test:unit:source:owners": "bun run test:pairing-capsule && bun run test:credential-ownership && bun run test:process-launch-fences && bun run test:mobile-post-startup-fences",
     "test:pairing-capsule": "bun test --isolate packages/runtime/src/pairing-security/trust-authority-view.test.ts scripts/pairing-trust-owner-process.test.ts scripts/pairing-trust-owner-census.test.ts scripts/pairing-cutover-process.test.ts scripts/pairing-slot-reclamation-process.test.ts scripts/pairing-quiescent-reclamation-process.test.ts scripts/pairing-authority-view-fixtures.test.ts scripts/pairing-v1-closure.test.ts && bun test scripts/pairing-slot-identity.test.ts && bun scripts/pairing-capsule-controls.ts && bun scripts/pairing-slot-identity-controls.ts && bun scripts/pairing-slot-reclamation-controls.ts && bun scripts/pairing-authority-view-controls.ts && bun scripts/pairing-quiescent-reclamation-controls.ts && bun scripts/pairing-cutover-controls.ts && bun run test:pairing-cutover:compiled && node scripts/pairing-authority-view-compiled-smoke.mjs",
     "test:pairing-cutover:compiled": "bun run --cwd packages/runtime build && node scripts/pairing-cutover-compiled-smoke.mjs",
     "test:remote-target-programs": "bun test scripts/remote-target-programs.test.ts",
@@ -98,6 +98,7 @@
     "scout:tui:install": "bash scripts/cargo.sh install --locked --path crates/scout-tui",
     "test:extension-channel:qualification": "bun scripts/extension-channel-qualification.ts",
     "test:credential-ownership": "bun test --isolate scripts/credential-ownership.test.ts",
+    "test:mobile-post-startup-fences": "bun test --isolate scripts/live-session-mobile-post.test.ts scripts/live-session-mobile-post-fastpath.test.ts",
     "test:process-launch-fences": "bun test --isolate scripts/live-session-process-warmup.test.ts scripts/live-session-process-owners.test.ts scripts/live-session-process-ipc.test.ts"
   },
   "ignoreScripts": [

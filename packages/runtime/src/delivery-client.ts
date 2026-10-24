@@ -121,7 +121,7 @@ export async function requireScoutSessionInputSupport(broker: ScoutDeliveryBroke
  * Durable keyed acceptance requires the daemon's configured receipt owner.
  */
 export async function deliverScoutRequest(broker: ScoutDeliveryBroker, prepared: ScoutDeliverRequest,
-  options: { signal?: AbortSignal } = {}): Promise<ScoutDeliverResponse> {
+  options: { signal?: AbortSignal; beforeEffect?: () => void } = {}): Promise<ScoutDeliverResponse> {
   if (prepared.sessionDelivery) {
     if (!prepared.requestId?.trim()) throw new Error("request_id_required: session input requires a stable request id");
     await requireScoutSessionInputSupport(broker, options.signal);
@@ -130,6 +130,7 @@ export async function deliverScoutRequest(broker: ScoutDeliveryBroker, prepared:
     intent: prepared.sessionDelivery ? "session_input" : prepared.completion || prepared.relation ? "explicit_consult" : prepared.intent };
   const result = await requestScoutBrokerJson<ScoutDeliverResponse>(broker.baseUrl, "/v1/deliver", {
     method: "POST", body: wire, socketPath: broker.socketPath, signal: options.signal, acceptErrorJson: isDeliveryResponse,
+    beforeEffect: options.beforeEffect,
   });
   if (prepared.sessionDelivery && result.kind === "delivery") {
     const target = prepared.target;

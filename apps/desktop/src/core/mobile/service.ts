@@ -1154,15 +1154,19 @@ export async function createScoutSession(
   }, beforeEffect); // mobile agent configuration admission forwarding
 
   const broker = await loadScoutBrokerContext();
+  beforeEffect?.(); // mobile binding after startup/context waits
   const bindingSync = await registerScoutLocalAgentBinding({
     agentId: localAgent.agentId,
     broker,
+    beforeEffect,
   });
   const resolvedAgentId = bindingSync?.binding.agent.id ?? localAgent.agentId;
 
+  beforeEffect?.(); // mobile peer session after binding wait
   const directSession = await openScoutPeerSession({
     sourceId: "operator",
     targetId: resolvedAgentId,
+    beforeEffect,
     currentDirectory: currentDirectory ?? workspace.root,
   });
 
@@ -1197,6 +1201,7 @@ export async function createScoutSession(
 
   const seedInstructions = input.seed?.instructions?.trim() ?? "";
   const seedAttachments = input.seed?.attachments;
+  if (seedInstructions || seedAttachments?.length) beforeEffect?.(); // seed after peer wait
   const seedDelivery = seedInstructions || seedAttachments?.length
     ? await sendScoutDirectMessage({
         agentId: targetAgentId,
@@ -1206,6 +1211,7 @@ export async function createScoutSession(
         executionHarness: input.harness,
         source: "scout-mobile",
         deviceId,
+        beforeEffect,
       })
     : null;
 
