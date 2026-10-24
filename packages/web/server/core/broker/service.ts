@@ -2342,6 +2342,7 @@ async function ensureBrokerConversation(
   channel: string | undefined,
   senderId: string,
   targetParticipantIds: string[] = [],
+  beforeEffect?: () => void,
 ): Promise<ScoutBrokerConversationRecord> {
   const definition = conversationDefinition(snapshot, nodeId, channel, senderId, targetParticipantIds);
   const existing = snapshot.conversations[definition.id];
@@ -2365,7 +2366,7 @@ async function ensureBrokerConversation(
       ...definition,
       participantIds: nextParticipants,
     };
-    await brokerPostJson(baseUrl, scoutBrokerPaths.v1.conversations, nextConversation);
+    await brokerPostJson(baseUrl, scoutBrokerPaths.v1.conversations, nextConversation, {beforeEffect});
     snapshot.conversations[nextConversation.id] = nextConversation;
     return nextConversation;
   }
@@ -2459,6 +2460,7 @@ export async function sendScoutMessage(input: {
   executionModel?: string;
   executionReasoningEffort?: string;
   currentDirectory?: string;
+  beforeEffect?: () => void;
 }): Promise<ScoutMessagePostResult> {
   const broker = await loadScoutBrokerContext();
   if (!broker) {
@@ -2475,6 +2477,8 @@ export async function sendScoutMessage(input: {
     broker.node.id,
     input.senderId,
     currentDirectory,
+    undefined,
+    input.beforeEffect,
   );
   const explicitTargetCandidates = [...new Set(
     (input.explicitTargetAgentIds ?? [])
@@ -2499,7 +2503,7 @@ export async function sendScoutMessage(input: {
           ...clientMessageMetadata(input.clientMessageId),
         },
       },
-    }));
+    }), input.beforeEffect);
     if (delivery.kind !== "delivery") {
       return {
         usedBroker: true,
@@ -2540,7 +2544,7 @@ export async function sendScoutMessage(input: {
           ...clientMessageMetadata(input.clientMessageId),
         },
       },
-    }));
+    }), input.beforeEffect);
     if (delivery.kind !== "delivery") {
       return {
         usedBroker: true,
@@ -2567,7 +2571,7 @@ export async function sendScoutMessage(input: {
           broker.snapshot,
           broker.node.id,
           target.agentId,
-          currentDirectory,
+          currentDirectory, input.beforeEffect,
         )
           ? target
           : null
@@ -2583,7 +2587,7 @@ export async function sendScoutMessage(input: {
           broker.snapshot,
           broker.node.id,
           targetId,
-          currentDirectory,
+          currentDirectory, input.beforeEffect,
         )
           ? targetId
           : null
@@ -2603,14 +2607,14 @@ export async function sendScoutMessage(input: {
   if (validTargets.length === 1 && !input.channel) {
     const dm = await ensureBrokerDirectConversationBetween(
       broker.baseUrl, broker.snapshot, broker.node.id,
-      senderId, validTargets[0],
+      senderId, validTargets[0], input.beforeEffect,
     );
     conversation = dm.conversation;
   } else {
     conversation = await ensureBrokerConversation(
       broker.baseUrl, broker.snapshot, broker.node.id,
       input.channel, senderId,
-      availableTargets.map((target) => target.agentId),
+      availableTargets.map((target) => target.agentId), input.beforeEffect,
     );
   }
   const unresolvedTargets = mentionResolution.resolved
@@ -2649,7 +2653,7 @@ export async function sendScoutMessage(input: {
       ...clientMessageMetadata(input.clientMessageId),
       returnAddress,
     },
-  });
+  }, {beforeEffect: input.beforeEffect});
 
   for (const targetAgentId of validTargets) {
     await brokerPostJson(broker.baseUrl, scoutBrokerPaths.v1.invocations, {
@@ -2677,7 +2681,7 @@ export async function sendScoutMessage(input: {
         relayChannel: input.channel ?? "shared",
         returnAddress,
       },
-    });
+    }, {beforeEffect: input.beforeEffect});
   }
 
   return { usedBroker: true, conversationId: conversation.id, messageId, invokedTargets: validTargets, unresolvedTargets };
@@ -2706,6 +2710,7 @@ export async function sendScoutConversationMessage(input: {
    * body is then payload only: quoting "@kepler said" must not reach Kepler.
    */
   resolveMentionsFromBody?: boolean;
+  beforeEffect?: () => void;
 }): Promise<ScoutMessagePostResult> {
   const broker = await loadScoutBrokerContext();
   if (!broker) {
@@ -2725,6 +2730,8 @@ export async function sendScoutConversationMessage(input: {
     broker.node.id,
     input.senderId,
     currentDirectory,
+    undefined,
+    input.beforeEffect,
   );
   const routeBodyMentions = input.attentionMentions === undefined && input.resolveMentionsFromBody !== false;
   const mentionResolution = routeBodyMentions
@@ -2754,7 +2761,7 @@ export async function sendScoutConversationMessage(input: {
           broker.snapshot,
           broker.node.id,
           agentId,
-          currentDirectory,
+          currentDirectory, input.beforeEffect,
         )
           ? agentId
           : null
@@ -2813,7 +2820,7 @@ export async function sendScoutConversationMessage(input: {
       ...clientMessageMetadata(input.clientMessageId),
       returnAddress,
     },
-  });
+  }, {beforeEffect: input.beforeEffect});
 
   return {
     usedBroker: true,

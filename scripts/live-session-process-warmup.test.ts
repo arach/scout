@@ -3,7 +3,7 @@ import {mkdtempSync,mkdirSync,rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 const report=import.meta.dir;
-for(const flavor of ["web","desktop"])for(const protocol of ["trpc","legacy"])for(const stage of ["warmup-directory","happy","broker-residue"]){
+for(const flavor of ["web","desktop"])for(const protocol of ["trpc","legacy"])for(const stage of ["warmup-directory","happy","broker-residue","command-residue"]){
  test(`process warmup ${flavor}/${protocol}/${stage}`,async()=>{
  const root=mkdtempSync(join(tmpdir(),"pairing-capsule-a2-baseline-")),home=join(root,"home"),store=join(root,"pairing-capsule-store");mkdirSync(home);mkdirSync(store);
  let sentinelRequests=0;const sentinel=Bun.serve({hostname:"127.0.0.1",port:0,fetch(){sentinelRequests++;return Response.json({fixture:true});}});

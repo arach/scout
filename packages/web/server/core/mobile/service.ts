@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "@openscout/runtime/effect-admission";
 import { basename, join, resolve } from "node:path";
 import { statSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
@@ -1343,6 +1344,7 @@ export async function sendScoutMobileMessage(
   input: SendScoutMobileMessageInput,
   currentDirectory?: string,
   deviceId?: string,
+  beforeEffect?: () => void,
 ): Promise<ScoutDirectMessageResult> {
   if (input.agentId === SCOUTBOT_AGENT_ID) {
     const result = await postScoutbotOperatorMessage({
@@ -1354,6 +1356,7 @@ export async function sendScoutMobileMessage(
       replyToMessageId: input.replyToMessageId,
       referenceMessageIds: input.referenceMessageIds,
       deviceId,
+      beforeEffect,
     });
     if (!result.usedBroker || !result.conversationId || !result.messageId) {
       throw new Error("Scoutbot is not available.");
@@ -1375,6 +1378,7 @@ export async function sendScoutMobileMessage(
     executionHarness: input.harness,
     source: "scout-mobile",
     deviceId,
+    beforeEffect,
   });
 }
 
@@ -1865,7 +1869,13 @@ export async function sendScoutMobileComms(
   },
   currentDirectory?: string,
   deviceId?: string,
+  beforeEffect?: () => void,
 ): Promise<ScoutMobileSendResult> {
+  let admissionRefused = false;
+  const admit = beforeEffect ? () => {
+    try { admitSynchronousEffect(beforeEffect); }
+    catch (error) { admissionRefused = true; throw error; }
+  } : undefined;
   const broker = await loadScoutBrokerContext();
   if (!broker) throw new Error("Relay is not reachable.");
   const conv = broker.snapshot.conversations?.[input.conversationId];
@@ -1890,10 +1900,11 @@ export async function sendScoutMobileComms(
         },
         currentDirectory,
         deviceId,
+        admit,
       );
       return mobileSendResultFromDirect(result);
     } catch (error) {
-      if (!(error instanceof ScoutDirectDeliveryUnavailableError)) throw error;
+      if (admissionRefused || !(error instanceof ScoutDirectDeliveryUnavailableError)) throw error;
 
       // Routing/session liveness is broker-owned, but drafting is not. Keep the
       // operator's outbound message in the conversation even when its transport
@@ -1907,6 +1918,7 @@ export async function sendScoutMobileComms(
         clientMessageId: input.clientMessageId,
         source: "scout-mobile",
         currentDirectory,
+        beforeEffect: admit,
       });
       if (!persisted.usedBroker || !persisted.messageId) {
         throw new Error("The broker disconnected before it could save this message.");
@@ -1938,6 +1950,7 @@ export async function sendScoutMobileComms(
       clientMessageId: input.clientMessageId,
       source: "scout-mobile",
       currentDirectory,
+      beforeEffect: admit,
     });
     return {
       conversationId: result.conversationId ?? input.conversationId,
@@ -1962,6 +1975,7 @@ export async function sendScoutMobileComms(
     attachments: input.attachments,
     clientMessageId: input.clientMessageId,
     currentDirectory,
+    beforeEffect: admit,
   });
   return {
     conversationId: result.conversationId ?? input.conversationId,

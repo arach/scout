@@ -269,7 +269,7 @@ key. A missing key, unavailable membership or changed root uses **4003**. Codes
 4000 through 4005 are occupied; in particular the hosted relay uses 4005 for
 `Host asleep`. A revoke acknowledgement confirms authority publication, not
 physical closure or phone acknowledgement across every process. Close delivery
-is advisory; a lost close frame does not preserve permission.
+is advisory; a lost close frame does not preserve permission. Work that a host process submitted to another owner, such as the runtime or the process daemon, under an admission that passed before the ACK is earlier work, even when that owner first reads it after the ACK. A stalled owner can delay that work without limit.
 
 Pairing revocation is not removal of all device access. Existing SSH grants,
 open terminal sessions, issued HTTP bearers and already-received data have
@@ -283,9 +283,9 @@ revocation or the private consuming-graph proof.
 
 An operation a phone started before the revoke ACK can still complete its effects in:
 
-- process warmup/launch (Codex app-server, Claude stream-JSON, Pi RPC, tmux) reached through broker delivery routing or local-agent/Codex commands
-- mobile post-startup effects (binding registration, peer-session opening, seed send) reached through broker sends/updates/delivery with routing and fallbacks or local-agent and Codex commands and ACP invocation/delivery
-- broker sends/updates/delivery with routing and fallbacks
+- process warmup/launch (Codex app-server, Claude stream-JSON, Pi RPC, tmux) reached through broker delivery routing from local-agent and Codex commands and ACP invocation/delivery or harness replies and live terminal/permission input, or through local-agent/Codex commands
+- mobile post-startup effects (binding registration, peer-session opening, seed send) reached through broker sends/updates/delivery with routing and fallbacks from local-agent and Codex commands and ACP invocation/delivery or harness replies and live terminal/permission input, or through local-agent and Codex commands and ACP invocation/delivery
+- broker sends/updates/delivery with routing and fallbacks reached through local-agent and Codex commands and ACP invocation/delivery or harness replies and live terminal/permission input
 - local-agent and Codex commands and ACP invocation/delivery
 - harness replies and live terminal/permission input
 - artifact/attachment/web handoff parsers
@@ -426,3 +426,39 @@ local-agent configuration and broker routing families keep their own limits.
 `bun run test:mobile-post-startup-fences` runs the isolated mobile/controller and
 in-process broker witnesses. It joins `test:unit:source:owners`; the full local
 source chain includes it through that partition.
+
+### Resumed mobile broker submissions
+
+Both encrypted mobile send/comms surfaces forward their per-call admission to
+the final broker submission after asynchronous context, actor/target resolution
+and conversation work. This includes direct delivery, channel/group posts,
+assistant-thread posts and the web surface's typed delivery-recovery persistence
+fallback. Conversation updates and the next message after their response need
+separate admissions. The existing mobile read-cursor fence remains in force.
+An admission refusal is not a routing failure: even a one-shot refusal shaped
+like a delivery error cannot select the persistence fallback.
+
+HTTP, Unix-socket fallback and in-process broker submission retain the existing
+final synchronous guards. Assistant raw-HTTP helpers also check after request
+serialization. No positive permission survives an await. No phone principal or
+callback is placed on the wire, and no receiver-side or native execution fence
+is claimed. No best-effort in-flight abort narrowing is added.
+
+The remaining local-agent/command and harness-reply producers can still submit
+through these broker helpers without a paired callback. The limit lines retain
+those producers. The tests witness unguarded local producers and a resumed
+phone harness reply submitting to owned broker sinks after the ACK. These
+fixtures do not qualify native execution or canonical persistence.
+
+The permanent receive-window controls hold the real runtime HTTP router before
+body completion, then allow a pre-ACK guarded submission to reach its acceptance
+sink after the ACK. A process-daemon control buffers an admitted socket write
+and first reads it after the ACK. Both complete as earlier work. The process
+daemon control uses the Node socket backend; it makes no delayed-read claim for
+the Bun socket backend.
+
+`bun run test:broker-submission-fences` joins `test:unit:source:owners`. The
+per-effect fresh-view behavior is a reference model, not a performance result.
+These owner paths are outside the declared gate's substituted application
+router and stubbed broker watcher; no new work is added to its timed workload.
+The final census still qualifies the complete surface.

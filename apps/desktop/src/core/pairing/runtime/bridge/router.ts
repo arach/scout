@@ -1034,6 +1034,7 @@ const mobileRouter = t.router({
         input,
         resolveMobileCurrentDirectory(),
         ctx.deviceId,
+        () => { requireTransportContext(ctx); },
       );
     }),
 
@@ -1149,7 +1150,7 @@ const mobileRouter = t.router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      return sendScoutMobileComms(input, resolveMobileCurrentDirectory(), ctx.deviceId);
+      return sendScoutMobileComms(input, resolveMobileCurrentDirectory(), ctx.deviceId, () => { requireTransportContext(ctx); });
     }),
 
   attachmentUpload: procedure

@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "@openscout/runtime/effect-admission";
 import { basename, resolve } from "node:path";
 import { statSync } from "node:fs";
 
@@ -1235,9 +1236,10 @@ export async function sendScoutMobileMessage(
   input: SendScoutMobileMessageInput,
   currentDirectory?: string,
   deviceId?: string,
+  beforeEffect?: () => void,
 ): Promise<ScoutDirectMessageResult> {
   if (input.agentId === SCOUTBOT_AGENT_ID) {
-    return sendScoutbotMobileThreadMessage(input, currentDirectory, deviceId);
+    return sendScoutbotMobileThreadMessage(input, currentDirectory, deviceId, beforeEffect);
   }
 
   return sendScoutDirectMessage({
@@ -1251,6 +1253,7 @@ export async function sendScoutMobileMessage(
     executionHarness: input.harness,
     source: input.source ?? "scout-mobile",
     deviceId,
+    beforeEffect,
   });
 }
 
@@ -1258,6 +1261,7 @@ async function sendScoutbotMobileThreadMessage(
   input: SendScoutMobileMessageInput,
   currentDirectory?: string,
   deviceId?: string,
+  beforeEffect?: () => void,
 ): Promise<ScoutDirectMessageResult> {
   void currentDirectory;
   const broker = await loadScoutBrokerContext();
@@ -1282,7 +1286,7 @@ async function sendScoutbotMobileThreadMessage(
     },
   };
   if (!broker.snapshot.conversations[conversationId]) {
-    await postMobileBrokerJson(broker.baseUrl, "/v1/conversations", conversation);
+    await postMobileBrokerJson(broker.baseUrl, "/v1/conversations", conversation, beforeEffect);
   }
 
   const now = Date.now();
@@ -1319,7 +1323,7 @@ async function sendScoutbotMobileThreadMessage(
         ...(transportSessionId ? { sessionId: transportSessionId } : {}),
       },
     },
-  });
+  }, beforeEffect);
 
   return {
     conversationId,
@@ -1344,12 +1348,16 @@ async function postMobileBrokerJson<T>(
   baseUrl: string,
   path: string,
   body: unknown,
+  beforeEffect?: () => void,
 ): Promise<T> {
-  const response = await fetch(new URL(path, baseUrl), {
+  const url = new URL(path, baseUrl);
+  const init = {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
-  });
+  };
+  admitSynchronousEffect(beforeEffect); // final submission, after serialization
+  const response = await fetch(url, init);
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(`Broker ${path} failed (${response.status}): ${text || response.statusText}`);
@@ -1686,6 +1694,7 @@ export async function sendScoutMobileComms(
   },
   currentDirectory?: string,
   deviceId?: string,
+  beforeEffect?: () => void,
 ): Promise<ScoutMobileSendResult> {
   const broker = await loadScoutBrokerContext();
   if (!broker) throw new Error("Relay is not reachable.");
@@ -1708,6 +1717,7 @@ export async function sendScoutMobileComms(
       },
       currentDirectory,
       deviceId,
+      beforeEffect,
     );
     return mobileSendResultFromDirect(result);
   }
@@ -1735,6 +1745,7 @@ export async function sendScoutMobileComms(
       clientMessageId: input.clientMessageId,
       source: "scout-mobile",
       currentDirectory,
+      beforeEffect,
     });
     return {
       conversationId: result.conversationId ?? input.conversationId,
@@ -1759,6 +1770,7 @@ export async function sendScoutMobileComms(
     channel,
     clientMessageId: input.clientMessageId,
     currentDirectory,
+    beforeEffect,
   });
   return {
     conversationId: result.conversationId ?? input.conversationId,
