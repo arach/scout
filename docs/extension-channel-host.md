@@ -9,9 +9,9 @@ single-owner adapter and fixed asset verification, not a raw close function,
 injected driver or compiler-release witness hook. See its module documentation
 for the SIGPIPE lifetime and Darwin fork/exec constraints.
 
-Scout requires Bun 1.4 or newer. The native facade is **unavailable** on that
+Scout requires Bun 1.4.3 or newer. The native facade is **unavailable** on that
 supported range until a separate exact-revision review qualifies it. CI checks
-refusal on 1.4.0 and 1.4.4 on both platforms; this is not positive qualification.
+refusal on 1.4.3 and 1.4.4 on both platforms; this is not positive qualification.
 The historical positive checkpoint runner remains unchanged and cannot pass on
 the new floor. Do not broaden its allowlist just to make CI green.
 

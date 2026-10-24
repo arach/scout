@@ -9,7 +9,7 @@ state, and routes one real request through the broker.
 
 ## Prerequisites
 
-- Bun 1.4 or newer;
+- Bun 1.4.3 or newer;
 - Apple-silicon macOS, or Linux with a process manager for the foreground
   broker;
 - at least one supported coding-agent harness if you want Scout to launch or
