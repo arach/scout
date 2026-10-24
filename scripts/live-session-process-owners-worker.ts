@@ -18,7 +18,7 @@ const host=generateKeyPair(),phone=generateKeyPair(),key=bytesToHex(phone.public
 const domain=new TransportDomain(bridge,bytesToHex(host.publicKey),fixture.owner);fixtureHost(domain,host);const peer=liveTransport(domain,phone);assert.equal(requireTransportContext(peer.ctx,true).publicKey,key);console.log("A2_OWNER_FIXTURE_READY real-noise");
 let entered=false,revoked=false,effects=0,lateMutations=0,admissions=0,release!:()=>void;const pause=new Promise<void>(r=>release=r);const admission=()=>{admissions++;requireTransportContext(peer.ctx,true);};const sink=Error("fixture native launch submission observed");
 const source=(path:string)=>pathToFileURL(resolve(path)).href;
-let cleanup:(()=>Promise<void>)|undefined;
+let cleanup:(()=>Promise<void>)|undefined,acceptedTracking:(()=>boolean)|undefined;
 let run!:()=>Promise<unknown>,joiner:(()=>Promise<unknown>)|undefined;
 if(kind==="router"){
  const path=source("packages/runtime/src/local-agents.ts"),actual=await import(path);
@@ -35,16 +35,17 @@ if(kind==="router"){
   const request=JSON.parse(text);if(request.method==="turn/start")effects++;
   if(!request.id)return;
   const result=request.method==="thread/start"?{thread:{id:"fixture-thread",path:rollout}}:request.method==="turn/start"?{turn:{id:"fixture-turn"}}:{userAgent:"fixture"};
-  queueMicrotask(()=>input.handlers.onMessage(JSON.stringify({id:request.id,result})));
+  const respond=()=>input.handlers.onMessage(JSON.stringify({id:request.id,result}));
+  if(request.method==="turn/start"&&target==="accepted"){entered=true;void pause.then(respond);}else queueMicrotask(respond);
  }};}}));
  const options={agentName:"fixture",sessionId:"fixture-session",cwd:project,systemPrompt:"fixture",runtimeDirectory:runtime,logsDirectory:logs,launchArgs:[]};
  const {ensureCodexAppServerAgentOnline,startCodexAppServerAgent,shutdownCodexAppServerAgent}=await import(source("packages/runtime/src/codex-app-server.ts"));
  await ensureCodexAppServerAgentOnline(options); // earlier trusted startup, no turn submitted
  const {getOrCreateCodexAppServerClient}=await import(source("packages/agent-sessions/src/local/transports/codex-app-server.ts"));
  const client=getOrCreateCodexAppServerClient(options),transport=(client as any).transport,ensure=transport.ensureOnline.bind(transport);
- transport.ensureOnline=async(...args:any[])=>{const result=await ensure(...args);entered=true;await pause;return result;};
+ if(target!=="accepted")transport.ensureOnline=async(...args:any[])=>{const result=await ensure(...args);entered=true;await pause;return result;};
  run=()=>startCodexAppServerAgent({...options,prompt:"fixture"},admission);
- cleanup=()=>shutdownCodexAppServerAgent(options);
+ cleanup=()=>shutdownCodexAppServerAgent(options);acceptedTracking=()=>client.hasActiveTurn();
 }else{
  const mkdir=fs.mkdir;
  mock.module("node:fs/promises",()=>({...fs,mkdir:async(...args:Parameters<typeof fs.mkdir>)=>{const p=String(args[0]);assert(p.startsWith(home+"/"));if(revoked)lateMutations++;const value=await (mkdir as any)(...args);if(p===runtime&&!entered){entered=true;await pause;}return value;}}));
@@ -72,5 +73,6 @@ try{
  release();const result=await operation;if(joined)await joined;
  console.log("A2_OWNER_EFFECT "+JSON.stringify({kind,target,state,flavor,revoked,effects,lateMutations,admissions,nativeExecutions:0,result:String(result)}));
  if(state==="live"){assert.equal(effects,1);if(kind==="engine")assert.match(String(result),/fixture native launch submission observed/);}
+ else if(kind==="codex-turn"&&target==="accepted"){assert.equal(effects,1,"accepted native input remains earlier work");assert(acceptedTracking!(),"accepted turn tracking must survive a later revoke ACK");assert.equal((result as any).threadId,"fixture-thread");}
  else{assert.equal(effects,state==="trusted-join"?1:0);if(state!=="trusted-join")assert.equal(lateMutations,0);assert.match(String(result),/Unauthorized|live authenticated/i);}
 }finally{release();if(operation)await operation;if(joined)await joined;if(cleanup)await cleanup();domain.dispose();}

@@ -6,7 +6,7 @@ const cases:string[][]=[];
 for(const flavor of ["web","desktop"])for(const target of ["restart","connect","start"])for(const state of ["live","revoke"])cases.push(["router",target,state,flavor]);
 for(const target of ["codex","claude","pi"])for(const state of ["live","revoke"])cases.push(["engine",target,state]);
 cases.push(["engine","codex","trusted-join"]);
-for(const state of ["live","revoke"])cases.push(["codex-turn","turn-start",state]);
+for(const target of ["turn-start","accepted"])for(const state of ["live","revoke"])cases.push(["codex-turn",target,state]);
 for(const args of cases)test(`process owner ${args.join("/")}`,async()=>{
  const root=mkdtempSync(join(tmpdir(),"pairing-capsule-process-owner-")),home=join(root,"home"),store=join(root,"pairing-capsule-store");mkdirSync(home);mkdirSync(store);
  const child=Bun.spawn([process.execPath,join(import.meta.dir,"live-session-process-owners-worker.ts"),...args],{env:{...process.env,HOME:home,OPENSCOUT_HOME:join(home,"scout"),OPENSCOUT_SUPPORT_DIRECTORY:join(home,"support"),OPENSCOUT_PAIRING_HOME:store,OPENSCOUT_NODE_QUALIFIER:"fixture"},stdout:"pipe",stderr:"pipe"});const timer=setTimeout(()=>child.kill(),60_000);

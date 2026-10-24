@@ -1079,7 +1079,9 @@ export class CodexAppServerTransport {
       input: this.textInput(prompt),
       ...this.attachedRuntimeParams({ includeEffort: true }),
     }, undefined, beforeEffect);
-    await this.persistThreadId({}, beforeEffect);
+    // The provider has accepted this turn. Its observation/persistence is earlier
+    // work; a later caller revoke must not erase the client's active-turn receipt.
+    await this.persistThreadId();
     return response;
   }
 
