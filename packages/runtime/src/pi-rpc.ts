@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "./effect-admission.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -418,7 +419,8 @@ class PiRpcAgentSession {
     return Boolean(this.adapter && status !== "closed" && status !== "error");
   }
 
-  async ensureOnline(): Promise<{ sessionId: string }> {
+  async ensureOnline(beforeEffect?: () => void): Promise<{ sessionId: string }> {
+    admitSynchronousEffect(beforeEffect);
     if (this.alive) {
       return { sessionId: this.options.sessionId };
     }
@@ -426,13 +428,17 @@ class PiRpcAgentSession {
     // RPC rejection can mark the session unhealthy while its child still runs.
     // Keep ownership until the old adapter has been retired before replacement.
     if (this.adapter) await this.shutdown();
+    admitSynchronousEffect(beforeEffect);
     await mkdir(this.options.runtimeDirectory, { recursive: true });
+    admitSynchronousEffect(beforeEffect);
     await mkdir(this.options.logsDirectory, { recursive: true });
+    admitSynchronousEffect(beforeEffect);
     await writeFile(join(this.options.runtimeDirectory, "prompt.txt"), this.options.systemPrompt);
 
     const launch = parsePiRpcLaunchArgs(this.options.launchArgs, {
       runtimeDirectory: this.options.runtimeDirectory,
     });
+    admitSynchronousEffect(beforeEffect);
     const adapter = createPiAdapter({
       sessionId: this.options.sessionId,
       name: `${this.options.agentName} Pi RPC`,
@@ -467,7 +473,12 @@ class PiRpcAgentSession {
       });
     });
 
-    await adapter.start();
+    try { await adapter.start(beforeEffect); }
+    catch (error) {
+      if (this.adapter === adapter) this.adapter = null;
+      await adapter.shutdown().catch(() => undefined);
+      throw error;
+    }
     this.tracker.trackEvent(this.options.sessionId, {
       event: "session:update",
       session: { ...adapter.session },
@@ -586,9 +597,15 @@ function getOrCreateSession(options: PiRpcSessionRequestOptions): PiRpcAgentSess
   return session;
 }
 
-export async function ensurePiRpcAgentOnline(options: PiRpcSessionRequestOptions): Promise<PiRpcSessionResult> {
+export async function ensurePiRpcAgentOnline(options: PiRpcSessionRequestOptions, beforeEffect?: () => void): Promise<PiRpcSessionResult> {
   const session = getOrCreateSession(options);
-  const result = await session.ensureOnline();
+  let refused = false, refusal: unknown;
+  const checked = beforeEffect ? () => {
+    try { admitSynchronousEffect(beforeEffect); } catch (error) { refused = true; refusal = error; throw error; }
+  } : undefined;
+  let result: { sessionId: string };
+  try { result = await session.ensureOnline(checked); }
+  catch (error) { throw refused ? refusal : error; }
   return {
     ...result,
     ...(session.sessionMetadata ? { metadata: session.sessionMetadata } : {}),

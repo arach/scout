@@ -284,7 +284,7 @@ export class PiAdapter extends BaseAdapter {
     super(config);
   }
 
-  async start(): Promise<void> {
+  async start(beforeEffect?: () => void): Promise<void> {
     const args = buildPiLaunchArgs(this.config.options);
     const model = this.config.options?.["model"] as string | undefined;
     const thinking = normalizePiThinkingLevel(this.config.options?.["thinking"] as string | undefined);
@@ -315,6 +315,7 @@ export class PiAdapter extends BaseAdapter {
     };
 
     const child = await spawnHarnessProcess("pi", args, {
+      beforeEffect,
       cwd: this.config.cwd,
       env,
     });

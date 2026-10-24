@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "./effect-admission.js";
 import { appendBoundedLog } from "@openscout/agent-sessions/local/bounded-log";
 import type { RuntimeTimer } from "./portable-types.js";
 import { randomUUID } from "node:crypto";
@@ -228,12 +229,15 @@ async function readSessionCatalog(runtimeDirectory: string): Promise<SessionCata
   return readSessionCatalogSync(runtimeDirectory);
 }
 
-async function writeSessionCatalogAtomic(runtimeDirectory: string, catalog: SessionCatalog): Promise<void> {
+async function writeSessionCatalogAtomic(runtimeDirectory: string, catalog: SessionCatalog, beforeEffect?: () => void): Promise<void> {
   const catalogPath = join(runtimeDirectory, SESSION_CATALOG_FILENAME);
   const tempPath = `${catalogPath}.${process.pid}.${randomUUID()}.tmp`;
+  admitSynchronousEffect(beforeEffect);
   await mkdir(runtimeDirectory, { recursive: true });
   try {
+    admitSynchronousEffect(beforeEffect);
     await writeFile(tempPath, JSON.stringify(catalog, null, 2) + "\n");
+    admitSynchronousEffect(beforeEffect);
     await rename(tempPath, catalogPath);
   } catch (error) {
     await rm(tempPath, { force: true }).catch(() => undefined);
@@ -247,10 +251,11 @@ function updateSessionCatalog(
   runtimeDirectory: string,
   mutate: (catalog: SessionCatalog) => SessionCatalog,
   reportError?: (error: unknown) => Promise<void>,
+  beforeEffect?: () => void,
 ): Promise<void> {
   const previous = sessionCatalogWriteTails.get(runtimeDirectory) ?? Promise.resolve();
   const write = previous.then(() =>
-    writeSessionCatalogAtomic(runtimeDirectory, mutate(readSessionCatalogSync(runtimeDirectory))),
+    writeSessionCatalogAtomic(runtimeDirectory, mutate(readSessionCatalogSync(runtimeDirectory)), beforeEffect),
   );
   const operation = reportError ? write.catch(reportError) : write;
   const tail = operation.then(() => undefined, () => undefined);
@@ -826,6 +831,7 @@ class ClaudeStreamJsonSession {
   private attentionUnsafe = false;
 
   private starting: Promise<void> | null = null;
+  private readonly startRefusals = new WeakMap<Promise<void>, { refused: boolean }>();
 
   private claudeSessionId: string | null = null;
 
@@ -870,10 +876,11 @@ class ClaudeStreamJsonSession {
     return { accepted: true, evidence: "claude_stdin_written" };
   }
 
-  async connectDeck(): Promise<void> { await this.ensureStarted(); }
+  async connectDeck(beforeEffect?: () => void): Promise<void> { await this.ensureStarted(beforeEffect); }
 
-  async startDeck(prompt: string, signal?: AbortSignal): Promise<{ output: Promise<string>; sessionId: string | null }> {
-    await this.ensureStarted();
+  async startDeck(prompt: string, signal?: AbortSignal, beforeEffect?: () => void): Promise<{ output: Promise<string>; sessionId: string | null }> {
+    await this.ensureStarted(beforeEffect);
+    admitSynchronousEffect(beforeEffect);
     signal?.throwIfAborted();
     if (this.queuedOperations || this.activeTurn) throw new Error("Claude lane already has an active or queued turn.");
     const turn = this.startTurn(prompt);
@@ -881,7 +888,8 @@ class ClaudeStreamJsonSession {
     return { output: turn.outputPromise, sessionId: this.claudeSessionId };
   }
 
-  async ensureOnline(): Promise<{ sessionId: string | null }> {
+  async ensureOnline(beforeEffect?: () => void): Promise<{ sessionId: string | null }> {
+    admitSynchronousEffect(beforeEffect);
     if (!this.isAlive()) {
       const catalog = await readSessionCatalog(this.catalogDirectory);
       this.claudeSessionId = catalog.activeSessionId;
@@ -990,7 +998,8 @@ class ClaudeStreamJsonSession {
     );
   }
 
-  async shutdown(options: { resetSession?: boolean } = {}): Promise<void> {
+  async shutdown(options: { resetSession?: boolean } = {}, beforeEffect?: () => void): Promise<void> {
+    admitSynchronousEffect(beforeEffect);
     const turn = this.activeTurn;
     this.activeTurn = null;
     if (turn) {
@@ -1009,7 +1018,7 @@ class ClaudeStreamJsonSession {
 
     if (options.resetSession) {
       this.claudeSessionId = null;
-      await updateSessionCatalog(this.catalogDirectory, clearActiveSession);
+      await updateSessionCatalog(this.catalogDirectory, clearActiveSession, undefined, beforeEffect);
       return;
     }
     await drainSessionCatalogWrites(this.catalogDirectory);
@@ -1028,15 +1037,27 @@ class ClaudeStreamJsonSession {
     });
   }
 
-  private async ensureStarted(): Promise<void> {
+  private async ensureStarted(beforeEffect?: () => void): Promise<void> {
+    admitSynchronousEffect(beforeEffect);
     if (this.isAlive()) {
       return;
     }
     if (this.starting) {
-      return this.starting;
+      const joined = this.starting;
+      try { await joined; } catch (error) {
+        if (!this.startRefusals.get(joined)?.refused) throw error;
+        return this.ensureStarted(beforeEffect);
+      }
+      admitSynchronousEffect(beforeEffect);
+      return;
     }
 
-    this.starting = this.startSession();
+    const refusal = { refused: false };
+    const checked = beforeEffect ? () => {
+      try { admitSynchronousEffect(beforeEffect); } catch (error) { refusal.refused = true; throw error; }
+    } : undefined;
+    this.starting = this.startSession(checked);
+    this.startRefusals.set(this.starting, refusal);
     try {
       await this.starting;
     } finally {
@@ -1044,9 +1065,12 @@ class ClaudeStreamJsonSession {
     }
   }
 
-  private async startSession(): Promise<void> {
+  private async startSession(beforeEffect?: () => void): Promise<void> {
+    admitSynchronousEffect(beforeEffect);
     await mkdir(this.options.runtimeDirectory, { recursive: true });
+    admitSynchronousEffect(beforeEffect);
     await mkdir(this.options.logsDirectory, { recursive: true });
+    admitSynchronousEffect(beforeEffect);
     await writeFile(join(this.options.runtimeDirectory, "prompt.txt"), this.options.systemPrompt);
     const catalog = await readSessionCatalog(this.catalogDirectory);
     this.claudeSessionId = catalog.activeSessionId;
@@ -1066,6 +1090,7 @@ class ClaudeStreamJsonSession {
     }
 
     const claudeExecutable = resolveClaudeExecutable(process.env)?.path ?? "claude";
+    admitSynchronousEffect(beforeEffect);
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(claudeExecutable, args, {
@@ -1236,10 +1261,10 @@ export function existingClaudeNativeSession(agentName: string, sessionId: string
     submit: (expected: { sessionId: string; token: string }, action: "revive" | "steer", prompt: string) => session.submitExisting(expected, action, prompt) };
 }
 
-export async function ensureClaudeStreamJsonAgentOnline(options: SessionRequestOptions): Promise<{ sessionId: string | null }> {
+export async function ensureClaudeStreamJsonAgentOnline(options: SessionRequestOptions, beforeEffect?: () => void): Promise<{ sessionId: string | null }> {
   const session = getOrCreateSession(options);
   session.update(options);
-  return session.ensureOnline();
+  return session.ensureOnline(beforeEffect);
 }
 
 export async function invokeClaudeStreamJsonAgent(options: InvocationOptions): Promise<{ output: string; sessionId: string | null }> {
@@ -1294,12 +1319,14 @@ export async function getClaudeStreamJsonAgentSnapshot(
 export async function shutdownClaudeStreamJsonAgent(
   options: SessionRequestOptions,
   shutdownOptions: { resetSession?: boolean } = {},
+  beforeEffect?: () => void,
 ): Promise<void> {
+  admitSynchronousEffect(beforeEffect);
   const key = sessionKey(options);
   const session = sessions.get(key);
   if (!session) {
     if (shutdownOptions.resetSession) {
-      await updateSessionCatalog(options.runtimeDirectory, clearActiveSession);
+      await updateSessionCatalog(options.runtimeDirectory, clearActiveSession, undefined, beforeEffect);
     } else {
       await drainSessionCatalogWrites(options.runtimeDirectory);
     }
@@ -1307,19 +1334,19 @@ export async function shutdownClaudeStreamJsonAgent(
   }
 
   sessions.delete(key);
-  await session.shutdown(shutdownOptions);
+  await session.shutdown(shutdownOptions, beforeEffect);
 }
 
 /** Deck connect starts the transport without submitting a prompt. */
-export async function connectClaudeDeck(options: SessionRequestOptions): Promise<void> {
+export async function connectClaudeDeck(options: SessionRequestOptions, beforeEffect?: () => void): Promise<void> {
   const session = getOrCreateSession(options);
   session.update(options);
-  await session.connectDeck();
+  await session.connectDeck(beforeEffect);
 }
 
 /** Native conflict guard and accepted-start boundary; never queues a Deck turn. */
-export async function startClaudeDeckTurn(options: InvocationOptions, signal?: AbortSignal): Promise<{ output: Promise<string>; sessionId: string | null }> {
+export async function startClaudeDeckTurn(options: InvocationOptions, signal?: AbortSignal, beforeEffect?: () => void): Promise<{ output: Promise<string>; sessionId: string | null }> {
   const session = getOrCreateSession(options);
   session.update(options);
-  return session.startDeck(options.prompt, signal);
+  return session.startDeck(options.prompt, signal, beforeEffect);
 }

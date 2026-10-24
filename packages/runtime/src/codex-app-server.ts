@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "./effect-admission.js";
 import { bindManagedPermissionRequester } from "./managed-permission.js";
 import type { RuntimeEnv } from "./portable-types.js";
 import { lstat, mkdir, readFile, symlink } from "node:fs/promises";
@@ -1117,10 +1118,11 @@ function withManagedCodexEnvironment<T extends SessionRequestOptions>(options: T
   };
 }
 
-async function prepareManagedCodexAuthentication(options: SessionRequestOptions): Promise<void> {
+async function prepareManagedCodexAuthentication(options: SessionRequestOptions, beforeEffect?: () => void): Promise<void> {
   const codexHome = options.env?.CODEX_HOME?.trim();
   const authSource = options.env?.OPENSCOUT_CODEX_AUTH_SOURCE?.trim();
   if (!codexHome) return;
+  admitSynchronousEffect(beforeEffect);
   await mkdir(codexHome, { recursive: true });
   // An ambient key may belong to another tool/provider. An explicit operator
   // auth source is authoritative unless this launch explicitly chooses API auth.
@@ -1146,19 +1148,22 @@ async function prepareManagedCodexAuthentication(options: SessionRequestOptions)
     throw error;
   }
 
+  admitSynchronousEffect(beforeEffect);
   await mkdir(codexHome, { recursive: true });
   try {
+    admitSynchronousEffect(beforeEffect);
     await symlink(authSource, authTarget);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
 }
 
-async function withPreparedManagedCodexEnvironment<T extends SessionRequestOptions>(options: T): Promise<T> {
+async function withPreparedManagedCodexEnvironment<T extends SessionRequestOptions>(options: T, beforeEffect?: () => void): Promise<T> {
+  admitSynchronousEffect(beforeEffect);
   // An attached app-server already has its own CODEX_HOME and auth; Scout's
   // environment never reaches it.
   if (options.connection?.mode === "attach") return options;
-  await prepareManagedCodexAuthentication(options);
+  await prepareManagedCodexAuthentication(options, beforeEffect);
   const requestPermission = bindManagedPermissionRequester();
   return withManagedCodexEnvironment({ ...options,
     onPermissionRequest: async (request, controls) => {
@@ -1180,12 +1185,12 @@ async function withPreparedManagedCodexEnvironment<T extends SessionRequestOptio
   });
 }
 
-export async function ensureCodexAppServerAgentOnline(options: SessionRequestOptions): Promise<{
+export async function ensureCodexAppServerAgentOnline(options: SessionRequestOptions, beforeEffect?: () => void): Promise<{
   threadId: string;
   durableThreadId: string | null;
   codexAppServer?: CodexAppServerIdentity | null;
 }> {
-  return ensureCodexAppServerLocalAgentOnline(await withPreparedManagedCodexEnvironment(options));
+  return ensureCodexAppServerLocalAgentOnline(await withPreparedManagedCodexEnvironment(options, beforeEffect), beforeEffect);
 }
 
 export async function invokeCodexAppServerAgent(options: InvocationOptions): Promise<CodexAppServerTurnResult> {
@@ -1198,8 +1203,9 @@ export async function sendCodexAppServerAgent(options: InvocationOptions): Promi
 
 export async function startCodexAppServerAgent(
   options: InvocationOptions,
+  beforeEffect?: () => void,
 ): Promise<{ threadId: string; turnId: string }> {
-  return startCodexAppServerLocalAgent(await withPreparedManagedCodexEnvironment(options));
+  return startCodexAppServerLocalAgent(await withPreparedManagedCodexEnvironment(options, beforeEffect), beforeEffect);
 }
 
 export async function steerCodexAppServerAgent(options: SteerOptions): Promise<void> {
@@ -1256,6 +1262,7 @@ export async function getCodexAppServerAgentSnapshot(
 export async function shutdownCodexAppServerAgent(
   options: SessionRequestOptions,
   shutdownOptions: CodexAppServerShutdownOptions = {},
+  beforeEffect?: () => void,
 ): Promise<void> {
-  await shutdownCodexAppServerLocalAgent(options, shutdownOptions);
+  await shutdownCodexAppServerLocalAgent(options, shutdownOptions, beforeEffect);
 }

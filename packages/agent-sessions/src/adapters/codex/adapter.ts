@@ -67,8 +67,8 @@ export class CodexAdapter extends BaseAdapter {
     );
   }
 
-  async start(): Promise<void> {
-    await this.ensureStarted();
+  async start(beforeEffect?: () => void): Promise<void> {
+    await this.ensureStarted(beforeEffect);
   }
 
   send(prompt: Prompt): void {
@@ -197,7 +197,7 @@ export class CodexAdapter extends BaseAdapter {
     return this.transport;
   }
 
-  private async ensureStarted(): Promise<void> {
+  private async ensureStarted(beforeEffect?: () => void): Promise<void> {
     if (this.transport?.isAlive() && this.transport.currentThreadId) {
       return;
     }
@@ -206,7 +206,7 @@ export class CodexAdapter extends BaseAdapter {
       return this.starting;
     }
 
-    this.starting = this.startSession();
+    this.starting = this.startSession(beforeEffect);
     try {
       await this.starting;
     } finally {
@@ -214,7 +214,7 @@ export class CodexAdapter extends BaseAdapter {
     }
   }
 
-  private async startSession(): Promise<void> {
+  private async startSession(beforeEffect?: () => void): Promise<void> {
     const options = this.codexOptions;
     this.removeTransportNotificationListener?.();
     this.removeTransportErrorListener?.();
@@ -223,7 +223,7 @@ export class CodexAdapter extends BaseAdapter {
     this.removeTransportNotificationListener = transport.onNotification((message) => this.handleNotification(message));
     this.removeTransportErrorListener = transport.onError((error) => this.failSession(error));
 
-    await transport.ensureOnline();
+    await transport.ensureOnline(beforeEffect);
     if (transport.currentThreadId || transport.currentThreadPath) {
       const thread = {
         ...(transport.currentThreadId ? { id: transport.currentThreadId } : {}),

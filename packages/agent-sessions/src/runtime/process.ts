@@ -1,3 +1,4 @@
+import { admitEffect } from "./effect-admission.js";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Subprocess } from "bun";
 
@@ -24,6 +25,7 @@ export interface HarnessProcess {
 }
 
 export interface HarnessSpawnOptions {
+  beforeEffect?: () => void;
   cwd?: string;
   env?: ProcessEnv;
   stdin?: "pipe" | "ignore";
@@ -37,6 +39,7 @@ export async function spawnHarnessProcess(
   options: HarnessSpawnOptions,
 ): Promise<HarnessProcess> {
   if (typeof Bun !== "undefined") {
+    admitEffect(options.beforeEffect);
     return wrapBunProcess(Bun.spawn([command, ...args], {
       cwd: options.cwd,
       env: options.env,
@@ -47,6 +50,7 @@ export async function spawnHarnessProcess(
   }
 
   const { spawn } = await import("node:child_process");
+  admitEffect(options.beforeEffect);
   return wrapNodeProcess(spawn(command, [...args], {
     cwd: options.cwd,
     env: options.env,

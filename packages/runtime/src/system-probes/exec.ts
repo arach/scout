@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "../effect-admission.js";
 import type { RuntimeBinaryInput, RuntimeChildProcessLike, RuntimeEnv, RuntimeSignal, RuntimeSpawnFunction } from "../portable-types.js";
 import { spawn } from "node:child_process";
 
@@ -11,6 +12,8 @@ export type ExecProbeFileOptions = {
   input?: string | RuntimeBinaryInput;
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
+  /** Trusted per-call submission hook, never serialized to scoutd. */
+  beforeEffect?: () => void;
 };
 
 export type ExecProbeFileResult = {
@@ -117,6 +120,7 @@ export async function execProbeFile(
     let settled = false;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
 
+    admitSynchronousEffect(options.beforeEffect); // final local spawn submission
     const child = spawnProcess(file, [...args], {
       cwd: options.cwd,
       env: options.env,
@@ -245,7 +249,7 @@ export async function execSystemFile(
       scoutd = await getScoutdProbeClient().requestExecVerb<ExecProbeFileResult>({
         verb: execVerb.verb,
         args: execVerb.args,
-      });
+      }, options.beforeEffect);
     } catch (error) {
       if (error instanceof ScoutdExecResponseError) {
         throw new ProbeCommandError(error.message, { code: error.code });
