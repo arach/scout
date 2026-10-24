@@ -263,6 +263,119 @@
           "reason": "PR #139 isolates the synthetic watcher heap probe in a scratch HOME, with a 15-second SIGKILL timeout and child-exit settlement; no production spawning allowance."
         }
       ]
+    },
+    {
+      "id": "core-pairing-package-moves",
+      "sourceHead": "fca6f26289225b399050b9662a7e2a5ef15774a0",
+      "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability.",
+      "fromCount": 177,
+      "toCount": 176,
+      "retired": [
+        {
+          "path": "apps/desktop/src/core/pairing/pairing-runtime-controller.ts",
+          "symbol": "node:child_process",
+          "policySha256": "c1246e6c2f4f2b67c2a396dcbb3e4718cce818a6cad5746c1cceec9b09a93d47",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "apps/desktop/src/core/pairing/runtime/relay-runtime.test.ts",
+          "symbol": "node:child_process",
+          "policySha256": "6dc2d503ce401e8119ab2a1e120d2f38904785faa72094b0f8e11cef8a9aa28b",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "apps/desktop/src/core/pairing/runtime/relay-runtime.test.ts",
+          "symbol": "spawnSync",
+          "policySha256": "3a854f46be1ed76c3a7074599766235c2d9a42bc6e3f1655ede63796a67876a2",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/core/broker/service.ts",
+          "symbol": "node:child_process",
+          "policySha256": "c17711c79cd52555bc8b0cbd4bc219ab5e2c7f4779d9fd35e7582e2637b79e1a",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/core/pairing/pairing-runtime-controller.ts",
+          "symbol": "node:child_process",
+          "policySha256": "0d801f67c88ff098826df32baef0f63122bfc816eb96c09f01b5dfb66552c1f5",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/pairing-bridge-client.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "fe1ab873de95de1361658cf9713115656d02e55f003666476286816c4f163cb7",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/pairing-pair-requests.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "1fed2b3173235ddb0fba1e81147dd33497677929f157890bd59467a0fc08be43",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/pairing.ts",
+          "symbol": "node:child_process",
+          "policySha256": "bdb759ebf1f6c4daedfa948a691330ab9b2f357d761cb50cabc14c8c064a4368",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/terminal-hosts/herdr.ts",
+          "symbol": "node:child_process",
+          "policySha256": "9415a0afc0dffebc58433ab7226d4c9532faa983c0e6cc54aeefdf1474bca8a9",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        }
+      ],
+      "added": [
+        {
+          "path": "packages/pairing/src/core/broker/service.ts",
+          "symbol": "node:child_process",
+          "policySha256": "90fe9f58e9af476ce96e0655fb7ad1a04a054ec8106744b37b14a6ba1ef543f4",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/core/pairing/pairing-runtime-controller.ts",
+          "symbol": "node:child_process",
+          "policySha256": "8318b4006ea960ef5697536cdb97231c29c3621d46c888bd1a746e5afe3d2ad1",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/core/pairing/runtime/relay-runtime.test.ts",
+          "symbol": "node:child_process",
+          "policySha256": "00b9c00dc8be552e509a10ded52e1c77f8ac8251013b13c5e3158d4f03858011",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/core/pairing/runtime/relay-runtime.test.ts",
+          "symbol": "spawnSync",
+          "policySha256": "2a54e00b5d07b5888b61f943db0085f7df63546e5b114a41d2bbf0f51c70bb5d",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/pairing-bridge-client.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "7191e3e9a911eb4114aa4e6a517a6a8ecf89cf324cfdcbf5a5af56733871d577",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/pairing.ts",
+          "symbol": "node:child_process",
+          "policySha256": "c4b2a5f3c95cc517e85b9a0c2c4453e47adb481704fa9152e2ebbdf66409e588",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/terminal-hosts/herdr.ts",
+          "symbol": "node:child_process",
+          "policySha256": "fc3a9bfcca6accfb778777d9e064d7863fbaed3d229867f7c30233e1834a06fd",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/pairing-pair-requests.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "01d573415874451d0268f59d0148702f168c147e7b4dc5d6b8366b963ae542c2",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        }
+      ]
     }
   ]
 }

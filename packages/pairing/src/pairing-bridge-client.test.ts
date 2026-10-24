@@ -199,7 +199,7 @@ test("local readers reach a secure bridge with its own key and leave no paired-d
   const home = mkdtempSync(join(tmpdir(), "scout-pairing-home-"));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
   const child = Bun.spawn(["bun", `${import.meta.dir}/fixtures/pairing-secure-local-reader.ts`], {
-    env: { ...process.env, HOME: home },
+    env: { ...process.env, HOME: home, OPENSCOUT_HOME: join(home, "config"), OPENSCOUT_SUPPORT_DIRECTORY: join(home, "support"), OPENSCOUT_WEB_AUTH_TOKEN: "test-pairing-http-token" },
     stdout: "pipe",
     stderr: "pipe",
   });
