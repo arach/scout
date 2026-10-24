@@ -1,3 +1,4 @@
+import { beginCliEnvDiagnostic, cliEnvPhase } from "../../../../runtime/src/cli-env-diagnostic.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,6 +65,7 @@ async function runCommandJson(
   },
 ): Promise<unknown> {
   const lines: string[] = [];
+  cliEnvPhase(`context.before:${handler.name}`);
   const context = createScoutCommandContext({
     cwd: input.cwd,
     env: input.env,
@@ -73,7 +75,10 @@ async function runCommandJson(
     },
   });
 
+  cliEnvPhase(`context.after:${handler.name}`);
+  cliEnvPhase(`handler.before:${handler.name}`);
   await handler(context, input.args ?? []);
+  cliEnvPhase(`handler.after:${handler.name}`);
 
   expect(lines).toHaveLength(1);
   return JSON.parse(lines[0]!);
@@ -81,31 +86,36 @@ async function runCommandJson(
 
 describe("runEnvCommand", () => {
   test("reports the same resolved sender as whoami inside a project", async () => {
-    const home = useIsolatedOpenScoutHome();
-    const projectRoot = join(home, "dev", "sample");
+    const stopDiagnostic = beginCliEnvDiagnostic();
+    try {
+      const home = useIsolatedOpenScoutHome();
+      const projectRoot = join(home, "dev", "sample");
 
-    mkdirSync(join(projectRoot, ".git"), { recursive: true });
-    await writeProjectConfig(projectRoot, {
-      version: 1,
-      project: {
-        id: "sample",
-        name: "Sample",
-      },
-      agent: {
-        id: "sample",
-      },
-    });
+      mkdirSync(join(projectRoot, ".git"), { recursive: true });
+      cliEnvPhase("writeProjectConfig.before");
+      await writeProjectConfig(projectRoot, {
+        version: 1,
+        project: {
+          id: "sample",
+          name: "Sample",
+        },
+        agent: {
+          id: "sample",
+        },
+      });
 
-    const envReport = await runCommandJson(runEnvCommand, { cwd: projectRoot }) as {
-      agent: { resolvedId: string; projectRoot: string | null };
-    };
-    const whoamiReport = await runCommandJson(runWhoAmICommand, { cwd: projectRoot }) as {
-      defaultSenderId: string;
-      projectRoot: string | null;
-    };
+      cliEnvPhase("writeProjectConfig.after");
+      const envReport = await runCommandJson(runEnvCommand, { cwd: projectRoot }) as {
+        agent: { resolvedId: string; projectRoot: string | null };
+      };
+      const whoamiReport = await runCommandJson(runWhoAmICommand, { cwd: projectRoot }) as {
+        defaultSenderId: string;
+        projectRoot: string | null;
+      };
 
-    expect(envReport.agent.resolvedId).toBe(whoamiReport.defaultSenderId);
-    expect(envReport.agent.projectRoot).toBe(whoamiReport.projectRoot);
+      expect(envReport.agent.resolvedId).toBe(whoamiReport.defaultSenderId);
+      expect(envReport.agent.projectRoot).toBe(whoamiReport.projectRoot);
+    } finally { stopDiagnostic(); }
   });
 
   test("respects OPENSCOUT_AGENT from the command context env", async () => {

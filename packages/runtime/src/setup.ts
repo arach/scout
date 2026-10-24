@@ -1,3 +1,4 @@
+import { cliEnvPhase } from "./cli-env-diagnostic.js";
 import type { RuntimeEnv } from "./portable-types.js";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -871,25 +872,31 @@ function detectGitBranchUncached(projectRoot: string): string | null {
   // (freshly initialized repos with no commits yet). Fall back to
   // `rev-parse --abbrev-ref HEAD` for project paths below a repository root.
   try {
+    cliEnvPhase("git.symbolic-ref.before");
     const branch = execFileSync(
       "git",
       ["-C", projectRoot, "symbolic-ref", "--short", "HEAD"],
       { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" },
     ).trim();
+    cliEnvPhase("git.symbolic-ref.after");
     if (branch) {
       return branch;
     }
   } catch {
+    cliEnvPhase("git.symbolic-ref.catch");
     // ignore and fall through
   }
   try {
+    cliEnvPhase("git.rev-parse.before");
     const branch = execFileSync(
       "git",
       ["-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD"],
       { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" },
     ).trim();
+    cliEnvPhase("git.rev-parse.after");
     return branch && branch !== "HEAD" ? branch : null;
   } catch {
+    cliEnvPhase("git.rev-parse.catch");
     return null;
   }
 }
@@ -1303,9 +1310,12 @@ function legacyLocalRelayLinkPath(projectRoot: string): string {
 
 async function pathExists(filePath: string): Promise<boolean> {
   try {
+    cliEnvPhase("access.before");
     await access(filePath);
+    cliEnvPhase("access.after");
     return true;
   } catch {
+    cliEnvPhase("access.catch");
     return false;
   }
 }
@@ -1321,15 +1331,23 @@ async function isDirectory(filePath: string): Promise<boolean> {
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
   try {
-    return JSON.parse(await readFile(filePath, "utf8")) as T;
+    cliEnvPhase(`json.read.before:${basename(filePath)}`);
+    const source = await readFile(filePath, "utf8");
+    cliEnvPhase(`json.read.after:${basename(filePath)}`);
+    return JSON.parse(source) as T;
   } catch {
+    cliEnvPhase(`json.read.catch:${basename(filePath)}`);
     return null;
   }
 }
 
 async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
+  cliEnvPhase("config.mkdir.before");
   await mkdir(dirname(filePath), { recursive: true });
+  cliEnvPhase("config.mkdir.after");
+  cliEnvPhase("config.write.before");
   await writeFile(filePath, JSON.stringify(value, null, 2) + "\n", "utf8");
+  cliEnvPhase("config.write.after");
 }
 
 function codexEnvironmentPath(projectRoot: string): string {
@@ -1661,8 +1679,11 @@ async function ensureProjectConfigIgnored(projectRoot: string): Promise<void> {
 
   let current = "";
   try {
+    cliEnvPhase("ignore.read.before");
     current = await readFile(gitignorePath, "utf8");
+    cliEnvPhase("ignore.read.after");
   } catch {
+    cliEnvPhase("ignore.read.catch");
     current = "";
   }
 
@@ -1673,7 +1694,9 @@ async function ensureProjectConfigIgnored(projectRoot: string): Promise<void> {
 
   const separator = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
   const header = lines.some((line) => line.trim() === comment) ? "" : `${comment}\n`;
+  cliEnvPhase("ignore.write.before");
   await writeFile(gitignorePath, `${current}${separator}${header}${ignoreRule}\n`, "utf8");
+  cliEnvPhase("ignore.write.after");
 }
 
 async function readLegacyRelayConfig(): Promise<LegacyRelayConfig | null> {

@@ -1,3 +1,4 @@
+import { watchCliEnvProcess } from "../../runtime/src/cli-env-diagnostic.ts";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -35,8 +36,11 @@ if (import.meta.main) {
     console.log(JSON.stringify({event:"cli-unit-process",files,version:Bun.version,revision:Bun.revision}));
     const child = Bun.spawn([process.execPath, "test", "--isolate", ...files.map(file => `./${file}`)], {
       cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit",
+      env: { ...process.env, SCOUT_CLI_ENV_DIAG: files.length > 1 ? "1" : "0" },
     });
-    const code = await child.exited;
+    const stopWatch = files.length > 1 ? watchCliEnvProcess(child.pid) : () => {};
+    let code: number;
+    try { code = await child.exited; } finally { stopWatch(); }
     if (code !== 0) process.exit(code || 1);
   }
 }
