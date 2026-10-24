@@ -735,6 +735,7 @@ function resolveScoutBunExecutable(): string {
 function resolveScoutPairingRuntimeScriptPath(): string {
   const candidates = [
     join(resolveOpenScoutWebServerDirectory(), SCOUT_PAIRING_RUNTIME_SCRIPT.replace(/\.ts$/, ".mjs")),
+    join(resolveOpenScoutWebServerDirectory(), SCOUT_PAIRING_RUNTIME_SCRIPT.replace(/\.ts$/, ".js")),
     join(resolveOpenScoutWebServerDirectory(), SCOUT_PAIRING_RUNTIME_SCRIPT),
   ];
 

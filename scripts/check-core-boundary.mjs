@@ -19,7 +19,7 @@ export function findCoreSourceBoundaryFailures(root) {
         const specifier = imported.fileName;
         const target = specifier.startsWith(".") ? relative(root, resolve(dirname(file), specifier)).replaceAll("\\", "/") : specifier;
         if (departed.some(name => target === name || target.startsWith(name + "/"))
-          || /^(?:@scout\/app|@openscout\/web)(?:\/|$)/.test(specifier)) {
+          || /^(?:@scout\/app|@openscout\/web|@openscout\/session-trace-react)(?:\/|$)/.test(specifier)) {
           failures.push(`${relative(root, file)} imports departed source: ${specifier}`);
         }
       }
