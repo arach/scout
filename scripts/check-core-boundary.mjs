@@ -15,13 +15,27 @@ export function findCoreSourceBoundaryFailures(root) {
       if (entry.isDirectory()) { inspect(file); continue; }
       if (!/\.[cm]?[jt]sx?$/.test(entry.name)) continue;
       const source = readFileSync(file, "utf8");
-      for (const imported of ts.preProcessFile(source, true, true).importedFiles) {
-        const specifier = imported.fileName;
+      const inspectSpecifier = specifier => {
         const target = specifier.startsWith(".") ? relative(root, resolve(dirname(file), specifier)).replaceAll("\\", "/") : specifier;
         if (departed.some(name => target === name || target.startsWith(name + "/"))
           || /^(?:@scout\/app|@openscout\/web|@openscout\/session-trace-react)(?:\/|$)/.test(specifier)) {
           failures.push(`${relative(root, file)} imports departed source: ${specifier}`);
         }
+      };
+      for (const imported of ts.preProcessFile(source, true, true).importedFiles) inspectSpecifier(imported.fileName);
+      // Module-resolution anchors can borrow dependencies from an app even
+      // without importing app code. Keep those core-owned as well.
+      if (source.includes("createRequire")) {
+        const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+        const visit = node => {
+          if (ts.isCallExpression(node) && node.expression.getText(tree) === "createRequire") {
+            const url = node.arguments[0];
+            if (url && ts.isNewExpression(url) && url.expression.getText(tree) === "URL"
+              && url.arguments?.[0] && ts.isStringLiteralLike(url.arguments[0])) inspectSpecifier(url.arguments[0].text);
+          }
+          ts.forEachChild(node, visit);
+        };
+        visit(tree);
       }
     }
   };

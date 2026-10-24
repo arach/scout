@@ -18,6 +18,7 @@ test("core source guard rejects value, type, re-export, dynamic and package edge
       'export * from "../../web/x.ts";',
       'await import("../../../apps/desktop/x.ts");',
       'import "@openscout/web";',
+      'const app = createRequire(new URL("../../web/package.json", import.meta.url));',
     ]) {
       writeFileSync(file, source);
       assert.equal(findCoreSourceBoundaryFailures(root).length, 1, source);

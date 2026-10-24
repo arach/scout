@@ -15,7 +15,7 @@ const fixturePath = new URL("./test-fixtures/tail-wire.ts", import.meta.url);
 // client in an external scratch install without changing another lane's lock.
 const clientModule =
   process.env.TAIL_WIRE_CLIENT_MODULE ??
-  createRequire(new URL("../../web/package.json", import.meta.url)).resolve(
+  createRequire(new URL("../package.json", import.meta.url)).resolve(
     "@trpc/client",
   );
 const remoteModule =
