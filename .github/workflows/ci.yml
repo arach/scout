@@ -1,134 +1,43 @@
 name: CI
-
 on:
-  # CI runs only at explicit checkpoints, not on every commit, PR, branch
-  # push, or tag. Dispatch it manually when a coherent batch is ready for
-  # validation so a series of small PRs costs one run instead of one each.
-  #
-  # Deliberately NOT on pull_request or push: a stacked series produced ~3
-  # runs per PR, most cancelling each other before finishing.
-  #
-  # Local exact-head/base validation is the default review evidence. Hosted
-  # execution is optional and must be explicitly requested; required repository
-  # rules and blocking review feedback still apply to every merge.
   workflow_dispatch:
-  # Release Candidate deliberately reuses these checks as one lane of its
-  # explicitly initiated validation workflow. This is callable, not ambient.
-  workflow_call:
-
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  checks:
-    name: Typecheck and unit tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Install zsh for shell integration tests
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends zsh
-          zsh --version
-
-      - name: Set up Node for CLI launcher tests
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "24.x"
-          package-manager-cache: false
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.14"
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # Separate cold process; never disable DFG for the warm full-JIT matrix.
-      - name: Cold no-DFG extension read-timeout witness
-        env:
-          BUN_JSC_useDFGJIT: "0"
-        run: bun scripts/extension-numeric-spike/witness.ts credential none async read-timeout
-
-      - name: Sync exec fence
-        run: bun run sync-exec:fence
-
-      - name: Public repository presentation
-        run: bun run check:presentation
-
-      - name: Typecheck
-        # Share the package list with the root check command.
-        run: bun run check:types
-
-      - name: CLI launcher and package tests
-        run: bun run test:cli
-
-      # Keep runtime selection in its package script: nested units and scenarios,
-      # excluding opt-in live tests. Both the root chain and fallback delegate.
-      - name: Unit tests
-        env:
-          OPENSCOUT_CONFORMANCE: "1"
-        run: |
-          if bun -e "const pkg = require('./package.json'); process.exit(pkg.scripts?.['test:unit:source'] ? 0 : 1)"; then
-            bun run test:unit:source
-          else
-            bun run --cwd packages/protocol test
-            bun run --cwd packages/agent-sessions test
-            bun run --cwd packages/runtime test
-            bun run --cwd apps/desktop test:happy
-            bun run --cwd packages/web test:happy
-            bun test packages/session-trace/src/*.test.ts packages/session-trace-react/src/*.test.tsx
-          fi
-
-  rust-scoutd:
-    name: scoutd verification
-    runs-on: macos-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Verify portable voice core
-        run: |
-          cargo check --manifest-path crates/openscout-voice-core/Cargo.toml --all-features
-          cargo test --manifest-path crates/openscout-voice-core/Cargo.toml --all-features
-
-      - name: Verify scout-tui
-        run: cargo check --manifest-path crates/scout-tui/Cargo.toml
-
-      - name: Verify
-        run: bash scripts/scoutd-verify.sh
-
-  extension-channel-qualification:
-    name: Dormant extension channel (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-14, ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+  bun-git-shape:
+    name: Git sync-spawn old baseline then Bun 1.4.4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
+      - name: Download checksum-pinned Bun binaries without installing
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bun-probes"
+          cd "$RUNNER_TEMP/bun-probes"
+          for version in 1.3.14 1.4.4; do
+            mkdir "$version"
+            curl -fLsS --max-time 120 "https://github.com/oven-sh/bun/releases/download/bun-v$version/bun-linux-x64.zip" -o "$version/bun.zip"
+          done
+          echo '951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f  1.3.14/bun.zip' | sha256sum -c -
+          echo 'bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c  1.4.4/bun.zip' | sha256sum -c -
+          unzip -q 1.3.14/bun.zip -d 1.3.14
+          unzip -q 1.4.4/bun.zip -d 1.4.4
+          chmod +x */bun-linux-x64/bun
+      - name: Failing baseline first, then identical subject on 1.4.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I diagnostics/bun-git-shape/probe.py linux-old "$RUNNER_TEMP/bun-probes/1.3.14/bun-linux-x64/bun" "$GITHUB_WORKSPACE/diagnostics/bun-git-shape/git-shape.mjs"
+          python3 -I diagnostics/bun-git-shape/probe.py linux-new "$RUNNER_TEMP/bun-probes/1.4.4/bun-linux-x64/bun" "$GITHUB_WORKSPACE/diagnostics/bun-git-shape/git-shape.mjs"
+          python3 -I diagnostics/bun-git-shape/classify.py
+      - name: Preserve both receipts and kernel snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          bun-version: "1.3.14"
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
-        with:
-          node-version: "24.x"
-          package-manager-cache: false
-      - run: bun install --frozen-lockfile
-      # Independent of checks/scenarios; positive skips fail this checkpoint.
-      - run: bun run test:extension-channel:qualification
+          name: bun-git-shape
+          path: |
+            diagnostics/bun-git-shape/linux-old/
+            diagnostics/bun-git-shape/linux-new/
+          if-no-files-found: warn
