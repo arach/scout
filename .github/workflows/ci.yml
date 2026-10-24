@@ -80,17 +80,29 @@ jobs:
       - name: Unit tests
         env:
           OPENSCOUT_CONFORMANCE: "1"
+        # Diagnostic only: run each part of test:unit:source even after one
+        # fails, so one run at 1.4.4 shows every suite; fail at the end.
         run: |
-          if bun -e "const pkg = require('./package.json'); process.exit(pkg.scripts?.['test:unit:source'] ? 0 : 1)"; then
-            bun run test:unit:source
-          else
-            bun run --cwd packages/protocol test
-            bun run --cwd packages/agent-sessions test
-            bun run --cwd packages/runtime test
-            bun run --cwd apps/desktop test:happy
-            bun run --cwd packages/web test:happy
-            bun test packages/session-trace/src/*.test.ts packages/session-trace-react/src/*.test.tsx
-          fi
+          status=0
+          for part in \
+            "bun run test:remote-target-programs" \
+            "bun run --cwd packages/protocol test" \
+            "bun run --cwd packages/agent-sessions test" \
+            "bun run --cwd packages/runtime test" \
+            "bun run --cwd packages/cli test:source" \
+            "bun run --cwd apps/desktop test" \
+            "bun run --cwd packages/web test" \
+            "bun run --cwd packages/session-trace test" \
+            "bun run --cwd packages/session-trace-react test" \
+            "node --test scripts/ship-release.test.mjs scripts/bundle-scout-web.test.mjs scripts/check-packed-dependencies.test.mjs" \
+            "bun run --cwd packages/mesh-extension test" \
+            "bun run test:pairing-capsule"
+          do
+            code=0; bash -c "$part" || code=$?
+            echo "PART RESULT: $code $part"
+            [ "$code" = 0 ] || status=1
+          done
+          exit $status
 
   rust-scoutd:
     name: scoutd verification
