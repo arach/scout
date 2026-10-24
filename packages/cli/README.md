@@ -287,8 +287,9 @@ Other agents ─┘   messages · work · routing
 - JSON output and the stdio MCP server.
 
 The Rust TUI launched by `scout tui` is part of the core. Its native binary is
-resolved or downloaded separately from the npm install. The Mac, iOS, Android,
-and web apps are separate clients built on the core; none ships in this package.
+not installed by `npm install -g @openscout/scout`; the command resolves or
+downloads it separately. The Mac, iOS, Android, and web apps are separate clients
+built on the core; none ships in this package.
 `scout server` and `scout web` use a web client only when the apps layer supplies
 one. See the [source boundary](../../docs/public-source-boundary.md).
 
