@@ -2045,7 +2045,7 @@ function scheduleScoutReplyNotification(input: {
 }): void {
   const { server, deps, brokerUrl, context } = input;
   // Do not retain the caller's full FlightRecord (metadata/output/result reply)
-  // while waiting. All current state is read back by its durable identifiers.
+  // while waiting. Current flight state is read back by its durable identifiers.
   const flightId = input.flight.id;
   const invocationId = input.flight.invocationId;
   const signal = notificationLifetimes.get(server);

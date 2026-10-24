@@ -2,7 +2,9 @@
 import { heapStats } from "bun:jsc";
 import { readFileSync, statfsSync, writeFileSync } from "node:fs";
 const directory = process.env.OWNED_MCP_PENDING_PROBE!;
-process.on("SIGUSR2", () => { void collect(); });
+process.on("SIGUSR2", () => {
+  void collect().catch(error => console.error(JSON.stringify({ event: "pending-soak-probe-error", error: String(error) })));
+});
 async function collect() {
   const disk = statfsSync(process.platform === "darwin" ? "/System/Volumes/Data" : directory);
   if (disk.bavail * disk.bsize < 3 * 1024 ** 3) throw Error("pending soak disk guard: below 3 GiB");
@@ -12,11 +14,16 @@ async function collect() {
   Bun.gc(true);
   const heap = heapStats();
   let footprint: string | null = null;
+  let vmmapTimeout = false;
   if (process.platform === "darwin") {
     const child = Bun.spawn(["vmmap", "-summary", String(process.pid)], { stdout: "pipe", stderr: "ignore" });
-    const output = await new Response(child.stdout).text(); await child.exited;
-    footprint = output.match(/^Physical footprint:\s*(.+)$/m)?.[1] ?? null;
+    // A slow host observation must not block the owned MCP server forever.
+    const timer = setTimeout(() => { vmmapTimeout = true; child.kill("SIGKILL"); }, 15000);
+    try {
+      const output = await new Response(child.stdout).text(); await child.exited;
+      footprint = output.match(/^Physical footprint:\s*(.+)$/m)?.[1] ?? null;
+    } finally { clearTimeout(timer); }
   }
   if (command.snapshot) writeFileSync(`${directory}/${command.label}.heapsnapshot`, Bun.generateHeapSnapshot("v8"));
-  console.error(JSON.stringify({ event: "pending-soak-sample", label: command.label, heap, footprint, memory: process.memoryUsage() }));
+  console.error(JSON.stringify({ event: "pending-soak-sample", label: command.label, heap, footprint, vmmapTimeout, memory: process.memoryUsage() }));
 }
