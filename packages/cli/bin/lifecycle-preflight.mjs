@@ -315,7 +315,7 @@ export const INSTALL_HELP = [
   "",
   "  The app connects to the local service from @openscout/scout.",
   "  Install with `npm install -g @openscout/scout` or `bun add -g @openscout/scout`.",
-  "  The normal macOS local service requires Bun 1.3 or newer.",
+  "  The normal macOS local service requires Bun 1.4.3 or newer.",
   "",
   QUICK_LINKS,
 ].join("\n");

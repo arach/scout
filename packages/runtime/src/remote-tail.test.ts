@@ -266,7 +266,7 @@ test("refused connection retries within budget and succeeds when the listener re
   await reservation.close();
   const { iterator } = subscription(url, { reconnect: { maxAttempts: 4, maxElapsedMs: 5_000 } });
   // Observe the second physical attempt, then restore during its backoff. The
-  // initial two WS/probe pairs see a genuinely closed port, not a rejected HTTP response.
+  // initial two WS attempts see a genuinely closed port, not a rejected HTTP response.
   for (;;) {
     const item = await deadline(iterator.next()); assert(!item.done);
     if (item.value.type === "connection" && item.value.generation === 2) break;
@@ -295,22 +295,21 @@ test("live listener rejecting the upgrade is terminal with no second attempt", a
   const address = server.address(); assert(address && typeof address !== "string");
   const { iterator } = subscription(`http://127.0.0.1:${address.port}`, { reconnect: { maxAttempts: 3, maxElapsedMs: 1_000 } });
   const error = await terminal(iterator);
-  assert.equal(error.reason, process.versions.bun ? "handshake_error" : "auth_denied");
+  assert.equal(error.reason, "auth_denied");
   assert.equal(error.generation, 1); assert.equal(error.lastDeliveredId, null);
   assert.equal(error.resyncRequired, false);
   await until(() => peers.every(peer => peer.closed));
   await sleep(30);
-  assert.equal(peers.length, process.versions.bun ? 2 : 1);
+  assert.equal(peers.length, 1);
   assert(peers[0]!.bytes > 0); // Exactly one actual upgrade request.
-  if (process.versions.bun) assert.equal(peers[1]!.bytes, 0); // Probe writes nothing.
 });
 
 for (const status of [401, 403, 302, 503]) {
   test(`upgrade ${status} never follows or downgrades`, async () => {
     const f = await fixture({ status }); const { iterator } = subscription(f.url, { reconnect: { maxAttempts: 2, maxElapsedMs: 400 } });
     const error = await terminal(iterator);
-    assert.equal(error.reason, process.versions.bun ? "handshake_error" : status === 401 || status === 403 ? "auth_denied" : status === 503 ? "retry_exhausted" : "server_error");
-    assert.equal(f.connections(), !process.versions.bun && status === 503 ? 2 : 1);
+    assert.equal(error.reason, status === 401 || status === 403 ? "auth_denied" : status === 503 ? "retry_exhausted" : "server_error");
+    assert.equal(f.connections(), status === 503 ? 2 : 1);
   });
 }
 

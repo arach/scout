@@ -112,7 +112,7 @@ state, and routes one real request through the broker.
 
 ## Prerequisites
 
-- Bun 1.3 or newer;
+- Bun 1.4.3 or newer;
 - macOS or Linux;
 - at least one supported coding-agent harness if you want Scout to launch or
   route work.

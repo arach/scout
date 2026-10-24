@@ -461,6 +461,8 @@ async function websocket(disconnect = false) {
     await new Promise<void>((resolve, reject) =>
       server.close((error: any) => (error ? reject(error) : resolve())),
     );
+    // Bun 1.4 delivers the final server-side close after the close callback.
+    await until(() => server.clients.size === 0);
     assert.equal(server.clients.size, 0);
     assert.equal(listeners(), 0);
   }

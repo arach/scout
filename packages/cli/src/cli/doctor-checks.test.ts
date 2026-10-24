@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { doctorBrokerCheck, doctorNativeCheck, doctorWorkerCommand, renderDoctorAssessment, renderDoctorCheck, runDoctorCheck } from "./doctor-checks.ts";
+import { doctorBunReport, doctorBrokerCheck, doctorNativeCheck, doctorWorkerCommand, renderDoctorAssessment, renderDoctorCheck, runDoctorCheck } from "./doctor-checks.ts";
 import type { BrokerServiceStatus } from "@openscout/runtime/broker-process-manager";
 
 const input = { cwd: process.cwd(), env: process.env };
@@ -92,4 +92,11 @@ test("native connected timeout remains inconclusive, while observed failure and 
   expect(doctorNativeCheck(report).state).toBe("inconclusive");
   expect(doctorNativeCheck({ ...report, status: { ...report.status!, healthState: "degraded" } }).state).toBe("impaired");
   expect(doctorNativeCheck({ ...report, status: { ...report.status!, runtimeFreshness: { ...report.status!.runtimeFreshness!, state: "stale" } } }).state).toBe("impaired");
+});
+
+test("doctor reports the executing Bun against the hard floor", () => {
+  expect(doctorBunReport("1.4.3")).toEqual({ version: "1.4.3", minimum: "1.4.3", supported: true, upgrade: "bun upgrade" });
+  expect(doctorBunReport("1.4.2").supported).toBe(false);
+  expect(doctorBunReport("1.3.14").supported).toBe(false);
+  expect(doctorBunReport("1.4.4").supported).toBe(true);
 });

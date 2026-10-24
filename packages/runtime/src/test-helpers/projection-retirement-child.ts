@@ -38,6 +38,7 @@ if (mode === "dispatch-error" || mode?.startsWith("entry-")) {
     // Bun's parentPort methods are readonly. Substitute only the port binding
     // in an otherwise exact entry module, without adding a production seam.
     const instrumented = (await readFile(entryUrl, "utf8"))
+      .replace(/import "(\.\/[^\"]+)\.js"/g, (_match, relative: string) => `import ${JSON.stringify(new URL(`${relative}.ts`, entryUrl).href)}`)
       .replace(/from "(\.\/[^\"]+)\.js"/g, (_match, relative: string) => `from ${JSON.stringify(new URL(`${relative}.ts`, entryUrl).href)}`)
       .replace("const port = parentPort;", `let attempts = 0;
         const port = { on: parentPort.on.bind(parentPort), close: parentPort.close.bind(parentPort),

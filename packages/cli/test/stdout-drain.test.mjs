@@ -10,7 +10,7 @@ test("imported CLI output drains a slow pipe beyond 64 KiB before forced exit", 
   try {
     mkdirSync(join(root, "bin"));
     mkdirSync(join(root, "dist", "node"), { recursive: true });
-    for (const name of ["scout.mjs", "lifecycle-preflight.mjs"]) {
+    for (const name of ["scout.mjs", "lifecycle-preflight.mjs", "bun-preflight.mjs"]) {
       copyFileSync(new URL("../bin/" + name, import.meta.url), join(root, "bin", name));
     }
     writeFileSync(join(root, "package.json"), '{"version":"0.0.0"}');

@@ -40,11 +40,11 @@ test("launcher bootstrap help succeeds with poisoned Bun/Node bundles and empty 
   const marker = join(root, "entry-loaded");
   const poison = `import {writeFileSync} from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "loaded"); throw Error("MIXED ENTRY LOADED");`;
   for (const name of ["main.mjs", "node/main.mjs"]) writeFileSync(join(root, "dist", name), poison);
-  for (const name of ["scout.mjs", "lifecycle-preflight.mjs"]) copyFileSync(new URL(`../../bin/${name}`, import.meta.url), join(root, "bin", name));
+  for (const name of ["scout.mjs", "lifecycle-preflight.mjs", "bun-preflight.mjs"]) copyFileSync(new URL(`../../bin/${name}`, import.meta.url), join(root, "bin", name));
   writeFileSync(join(root, "package.json"), '{"version":"test"}');
   for (const command of ["setup", "doctor"]) for (const flag of ["--help", "-h"]) {
     const result = await execSystemFile(process.execPath, [join(root, "bin/scout.mjs"), command, flag], {
-      cwd: root, env: { HOME: join(root, "home"), PATH: "", OPENSCOUT_RUNTIME_HOST: "node" }, timeoutMs: 3_000,
+      cwd: root, env: { HOME: join(root, "home"), PATH: "", OPENSCOUT_RUNTIME_HOST: "node", BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, timeoutMs: 3_000,
     });
     expect(result.exitCode).toBe(0); expect(result.stderr).toBe(""); expect(result.stdout).toContain("Usage:");
     expect(existsSync(marker)).toBe(false); expect(readdirSync(join(root, "home"))).toEqual([]);
