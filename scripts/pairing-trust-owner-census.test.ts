@@ -9,8 +9,8 @@ test("no direct trust writer or default adapter installer/adopter remains outsid
   const result = pairingTrustCensus(root);
   expect(result.directWriters).toEqual([]); expect(result.adapterInstallers).toEqual([]); expect(result.managedAdopters).toEqual([]);
   expect(result.ownerConsumers).toContain("packages/runtime/src/pairing-security/identity.ts");
-  expect(result.ownerConsumers).toContain("packages/web/server/pairing.ts");
-  expect(readFileSync(join(root,"apps/desktop/src/core/pairing/runtime/security/identity.ts"),"utf8")).toContain('export * from "@openscout/runtime/pairing-security/identity"');
+  expect(result.ownerConsumers).toContain("packages/pairing/src/pairing.ts");
+  expect(readFileSync(join(root,"packages/pairing/src/core/pairing/runtime/security/identity.ts"),"utf8")).toContain('export * from "@openscout/runtime/pairing-security/identity"');
   const source = readFileSync(join(root,result.canonicalOwner),"utf8");
   expect(source).not.toMatch(/process\.env|import\s*\(|require\s*\(|process\.argv/);
 }, 30000); // Full-tree AST census: hosted Linux observed 7.6 s; retain ~4x headroom.
