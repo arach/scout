@@ -240,8 +240,7 @@ async function runInstall(context: ScoutCommandContext, args: string[], deps: Sc
 
     const unpacked = join(workDirectory, "client");
     mkdirSync(unpacked, { recursive: true });
-    // Keep extraction on the main event loop. On Bun 1.3.13/1.3.14, GC
-    // inside synchronous child execution can poison Linux stdio epoll entries.
+    // Extraction is asynchronous so downloads do not block the CLI event loop.
     try {
       await promisify(execFile)("tar", ["-xzf", tarball, "-C", unpacked], {
         encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 128 * 1024,

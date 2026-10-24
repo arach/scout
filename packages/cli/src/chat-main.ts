@@ -1,3 +1,4 @@
+import "./bun-bootstrap.ts";
 import { basename } from "node:path";
 import { parseScoutArgv } from "./cli/argv.ts";
 import { createScoutCommandContext } from "./cli/context.ts";

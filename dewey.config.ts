@@ -50,7 +50,7 @@ export default {
       expectedOutput: "A Scout readiness report with no blocking setup error.",
     },
     prerequisites: [
-      "Bun 1.3 or newer",
+      "Bun 1.4 or newer",
       "macOS or Linux",
       "At least one supported coding-agent harness for routed work",
     ],

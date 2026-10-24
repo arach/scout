@@ -1,3 +1,4 @@
+import "../bun-bootstrap.ts";
 import { homedir } from "node:os";
 import { captureScoutExtensionSelection, rememberScoutExtensionSelection } from "./extension-context.ts";
 import { ScoutCommandUnavailableError, renderScoutCommandUnavailable } from "./command-unavailable.ts";

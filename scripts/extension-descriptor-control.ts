@@ -87,7 +87,17 @@ export async function runStandardDescriptorControl(input: {
         if(iteration===1){
           if(parent.fd!==previous)throw Error("second spawn did not reuse a former descriptor number");
           emit({event:"second-spawn-reuse",iteration,reused:[parent.fd],construction:"identified-reservation-dup2"});
-          if(input.fault==="second-spawn-close")closeSync(parent.fd);
+          if(input.fault==="second-spawn-close"){
+            // Corrupt the replacement while it is alive, but only after its
+            // request was written. Otherwise the control races a child EPIPE
+            // diagnostic instead of testing the parent's stale descriptor owner.
+            if(duplex){
+              const until=Date.now()+3000;
+              while(!existsSync(ready)&&child.exitCode===null&&Date.now()<until)await Bun.sleep(5);
+              if(!existsSync(ready))throw Error("control request missing before stale close");
+            }
+            closeSync(parent.fd);
+          }
         }
         Bun.gc(true);await Bun.sleep(5);Bun.gc(true);
         if(!same(parent.fd,parent.id))throw Error("replacement spawn descriptor lost");

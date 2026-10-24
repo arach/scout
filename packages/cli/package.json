@@ -58,7 +58,7 @@
     "openscout-runtime": "./bin/openscout-runtime.mjs"
   },
   "engines": {
-    "bun": ">=1.3"
+    "bun": ">=1.4.0"
   },
   "files": [
     "bin",

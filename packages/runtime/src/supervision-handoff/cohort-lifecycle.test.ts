@@ -374,17 +374,10 @@ carrierTest("a failed wait cannot invent an exit; independent retirement proof s
   } finally { poll.mockRestore(); }
 });
 
-test("mapped spawn explicitly refuses the unsafe Bun 1.3.13 extra-FD finalizer backend", async () => {
-  const capability = carrierChildCapability();
-  if (process.platform !== "darwin" || !["arm64", "x64"].includes(process.arch)) {
-    expect(capability).toEqual({ available: false, reason: "child_custody_backend_unproven" }); return;
-  }
-  if (Bun.revision === "0d9b296af33f2b851fcbf4df3e9ec89751734ba4") {
-    expect(capability).toEqual({ available: true, backend: "darwin-borrowed-extra-fd/1" }); return;
-  }
-  expect(capability).toEqual({ available: false, reason: "carrier_mapping_backend_unproven" });
+test("mapped spawn refuses a runtime without audited child custody", async () => {
+  expect(carrierChildCapability()).toEqual({ available: false, reason: "child_custody_backend_unproven" });
   const f = await fixture();
-  await expect(f.start()).rejects.toThrow("carrier_mapping_backend_unproven");
+  await expect(f.start()).rejects.toThrow("child_custody_backend_unproven");
   expect(await f.retire()).toMatchObject({ state: "retired" }); // No child was spawned.
 });
 

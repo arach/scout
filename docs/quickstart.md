@@ -9,7 +9,7 @@ state, and routes one real request through the runtime.
 
 ## Prerequisites
 
-- Bun 1.3 or newer;
+- Bun 1.4 or newer;
 - Apple-silicon macOS, or Linux with a process manager for the foreground
   runtime;
 - at least one supported coding-agent harness if you want Scout to launch or
