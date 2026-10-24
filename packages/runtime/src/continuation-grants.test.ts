@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   appendContinuationAudit,
   claimContinuationActuation,
+  releaseContinuationActuation,
   DEFAULT_CONTINUATION_LEVEL,
   decideContinuation,
   loadContinuationPolicy,
@@ -172,4 +173,26 @@ describe("continuation grants", () => {
       expect(wins.filter(Boolean).length).toBeLessThanOrEqual(1);
     }
   });
+});
+
+
+test("failed input releases only this process's claim, so a retry can acquire it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "continuation-release-"));
+  try {
+    expect(claimContinuationActuation("failed-prompt", 30_000, dir)).toBe(true);
+    expect(claimContinuationActuation("other-prompt", 30_000, dir)).toBe(true);
+    releaseContinuationActuation("failed-prompt", dir);
+    expect(claimContinuationActuation("failed-prompt", 30_000, dir)).toBe(true);
+    expect(claimContinuationActuation("other-prompt", 30_000, dir)).toBe(false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a foreign process's claim is never released", () => {
+  const dir = mkdtempSync(join(tmpdir(), "continuation-release-foreign-"));
+  try {
+    expect(claimContinuationActuation("foreign-prompt", 30_000, dir)).toBe(true);
+    for (const name of readdirSync(dir)) writeFileSync(join(dir, name), `999999 ${Date.now()}\n`);
+    releaseContinuationActuation("foreign-prompt", dir);
+    expect(claimContinuationActuation("foreign-prompt", 30_000, dir)).toBe(false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

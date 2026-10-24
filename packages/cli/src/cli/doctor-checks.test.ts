@@ -1,5 +1,9 @@
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { DEFAULT_OPENSCOUT_MESH_RELAY_URL, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL } from "@openscout/protocol";
 import { expect, test } from "bun:test";
-import { doctorBrokerCheck, doctorNativeCheck, doctorWorkerCommand, renderDoctorAssessment, renderDoctorCheck, runDoctorCheck } from "./doctor-checks.ts";
+import { doctorMeshBridgeCheck, doctorBrokerCheck, doctorNativeCheck, doctorWorkerCommand, renderDoctorAssessment, renderDoctorCheck, runDoctorCheck } from "./doctor-checks.ts";
 import type { BrokerServiceStatus } from "@openscout/runtime/broker-process-manager";
 
 const input = { cwd: process.cwd(), env: process.env };
@@ -92,4 +96,29 @@ test("native connected timeout remains inconclusive, while observed failure and 
   expect(doctorNativeCheck(report).state).toBe("inconclusive");
   expect(doctorNativeCheck({ ...report, status: { ...report.status!, healthState: "degraded" } }).state).toBe("impaired");
   expect(doctorNativeCheck({ ...report, status: { ...report.status!, runtimeFreshness: { ...report.status!.runtimeFreshness!, state: "stale" } } }).state).toBe("impaired");
+});
+
+test("bridge doctor names dir and the rejected pair together without resolving or printing credentials", () => {
+  const support = mkdtempSync(join(tmpdir(), "doctor-bridge-"));
+  const config = join(support, "mcp-bridge.json");
+  try {
+    expect(doctorMeshBridgeCheck(support, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).state).toBe("working");
+    const original = JSON.stringify({ relayUrl: "https://issuer.example.test", dir: "/private/secret-directory",
+      token: "DO-NOT-PRINT", tokenKeychainService: "NeverResolveThisService", tokenFile: "/private/secret-file" });
+    writeFileSync(config, original);
+    const result = doctorMeshBridgeCheck(support, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL);
+    expect(result.state).toBe("impaired");
+    expect(renderDoctorCheck(result)).toBe(`FAIL mesh-bridge: Stored bridge config: unsupported dir field; relay/rendezvous pair outside issuer audience (relay=https://issuer.example.test; rendezvous=${new URL(DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).origin}).`);
+    expect(JSON.stringify(result)).not.toContain("DO-NOT-PRINT");
+    expect(JSON.stringify(result)).not.toContain("/private/");
+    expect(JSON.stringify(result)).not.toContain("NeverResolveThisService");
+    expect(readFileSync(config, "utf8")).toBe(original);
+    // The amended default pair is valid; a legacy dir still blocks it.
+    writeFileSync(config, JSON.stringify({ relayUrl: DEFAULT_OPENSCOUT_MESH_RELAY_URL, dir: "/legacy" }));
+    expect(doctorMeshBridgeCheck(support, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).detail).toBe("Stored bridge config: unsupported dir field.");
+    writeFileSync(config, JSON.stringify({ relayUrl: DEFAULT_OPENSCOUT_MESH_RELAY_URL }));
+    expect(doctorMeshBridgeCheck(support, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).state).toBe("working");
+    writeFileSync(config, "broken JSON");
+    expect(doctorMeshBridgeCheck(support, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).state).toBe("impaired");
+  } finally { rmSync(support, { recursive: true, force: true }); }
 });

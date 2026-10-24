@@ -361,6 +361,12 @@
       "import": "./dist/scout-home.js",
       "default": "./dist/scout-home.js"
     },
+    "./mesh-bridge-config": {
+      "bun": "./src/mesh-bridge-config.ts",
+      "types": "./dist/mesh-bridge-config.d.ts",
+      "import": "./dist/mesh-bridge-config.js",
+      "default": "./dist/mesh-bridge-config.js"
+    },
     "./open-scout-network": {
       "bun": "./src/open-scout-network.ts",
       "types": "./dist/open-scout-network.d.ts",

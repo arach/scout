@@ -221,9 +221,19 @@ export function endpointForFlight(snapshot: RuntimeSnapshot, flight: FlightRecor
 
 function flightsShareExecutionOwner(left: FlightRecord, right: FlightRecord): boolean {
   const endpointId = flightDispatchEndpointId(left);
-  if (!endpointId || endpointId !== flightDispatchEndpointId(right)) return false;
+  const rightEndpointId = flightDispatchEndpointId(right);
+  if (!endpointId || !rightEndpointId) return false;
   const leftAck = left.metadata!.dispatchAck as Record<string, unknown>;
   const rightAck = right.metadata!.dispatchAck as Record<string, unknown>;
+  if (endpointId !== rightEndpointId) {
+    // One harness session can sit behind two endpoints when it is registered
+    // under two agent ids. A tmux session still runs one turn at a time, so it
+    // is one owner when every piece of its address matches.
+    return (["sessionId", "nodeId", "harness", "transport"] as const).every((key) => {
+      const value = metadataStringValue(leftAck, key);
+      return value !== null && value === metadataStringValue(rightAck, key);
+    });
+  }
   for (const key of ["nodeId", "harness"] as const) {
     if (leftAck[key] && rightAck[key] && leftAck[key] !== rightAck[key]) return false;
   }
@@ -315,8 +325,7 @@ export function staleWorkingFlightReason(
   const startedAt = flightTimestamp(flight);
   const newerTerminalFlight = Object.values(snapshot.flights)
     .filter((candidate) => (
-      candidate.targetAgentId === flight.targetAgentId
-      && candidate.id !== flight.id
+      candidate.id !== flight.id
       && flightsShareExecutionOwner(flight, candidate)
       && !isWorkingFlightState(candidate.state)
       && flightTimestamp(candidate) > startedAt

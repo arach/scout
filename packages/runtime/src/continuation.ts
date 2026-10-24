@@ -42,6 +42,7 @@ export {
 export {
   appendContinuationAudit,
   claimContinuationActuation,
+  releaseContinuationActuation,
   continuationAuditPath,
   continuationPolicyPath,
   loadContinuationPolicy,

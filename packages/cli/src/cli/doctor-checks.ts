@@ -1,3 +1,6 @@
+import { inspectMeshBridgeCredentialConfig } from "@openscout/runtime/mesh-bridge-config";
+import { readOpenScoutNetworkSettingsSync } from "@openscout/runtime/open-scout-network";
+import { resolveOpenScoutSupportPaths } from "@openscout/runtime/support-paths";
 import { loadScoutCoreReport } from "../lib/core/setup/readiness.ts";
 import { assessCoreSetupCompletion } from "@openscout/runtime/core-report";
 import type { ScoutCommandContext } from "./context.ts";
@@ -7,7 +10,7 @@ import { loadHarnessCatalogSnapshot } from "@openscout/runtime/harness-catalog";
 import { loadNativeScoutdDoctorReport, type NativeScoutdDoctorReport } from "./scoutd.ts";
 import { spawn } from "node:child_process";
 
-export const DOCTOR_CHECK_NAMES = ["broker", "native", "runtimes", "probes"] as const;
+export const DOCTOR_CHECK_NAMES = ["broker", "native", "runtimes", "mesh-bridge", "probes"] as const;
 export type DoctorCheckName = typeof DOCTOR_CHECK_NAMES[number];
 export type DoctorCheck = {
   name: DoctorCheckName;
@@ -60,9 +63,17 @@ export function doctorNativeCheck(report: NativeScoutdDoctorReport): DoctorCheck
   };
 }
 
+export function doctorMeshBridgeCheck(supportDirectory: string, rendezvousUrl: string): DoctorCheck {
+  const report = inspectMeshBridgeCredentialConfig(supportDirectory, rendezvousUrl);
+  return { name: "mesh-bridge", state: report.ok ? "working" : "impaired", detail: report.detail,
+    ...(!report.ok ? { next: "Remove unsupported dir from mcp-bridge.json; use the issuer origin or the default relay/rendezvous pair, then run scout mesh bridge connect." } : {}) };
+}
+
 /** Internal read-only worker. Never routes through startup maintenance. */
 export async function collectDoctorCheck(name: DoctorCheckName, context: ScoutCommandContext): Promise<DoctorCheck> {
   switch (name) {
+    case "mesh-bridge": return doctorMeshBridgeCheck(resolveOpenScoutSupportPaths().supportDirectory,
+      context.env.OPENSCOUT_MESH_RENDEZVOUS_URL?.trim() || readOpenScoutNetworkSettingsSync().rendezvousUrl);
     case "broker": {
       const completion = assessCoreSetupCompletion({ report: await loadScoutCoreReport({ env: context.env }) });
       return { name, state: completion.outcome === "failed" ? "impaired" : completion.outcome === "complete" ? "working" : "inconclusive",

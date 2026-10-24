@@ -32,7 +32,7 @@ function fixture() {
   return { root, marker, env };
 }
 test("the default assessment contains only core checks, never CA or private Web-PTY prerequisites", () => {
-  expect([...DOCTOR_CHECK_NAMES]).toEqual(["broker", "native", "runtimes", "probes"]);
+  expect([...DOCTOR_CHECK_NAMES]).toEqual(["broker", "native", "runtimes", "mesh-bridge", "probes"]);
 });
 test("real source setup is headless/core-only even with hostile private dependency executables on PATH", () => {
   const f = fixture();
@@ -143,3 +143,20 @@ for (const args of [["setup", "--source-root", root, "--json"], ["doctor", "--js
   expect(result.exitCode, result.stderr.toString()).toBe(0);
   expect(existsSync(f.marker)).toBe(false);
 }, 30_000);
+
+test("owned mesh-bridge doctor worker reports both stored problems without secret helpers", () => {
+  const f = fixture();
+  mkdirSync(f.env.OPENSCOUT_SUPPORT_DIRECTORY);
+  writeFileSync(join(f.env.OPENSCOUT_SUPPORT_DIRECTORY, "mcp-bridge.json"), JSON.stringify({
+    relayUrl: "https://issuer.example.test", dir: "/legacy/private", tokenKeychainService: "NeverResolveThisService",
+  }));
+  const main = resolve(import.meta.dir, "../main.ts");
+  const result = Bun.spawnSync([process.execPath, main, "__doctor-check", "mesh-bridge"], {
+    cwd: f.root, env: { ...f.env, OPENSCOUT_MESH_RENDEZVOUS_URL: "https://rendezvous.example.test" },
+    timeout: 20000, killSignal: "SIGKILL",
+  });
+  expect(result.exitCode, result.stderr.toString()).toBe(0);
+  expect(JSON.parse(result.stdout.toString())).toMatchObject({ name: "mesh-bridge", state: "impaired",
+    detail: "Stored bridge config: unsupported dir field; relay/rendezvous pair outside issuer audience (relay=https://issuer.example.test; rendezvous=https://rendezvous.example.test)." });
+  expect(existsSync(f.marker)).toBe(false);
+});

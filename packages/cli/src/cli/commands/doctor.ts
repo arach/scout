@@ -1,7 +1,7 @@
 import { loadScoutCoreReport, resolveScoutCoreReportTarget } from "../../lib/core/setup/readiness.ts";
 import { loadHarnessCatalogSnapshot } from "@openscout/runtime/harness-catalog";
 import { DOCTOR_HELP } from "../../../bin/lifecycle-preflight.mjs";
-import { DOCTOR_CHECK_NAMES, runDoctorCheck, renderDoctorCheck, renderDoctorAssessment } from "../doctor-checks.ts";
+import { collectDoctorCheck, DOCTOR_CHECK_NAMES, runDoctorCheck, renderDoctorCheck, renderDoctorAssessment } from "../doctor-checks.ts";
 import type { ScoutCommandContext } from "../context.ts";
 import { defaultScoutContextDirectory } from "../context.ts";
 import { parseDoctorCommandOptions } from "../options.ts";
@@ -103,6 +103,7 @@ export async function runDoctorCommand(context: ScoutCommandContext, args: strin
       context.output.writeText("  No projects discovered yet.\n");
     }
     context.output.writeText(renderScoutDoctorTailAfterStream(report));
+    context.output.writeText(renderDoctorCheck(await collectDoctorCheck("mesh-bridge", context)));
     const nativeSection = renderNativeScoutdDoctorSection(native);
     if (nativeSection) {
       context.output.writeText(nativeSection);
@@ -114,5 +115,5 @@ export async function runDoctorCommand(context: ScoutCommandContext, args: strin
   const catalog = await loadHarnessCatalogSnapshot({ localOnly: true });
   const report = await loadScoutCoreReport({ env: context.env, catalog });
   const native = options.fix ? await loadNativeScoutdDoctorReport({ fix: true, yes: options.yes, env: context.env }) : null;
-  writeDoctorJsonLine(context, { phase: "complete", report, ...(native ? { nativeDaemon: native } : {}) });
+  writeDoctorJsonLine(context, { phase: "complete", report, meshBridge: await collectDoctorCheck("mesh-bridge", context), ...(native ? { nativeDaemon: native } : {}) });
 }

@@ -1,9 +1,10 @@
+import { DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL } from "@openscout/protocol";
 import type { RuntimeEnv } from "./portable-types.js";
 import { readFileSync } from "node:fs";
 
 import { resolveOpenScoutSupportPaths } from "./support-paths.js";
 
-export const DEFAULT_OPENSCOUT_NETWORK_RENDEZVOUS_URL = "https://mesh.oscout.net";
+export const DEFAULT_OPENSCOUT_NETWORK_RENDEZVOUS_URL = DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL;
 export const DEFAULT_OPENSCOUT_NETWORK_PAIRING_RELAY_URL = "wss://mesh.oscout.net/v1/relay";
 
 export type OpenScoutNetworkRuntimeSettings = {
