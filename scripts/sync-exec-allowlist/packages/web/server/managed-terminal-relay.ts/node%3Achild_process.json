@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/managed-terminal-relay.ts",
-  "symbol": "node:child_process",
-  "category": "process-lifecycle",
-  "reason": "owns terminal relay child process lifecycle",
-  "owner": "web"
-}

@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 
 import { buildScoutMcpCodexLaunchArgs } from "./codex-launch-config";
 
@@ -30,4 +33,30 @@ describe("buildScoutMcpCodexLaunchArgs", () => {
     expect(scoutArgs).toContain("--context-root");
     expect(scoutArgs.at(-1)).toBe("/Users/arach");
   });
+  test("resolves the real core CLI when no scout is on PATH", () => {
+    const home = mkdtempSync(resolve(tmpdir(), "scout-mcp-core-home-"));
+    try {
+      const args = buildScoutMcpCodexLaunchArgs({
+        currentDirectory: home,
+        env: { PATH: "", OPENSCOUT_BUN_BIN: process.execPath },
+      });
+      const commandArgs = JSON.parse(args[3]!.slice(args[3]!.indexOf("=") + 1));
+      expect(commandArgs).toEqual([
+        resolve(import.meta.dir, "../../cli/bin/scout.mjs"), "mcp", "--context-root", home,
+      ]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("an explicit CLI override still wins over the source checkout", () => {
+    const args = buildScoutMcpCodexLaunchArgs({
+      currentDirectory: import.meta.dir,
+      env: { PATH: "", OPENSCOUT_CLI_BIN: process.execPath },
+    });
+    expect(JSON.parse(args[1]!.slice(args[1]!.indexOf("=") + 1))).toBe(process.execPath);
+    expect(JSON.parse(args[3]!.slice(args[3]!.indexOf("=") + 1)))
+      .toEqual(["mcp", "--context-root", import.meta.dir]);
+  });
+
 });

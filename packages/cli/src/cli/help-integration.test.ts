@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readinessBootstrapImports, readinessWarmupExit, warmReadinessFixture } from "./test-fixtures/warm-readiness-fixture.ts";
 
-const entry = fileURLToPath(new URL("../../../../apps/desktop/bin/scout.ts", import.meta.url));
+const entry = fileURLToPath(new URL("../main.ts", import.meta.url));
 
 // File creation and import-only warming are fixture setup, not the behavior
 // under test. Each argv still invokes the real entry once with the throwing

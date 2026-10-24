@@ -1,6 +1,6 @@
-import { closeSync, fstatSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import { deriveOpenScoutInstanceLayout } from "./instance.js";
 import type { RuntimeEnv } from "./portable-types.js";
@@ -68,32 +68,12 @@ function checkedEntry(value: string | null | undefined, role: string): string | 
   return entry;
 }
 
-/** Preserve the installed npm web bundle until web leaves the public package.
- * Never search a repository, and never use this after explicit configuration. */
-function installedWebBundle(moduleDirectory: string): string | null {
-  for (const directory of [resolve(moduleDirectory, ".."), resolve(moduleDirectory, "..", "..")]) {
-    try {
-      const packageDirectory = realpathSync(join(directory, ".."));
-      // A built checkout has the same dist layout and package name. Only a
-      // real installation qualifies; linked checkouts need explicit entries.
-      if (!packageDirectory.split(sep).includes("node_modules")) continue;
-      const manifest = JSON.parse(readFileSync(join(packageDirectory, "package.json"), "utf8"));
-      if (manifest.name !== "@openscout/scout") continue;
-    } catch { continue; }
-    for (const name of ["scout-control-plane-web.mjs", "scout-web-server.mjs"]) {
-      const entry = join(directory, name);
-      try { if (statSync(entry).isFile()) return entry; } catch { /* Try the compatibility bundle name. */ }
-    }
-  }
-  return null;
-}
-
-export function resolveLegacyWebEntry(env: RuntimeEnv, moduleDirectory: string): string | null {
+export function resolveLegacyWebEntry(env: RuntimeEnv, _moduleDirectory: string): string | null {
   if (env.OPENSCOUT_WEB_SERVER_ENTRY !== undefined) return checkedEntry(env.OPENSCOUT_WEB_SERVER_ENTRY, "web");
   const config = readConfig(env);
   // A present file is authoritative, including an absent/null web entry.
   if (config) return checkedEntry(config.web?.entry, "web");
-  return installedWebBundle(moduleDirectory);
+  return null;
 }
 
 export function resolveLegacyScoutbotEntry(env: RuntimeEnv, entryOverride?: () => string | null): string | null {

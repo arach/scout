@@ -18,7 +18,8 @@ function createWorkspace(root: string): { workspaceRoot: string; appRoot: string
   const appRoot = join(workspaceRoot, "apps", "desktop");
   const cliRoot = join(workspaceRoot, "packages", "cli");
   mkdirSync(join(appRoot, "bin"), { recursive: true });
-  mkdirSync(cliRoot, { recursive: true });
+  mkdirSync(join(cliRoot, "src"), { recursive: true });
+  writeFileSync(join(cliRoot, "src/main.ts"), "export {};");
   writeJson(join(workspaceRoot, "package.json"), { workspaces: ["apps/*", "packages/*"] });
   writeJson(join(appRoot, "package.json"), { name: "@scout/app" });
   writeFileSync(join(appRoot, "bin", "scout.ts"), "#!/usr/bin/env bun\n");
@@ -70,7 +71,7 @@ describe("shared path resolution", () => {
     expect(resolved).toBe(workspaceRoot);
   });
 
-  test("resolves the source app root to apps/desktop for installed CLI builds", () => {
+  test("resolves the source CLI root without an app tree", () => {
     const fixtureRoot = makeFixtureRoot();
     cleanupDirectories.push(fixtureRoot);
     process.chdir(fixtureRoot);
@@ -83,7 +84,7 @@ describe("shared path resolution", () => {
       moduleDirectory,
     });
 
-    expect(resolved).toBe(appRoot);
+    expect(resolved).toBe(cliRoot);
   });
 
   test("resolves installed CLI package roots from the installed module location", () => {

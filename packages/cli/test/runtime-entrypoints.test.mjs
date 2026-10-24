@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { getOpenScoutRepoRoot, REFLECT_METADATA_BANNER } from "../../../scripts/bundle-scout-web.mjs";
+import { getOpenScoutRepoRoot, REFLECT_METADATA_BANNER } from "../../../scripts/bundle-core.mjs";
 import { bundleRuntimeEntrypoints } from "../scripts/runtime-entrypoints.mjs";
 
 test("installed runtime bundles start their sibling SQLite worker and preserve replayed records", () => {

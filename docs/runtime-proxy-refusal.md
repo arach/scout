@@ -34,26 +34,24 @@ sets forwarded proto. Funnel sets its own request marker; tagged Serve
 clients do not receive user-identity headers. The tests cover these distinct
 profiles rather than requiring an optional user header.
 
-Scout's local web service constructs new runtime requests with
-`requestScoutBrokerJson` in `packages/web/server/core/broker/service.ts`.
-Its GET helper passes socket path and signal; its POST helper passes method,
-body, and socket path. Neither copies browser headers. Event-stream requests
-also construct fresh headers. `packages/runtime/src/broker-api.ts` adds
-accept/content-type headers. The regression suite exercises that client
-against the real gate to preserve local web access. The separate phone relay
-forwards selected headers to the web surface, not wholesale to the runtime.
-The local tail/events WebSocket path in `packages/web/server/index.ts` also
-constructs a new upstream connection to `/trpc` without browser headers. Its
-peer-doorway branch forwards only selected headers to a peer web server, not
-the local runtime. Vite asset proxying is a separate dev-server path.
+The core host client constructs fresh runtime requests with
+`requestScoutBrokerJson` in `packages/pairing/src/core/broker/service.ts`.
+GET passes the selected socket path and signal; POST passes method, body and
+socket path. Neither copies browser forwarding headers. Event streams also
+construct fresh headers. `packages/runtime/src/broker-api.ts` supplies explicit
+accept/content-type headers. Runtime ingress regression tests exercise the real
+gate; the core pairing client is not an HTTP proxy for browser requests.
 
-Before extending the refusal set, a source inventory of Scout's local clients
-confirmed that none sends `Via`, `X-Forwarded-Port`, `CF-Connecting-IP`, or
-`True-Client-IP` to the runtime. The HTTP helper, CLI guest client and Python
-transport construct their own headers; the web HTTP/event/WebSocket paths above
-do not copy arbitrary browser headers to the runtime. Source occurrences of
-`via` describe coordination or UI data, not outbound HTTP headers. This audit
-does not cover third-party clients or external proxies.
+The phone relay's adjacent core `pair-http-proxy.ts` forwards an allowlist to
+the host pairing listener, not arbitrary headers to the runtime. Its ingress
+and operator-control gates remain distinct from the broker's ingress policy.
+
+The former web tail/events WebSocket, peer-doorway and Vite paths were app
+implementation evidence at the time of the audit. They left this repository
+with the web tree. Separately supplied apps must qualify their own adapters:
+construct new local runtime requests and do not copy browser proxy headers.
+The historical audit does not certify current app builds, third-party clients
+or external proxies.
 
 ## Limits
 

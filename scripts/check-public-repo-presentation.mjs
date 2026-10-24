@@ -41,14 +41,12 @@ if (missing.length > 0) {
 
 const manifests = [
   "package.json",
-  "apps/desktop/package.json",
   "packages/agent-sessions/package.json",
   "packages/cli/package.json",
   "packages/protocol/package.json",
   "packages/runtime/package.json",
   "packages/session-trace/package.json",
-  "packages/session-trace-react/package.json",
-  "packages/web/package.json",
+  "packages/pairing/package.json",
 ];
 const versions = new Map(
   manifests.map((path) => [path, JSON.parse(read(path)).version]),

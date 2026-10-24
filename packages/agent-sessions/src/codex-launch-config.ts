@@ -1,3 +1,4 @@
+import { repoScoutEntrypoint } from "./repo-scout-entry.js";
 import { accessSync, constants, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
@@ -90,7 +91,7 @@ function resolveBunExecutable(env: Record<string, string | undefined>): string |
   return resolveExecutableFromSearchPath(["bun"], env);
 }
 
-function resolveScoutExecutable(env: Record<string, string | undefined>): string | null {
+function resolveExplicitScoutExecutable(env: Record<string, string | undefined>): string | null {
   const explicitCandidates = [
     env.OPENSCOUT_CLI_BIN,
     env.SCOUT_CLI_BIN,
@@ -104,7 +105,7 @@ function resolveScoutExecutable(env: Record<string, string | undefined>): string
     }
   }
 
-  return resolveExecutableFromSearchPath(["scout"], env);
+  return null;
 }
 
 function resolveRepoScoutScript(currentDirectory: string): string | null {
@@ -113,7 +114,7 @@ function resolveRepoScoutScript(currentDirectory: string): string | null {
 
   for (const start of starts) {
     for (const candidate of ancestorChain(start)) {
-      const scriptPath = join(candidate, "apps", "desktop", "bin", "scout.ts");
+      const scriptPath = repoScoutEntrypoint(candidate);
       if (existsSync(scriptPath)) {
         return scriptPath;
       }
@@ -135,7 +136,7 @@ function resolveScoutMcpCommand(options: {
   const env = options.env ?? process.env;
   const contextRoot = resolveContextRoot(options.currentDirectory, env);
 
-  const scoutExecutable = resolveScoutExecutable(env);
+  const scoutExecutable = resolveExplicitScoutExecutable(env);
   if (scoutExecutable) {
     return {
       command: scoutExecutable,
@@ -144,6 +145,8 @@ function resolveScoutMcpCommand(options: {
     };
   }
 
+  // Explicit overrides win; a source checkout then uses its own CLI, not a
+  // potentially stale installed scout found through PATH or a common directory.
   const scoutScript = resolveRepoScoutScript(options.currentDirectory);
   const bunExecutable = resolveBunExecutable(env);
   if (scoutScript && bunExecutable) {
@@ -154,7 +157,12 @@ function resolveScoutMcpCommand(options: {
     };
   }
 
-  return null;
+  const installedScout = resolveExecutableFromSearchPath(["scout"], env);
+  return installedScout ? {
+    command: installedScout,
+    args: ["mcp", "--context-root", contextRoot],
+    cwd: contextRoot,
+  } : null;
 }
 
 export function buildScoutMcpCodexLaunchArgs(options: {

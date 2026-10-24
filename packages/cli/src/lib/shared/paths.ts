@@ -56,7 +56,7 @@ function looksLikeInstalledCliRoot(candidate: string): boolean {
 }
 
 function looksLikeSourceAppRoot(candidate: string): boolean {
-  return existsSync(join(candidate, "bin", "scout.ts"));
+  return existsSync(join(candidate, "src", "main.ts"));
 }
 
 function findMatchingAncestor(
@@ -125,7 +125,7 @@ export function resolveScoutAppRoot(options: ScoutPathResolutionOptions = {}): s
   }
 
   const workspaceRoot = resolveScoutWorkspaceRoot(options);
-  for (const relativePath of [["apps", "desktop"], ["apps", "scout"], ["packages", "cli"]] as const) {
+  for (const relativePath of [["packages", "cli"]] as const) {
     const candidate = resolve(workspaceRoot, ...relativePath);
     if (looksLikeSourceAppRoot(candidate)) {
       return candidate;

@@ -1,7 +1,7 @@
+import { startScoutPairLanBeacon, type ScoutPairLanBeacon } from "../../pairing-lan-beacon.ts";
 import {
   resolvedPairingConfig,
 } from "./runtime/config.ts";
-import { resolveWebPort } from "@openscout/runtime/local-config";
 import { spawn, type ChildProcess } from "node:child_process";
 import { renderQRCode } from "./runtime/bridge/qr.ts";
 import { startPairingRendezvousPublisher } from "./runtime/rendezvous.ts";
@@ -43,6 +43,7 @@ type PairingRuntimeControllerState = {
   relay: StartedManagedRelay | null;
   bonjour: BonjourAdvertisement | null;
   rendezvousPublisher: MeshRendezvousPublisher | null;
+  lanBeacon: ScoutPairLanBeacon | null;
 };
 
 type BonjourAdvertisement = {
@@ -80,6 +81,7 @@ export async function runPairingRuntimeController(): Promise<void> {
     relay: null,
     bonjour: null,
     rendezvousPublisher: null,
+    lanBeacon: null,
   };
 
   const shutdown = async () => {
@@ -178,7 +180,7 @@ async function startControlledPairingRuntime(state: PairingRuntimeControllerStat
           relayUrl: managedRelay.relayUrl,
           fallbackRelayUrls: advertisedRelayUrls.filter((relayUrl) => relayUrl !== managedRelay.relayUrl),
           publicKeyHex,
-          webPort: resolveWebPort(),
+          webPort: config.port,
           onUnavailable: () => {
             if (state.bonjour === bonjour) {
               state.bonjour = null;
@@ -236,6 +238,8 @@ async function startControlledPairingRuntime(state: PairingRuntimeControllerStat
     });
 
     state.rendezvousPublisher = startPairingRendezvousPublisher(() => state.current);
+    // Remote-relay hosts still advertise the core's real /pair listener.
+    state.lanBeacon = startScoutPairLanBeacon(() => Boolean(state.bonjour), { webPort: state.runtime.config.port });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     writeCurrent(state, {
@@ -333,6 +337,8 @@ function clearRestartTimer(state: PairingRuntimeControllerState): void {
 }
 
 async function stopControlledPairingRuntime(state: PairingRuntimeControllerState): Promise<void> {
+  state.lanBeacon?.stop();
+  state.lanBeacon = null;
   try {
     state.rendezvousPublisher?.stop();
   } catch {

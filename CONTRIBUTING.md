@@ -14,7 +14,7 @@ evidence proportionate to their risk.
 
 ## Repository routing
 
-Use the public Scout checkout for public CLI, broker, protocol, baseline web,
+Use the public Scout checkout for public CLI, broker, protocol, host pairing,
 and reusable runtime work. Push a topic branch to your fork and open its pull
 request against `oscout/scout`. Keep private OpenScout product work in its
 private repository. See [the source boundary](./docs/public-source-boundary.md)
@@ -39,7 +39,7 @@ Useful verification commands:
 bun run sync-exec:fence
 bun run --cwd packages/protocol check
 bun run --cwd packages/runtime check
-bun run --cwd apps/desktop check
+bun run --cwd packages/pairing check
 ```
 
 Run the narrowest relevant tests while iterating. Use `bun run check` and

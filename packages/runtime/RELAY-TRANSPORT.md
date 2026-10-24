@@ -1,8 +1,8 @@
 # Opaque room relay transport
 
-Status: draft extraction from the desktop and web relays. This contract does
-not activate a pairing provider or change the installed product. The narrow
-package export requires public API review before merge.
+The runtime owns the opaque relay transport. The core host-pairing package
+composes phone pairing and encrypted RPC above it. This contract does not
+authorize a new peer or activate a pairing opportunity.
 
 ## Ownership and API
 
@@ -95,49 +95,35 @@ Run the relay where only trusted peers can reach it, such as a restricted
 tailnet, a trusted-peer LAN, or TLS behind a network ACL. Treat `/resolve`
 answers as routing hints that the caller must verify end to end.
 
-## Private phone HTTP composition
+## Core phone HTTP composition
 
-The desktop and web `relay.ts` files remain compatibility wrappers. Both use
-one private `pair-http-proxy.ts` beside the desktop wrapper. The temporary
-web-to-desktop source import is private composition, not a dependency of the
-public runtime. Moving that policy into a private extension remains separate
-work.
+`packages/pairing/src/core/pairing/runtime/relay/relay.ts` wraps the public
+transport. Its adjacent `pair-http-proxy.ts` contains the phone-specific policy.
+There is one wrapper and one proxy implementation, not desktop and web copies.
+No private extension or temporary app-source inventory is required.
 
-The wrappers retain `RelayOptions.pairHttpOrigin` and the existing behavior:
+The wrapper retains `RelayOptions.pairHttpOrigin`:
 
-- Only `GET /pair` uses the proxy. An undefined origin resolves the private
-  web port **per request**. Null, empty or whitespace-only origins return 503.
-- The proxy preserves the query, uses GET, disables automatic redirect
-  following and retains the 3,000 ms deadline. Fetch failures return 502.
-- Requests forward only `accept`, `user-agent`, `x-scout-client` and
-  `x-scout-device-name`. The proxy always sets `x-scout-pair-relay: 1`.
-  It derives forwarding IP headers from the accepted connection. It drops
-  client forwarding headers, cookies and authorization headers.
-- Responses retain the upstream status and body. Only nonempty `location`,
-  `cache-control` and `content-type` headers pass through.
+- Only `GET /pair` uses the proxy. An undefined origin resolves the configured
+  legacy optional-app web port per request. Null, empty or whitespace-only
+  origins return 503. Core LAN discovery advertises the bridge's own `/pair`
+  listener; a caller using relay HTTP forwarding must supply that origin.
+- The proxy preserves the query, uses GET, disables automatic redirects and
+  retains the 3,000 ms deadline. Fetch failures return 502.
+- Requests forward only the named pairing/client headers. The proxy sets
+  `x-scout-pair-relay: 1` and derives forwarding IP headers from the accepted
+  connection. It drops client forwarding headers, cookies and authorization.
+- Responses retain the upstream status/body and nonempty `location`,
+  `cache-control` and `content-type` headers.
 
 The public transport alone does not install `/pair`. With no HTTP callback,
-`GET /pair` without room/role follows the ordinary 400 path. The wrappers keep
-the existing phone route. This extraction does not remove an installed
-pairing capability.
+`GET /pair` without room/role follows its ordinary 400 path. Core pairing mounts
+its existing admission routes in the encrypted bridge listener. It serves no
+browser client. Operator `/api/*` routes require same-Mac identity and the
+runtime bearer token; a remote knock is not consent.
 
-## Resolution of the two copies
-
-The comparison uses desktop and web relays at `09b2d2a8`:
-
-| Original difference | Resolution | Phone-visible effect |
-| --- | --- | --- |
-| Web expands the `pairHttpOrigin` comment to explain LAN knocks and loopback web. | Keep that explanation in this private-composition contract. | None; comments only. |
-| Web adds a comment before `GET /pair`. | Keep the explanation here; the shared private handler selects the same method/path. | None. |
-| Desktop extracts request header construction; web inlines it. | Use desktop's `pairProxyHeaders` once in the private helper. The allowlist and authoritative edge headers match. | None. |
-| Desktop loops over response header names; web spells out the three assignments. | Use the desktop loop. Names, iteration order and nonempty-value tests match. | None. |
-| Blank-line placement differs. | Use desktop formatting in the private helper. | None. |
-| Web includes `Buffer<ArrayBufferLike>` in two helper parameter types. | Retain web's widened annotations in the public kernel. | None; runtime branches are unchanged. |
-
-Both existing wrapper test files remain unchanged. They retain their different
-coverage. The named private inventory keeps both wrapper paths and adds the
-shared proxy path for both existing JS outputs. The public kernel is not a
-private exception.
+The former two-copy comparison at `09b2d2a8` is historical extraction evidence.
+Current wrapper/proxy tests live beside this core implementation.
 
 ## Tail is a separate contract
 
@@ -149,14 +135,14 @@ The public module exposes local `subscribeTail(handler)` and
 watchers. It accepts no broker URL, remote credential, resume cursor or source
 filter. The snapshot is a local aggregate buffer, not remote resume.
 
-The current private adapter connects to the selected broker's `/trpc`
+The core `packages/pairing/src/core/pairing/runtime/bridge/tail-fanout.ts` adapter connects to the selected broker's `/trpc`
 WebSocket and subscribes to `tail.events`. That broker procedure accepts
 `since` and `sources`, replays its bounded recent buffer, and streams tracked
 event IDs through a bounded live iterator. The broker's ingress gate authorizes
-the upgrade. The private encrypted phone bridge remains responsible for its
+the upgrade. The core encrypted phone bridge remains responsible for its
 phone-side authorization. A local tail callback supplies neither authority.
 
-A future public remote adapter must preserve broker selection, transport
+Any replacement remote adapter must preserve broker selection, transport
 reconnect/resume semantics, source filters, tracked IDs and the ingress
 credential boundary. Richer recent-read filters are not proof of subscription
 filter parity. This extraction does not change tail, launch a second watcher,

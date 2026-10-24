@@ -751,8 +751,8 @@ export type VerifyProblem = {
 
 /**
  * Every layer must hold exactly one process, owned by the layer above it. This
- * is the assertion set `scripts/restart-all.mjs` has always made; it lives here
- * now so stop and start can consult the same definition of "correct" that
+ * is the shared process-ownership assertion set; stop and start consult the
+ * same definition of "correct" that
  * verification does.
  */
 export function verifyTree(tree: LifecycleTree): VerifyProblem[] {

@@ -610,8 +610,6 @@ build_and_check() {
   echo "  cli…"
   (cd packages/cli && OPENSCOUT_REQUIRE_SCOUTD=1 node ./scripts/build.mjs)
 
-  echo "  web…"
-  (cd packages/web && npm run build)
 
   echo "Checking packed manifests…"
   node scripts/check-packed-manifests.mjs

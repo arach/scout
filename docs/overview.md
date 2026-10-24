@@ -45,33 +45,30 @@ Routing is explicit and independent of the calling surface:
 | Broker and runtime | `packages/runtime` |
 | Shared protocol | `packages/protocol` |
 | Harness observation | `packages/agent-sessions` |
-| Local web control plane | `packages/web` |
-| Desktop command surface | `apps/desktop` |
+| Host phone pairing | `packages/pairing` |
 | Native services | `crates` |
 
 ## Product boundary
 
-This repository is becoming the canonical home of Scout's reusable public
-primitives and complete baseline web control plane. The architecture is the
-target of an active migration: overlapping source and public release ownership
-are still being cut over, so the intended dependency model should not be read
-as proof that every migration phase is complete.
+Scout contains the public core: protocol, runtime, harness adapters, session
+extraction, CLI, TUI, and host-side phone pairing. The terminal is its interface.
+It contains no web app or native product app.
 
-Scout is currently for high-trust local developer pilots. It is not an
-enterprise-ready, compliance-ready, or hardened untrusted multi-tenant system.
+OpenScout apps own the web, macOS, iOS, and Android interfaces at every account
+level. Hosted services remain with the apps. The dependency runs one way:
+apps consume exact released core artifacts; the core does not import apps.
 
-The target dependency runs one way. The private OpenScout product consumes
-exact released public packages and adds native macOS and iOS apps, hosted
-services, advanced operations, and product-specific UI through trusted
-build-time web composition. It keeps no copied public packages or mirrored
-`packages/web`; public Scout never imports or requires the private product.
+The host pairing package owns the encrypted bridge and existing phone RPC
+projections. Its existing bridge listener hosts the pairing HTTP routes, and
+the controller owns LAN discovery. Apps can reuse those mounts. Terminal QR
+and approval-gated LAN pairing need no web client. Web commands use
+an app-supplied server entry and an explicitly installed matching client; they
+explain the missing app instead of serving a bundled fallback.
 
-The public web floor is intentionally substantial: setup and health, agents and
-sessions, conversations and requests, flights and work, activity, runtimes and
-capabilities, projects, mesh and pairing, and settings should form a coherent
-standalone operator experience. See the
-[public-source boundary](./public-source-boundary.md) for current migration
-status, target ownership, and release invariants.
+Scout is for high-trust local developer pilots. It is not enterprise-ready,
+compliance-ready, or a hardened untrusted multi-tenant system. See the
+[public-source boundary](./public-source-boundary.md) for source ownership and
+release invariants.
 
 ## Next
 

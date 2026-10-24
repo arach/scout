@@ -106,14 +106,14 @@ try {
     const result = owner.mutate((managed?1:0)+(revoking?1:0), "instrument", revoking?{type:"revoke",publicKey:key}:{type: "grant", peer});
     console.log(JSON.stringify({ok: true, result, syncs}));
   } else if (mode === "managed-paths" || mode === "capsule-paths" || mode === "routes") {
-    const web = await import("../packages/web/server/pairing.ts");
+    const web = await import("../packages/pairing/src/pairing.ts");
     if (mode === "managed-paths" || mode === "capsule-paths") {
       let holder: object | null = null;
       const remove = owner.register({id:"test.adapter", withGate(_r,body) {holder={};held=true;try{return body(holder);}finally{held=false;holder=null;}},currentHolder(){return holder;}});
       owner.withInvocation(c=>owner.mutate(0,"adopt",{type:"manage"},c));
       if (detail === "advisory-rename-fail") original.mkdirSync(join(root,"trusted-peers.last-seen.json"),{mode:0o700});
       const runtime = await import("../packages/runtime/src/pairing-security/index.ts");
-      const desktop = await import("../apps/desktop/src/core/pairing/runtime/security/index.ts");
+      const desktop = await import("../packages/pairing/src/core/pairing/runtime/security/index.ts");
       function exchange(Transport: typeof runtime.SecureTransport, identity: ReturnType<typeof runtime.generateKeyPair>, phone: ReturnType<typeof runtime.generateKeyPair>, trustOnComplete: boolean) {
         const queue: Array<["server"|"client",string]> = [], errors: Error[] = [];
         const server = new Transport({send:data=>queue.push(["client",data])},"responder",identity,{onError:error=>errors.push(error)},{trustOnComplete});
@@ -135,8 +135,8 @@ try {
     } else {
       const collision=key.slice(0,16)+"b".repeat(48);
       owner.mutate(0,"a",{type:"grant",peer}); owner.mutate(1,"b",{type:"grant",peer:{...peer,publicKey:collision}});
-      const {Hono}=createRequire(new URL("../packages/web/package.json",import.meta.url))("hono");
-      const {mountPairingRoutes}=await import("../packages/web/server/routes/pairing.ts");
+      const {Hono}=createRequire(new URL("../packages/pairing/package.json",import.meta.url))("hono");
+      const {mountPairingRoutes}=await import("../packages/pairing/src/routes/pairing.ts");
       const app=new Hono(); mountPairingRoutes(app,{options:{},currentDirectory:root,pendingPairRequests:null as any,shellStateCache:null as any});
       const ambiguous=await app.request("http://localhost/api/pairing/peers/"+key.slice(0,16),{method:"DELETE"});
       const full=await app.request("http://localhost/api/pairing/peers/"+key,{method:"DELETE"});
@@ -153,7 +153,7 @@ try {
     console.log(JSON.stringify({ok: true, snapshot: owner.read(JSON.parse(detail))}));
   } else if (mode === "binding") {
     const runtime = await import("../packages/runtime/src/pairing-security/identity.ts");
-    const desktop = await import("../apps/desktop/src/core/pairing/runtime/security/identity.ts");
+    const desktop = await import("../packages/pairing/src/core/pairing/runtime/security/identity.ts");
     if (runtime.saveTrustedPeer !== desktop.saveTrustedPeer) throw Error("desktop did not delegate");
     runtime.saveTrustedPeer(peer); desktop.saveTrustedPeer({...peer, publicKey: "b".repeat(64)});
     console.log(JSON.stringify({ok: true, keys: [...runtime.loadTrustedPeers().keys()], path: owner.path}));

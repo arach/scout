@@ -165,10 +165,7 @@ test("MCP preserves runtime availability/coverage and never upgrades missing obs
   }
 });
 
-test("the retired browser-cookie adapter is absent and its named inventory exception cannot return", () => {
-  const inventory = JSON.parse(readFileSync(new URL("../../temporary-private-files.json", import.meta.url), "utf8"));
-  expect(inventory.sources.some((row: { source: string }) => row.source === "packages/cli/src/cli/web-api.ts")).toBe(false);
-  expect(inventory.removedSources).toContain("packages/cli/src/cli/web-api.ts");
+test("the retired browser-cookie adapter is absent and runtime reads cannot return to it", () => {
   const source = readFileSync(new URL("./herdr-workspaces.ts", import.meta.url), "utf8");
   expect(source).not.toContain("web-api"); expect(source).not.toContain("/api/terminal-hosts");
   const factory = readFileSync(new URL("./scout-mcp.ts", import.meta.url), "utf8");

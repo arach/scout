@@ -61,6 +61,10 @@ test("fence inventory requires named retirements and rejects partial, vacuous an
     let expected=expectedFenceInventory(manifest,anchor);
     const verify=(output:string)=>verifyExpectedFenceInventory(output,readFenceInventory(root),expected);
     const full=await fence();expect(full.code).toBe(0);expect(verify(full.output)).toBe(2);
+    // A fresh core-only checkout has no apps directory. Packages and policies
+    // remain required, and the exact reviewed inventory still applies.
+    rmSync(join(root,"apps"),{recursive:true});
+    expect(verify(full.output)).toBe(2);
     expect(()=>verify("Sync exec fence passed (1 allowlisted symbol/file pairs).")).toThrow("inventory mismatch");
     expect(()=>verify("Sync exec fence passed (0 allowlisted symbol/file pairs).")).toThrow("inventory mismatch");
     expect(()=>verify(full.output+full.output)).toThrow("inventory mismatch");
@@ -84,8 +88,8 @@ test("fence inventory requires named retirements and rejects partial, vacuous an
     expect(()=>verify(edited.output)).toThrow("unaccounted removal or policy edit");
     remove("a");
     const empty=await fence();expect(empty.code).toBe(0);expect(()=>verify(empty.output)).toThrow("inventory mismatch");
-    rmSync(join(root,"apps"),{recursive:true});
-    expect(()=>verify(empty.output)).toThrow();
+    rmSync(join(root,"packages"),{recursive:true});
+    expect(()=>readFenceInventory(root)).toThrow();
   } finally {rmSync(root,{recursive:true,force:true});}
 });
 

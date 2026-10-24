@@ -29,7 +29,7 @@ Claude Code to review a Codex change, route a task to another project, and retur
 to the same request when you need a follow-up.
 
 Keep using your existing agent tools and provider accounts. Scout supplies the
-CLI, runtime, **Model Context Protocol (MCP) server**, and web control surface
+CLI, TUI, runtime, and **Model Context Protocol (MCP) server**
 that connect their work. Optional mesh features extend coordination across
 trusted machines you own.
 
@@ -382,7 +382,7 @@ inside the message body.
                                                     ╔══════════════════════╗
                      ╔══════════════════════╗       ║ ◆ Local broker       ║
                      ║ ◆ Scout surfaces     ║       ║ canonical writer     ║
-┌────────────────┐   ║ CLI + local web      ║   ┌──▶║ route + run          ║
+┌────────────────┐   ║ CLI + TUI      ║   ┌──▶║ route + run          ║
 │ ◆ Operator     │ ┌▶║ one control plane    ║───┘   ║                      ║
 │ or agent       │─┘ ║                      ║       ╚══════════════════════╝
 └────────────────┘   ╚══════════════════════╝                   │
@@ -414,27 +414,23 @@ coordination—not global consensus or exactly-once delivery.
 | Broker/runtime | [`packages/runtime`](./packages/runtime) | routing, mesh, pairing, knowledge, durable work |
 | Shared protocol | [`packages/protocol`](./packages/protocol) | wire types, identities, runtime catalog |
 | Harness sessions | [`packages/agent-sessions`](./packages/agent-sessions) | observed session descriptors and lifecycle |
-| Web control plane | [`packages/web`](./packages/web) | baseline local operator UI, reusable web primitives, app shell, and local server |
+| Host pairing | [`packages/pairing`](./packages/pairing) | encrypted phone bridge, controller, host RPC projections and pairing HTTP routes |
 | Trace tooling | [`packages/session-trace`](./packages/session-trace) | portable trace model and React viewer |
-| Native services | [`crates`](./crates) | `scoutd`, repo service, portable voice core |
+| Native services | [`crates`](./crates) | `scoutd`, repo service, terminal UI |
 
-### Public core, private product
+### Core and apps
 
-This is the destination for Scout's strong public primitives **and** a complete
-baseline web control plane. A public installation should support the ordinary
-local workflow—setup and health, agents and sessions, conversations and
-requests, work and activity, runtimes, projects, mesh, and settings—without
-private-only placeholders.
+Scout owns the core that runs on each host: runtime, protocol, harness adapters,
+session extraction, CLI, TUI, and phone pairing. The terminal is its interface.
+The web and native apps belong to OpenScout apps, at every account level.
+Hosted services remain with the apps for now.
 
-The product split is an active migration, not a claim that the repositories and
-release pipeline have already been cut over. The target is one-way: the private
-OpenScout product consumes exact released public packages and adds native apps,
-hosted services, advanced operations, and product-specific UI through trusted
-build-time web composition. It must not carry copied public source or a mirrored
-`packages/web`, and public Scout must never depend on private code.
+Apps consume exact released core artifacts. They do not copy core source, and
+core does not import apps. The CLI contains no bundled web client. Web commands
+use an apps-provided server and explain how to obtain the apps when it is absent.
 
-See the [public-source boundary](./docs/public-source-boundary.md) for current
-migration status, target ownership, and release invariants.
+See the [public-source boundary](./docs/public-source-boundary.md) for source
+ownership, optional web configuration, and release invariants.
 
 ## Linux desktop examples
 

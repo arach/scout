@@ -1,5 +1,5 @@
 /**
- * Deprecated re-export barrel for `packages/web/server/db-queries.ts`.
+ * Existing host phone query facade.
  *
  * Every query that used to live here now lives under `./db/` after SCO-031.
  * This file exists for one release as a back-compat shim so import sites can
