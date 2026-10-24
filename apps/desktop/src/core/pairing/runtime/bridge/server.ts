@@ -977,7 +977,7 @@ async function handleRPCInner(
         try {
           return {
             id: req.id,
-            result: await readMobileTerminalStatus(p?.sessionName, requireTransportContext(rpcContext, true).publicKey!),
+            result: await readMobileTerminalStatus(p?.sessionName, requireTransportContext(rpcContext, true).publicKey!, {publicKey: requireTransportContext(rpcContext, true).publicKey!, admit: () => {requireTransportContext(rpcContext, true);}}),
           };
         } catch (error) {
           if (error instanceof InvalidMobileTerminalSessionError) {
