@@ -1251,6 +1251,15 @@ export class AcpAdapter extends BaseAdapter {
       return;
     }
 
+    // A plan is a standalone reasoning block. End prior content before it
+    // starts, including reasoning whose active pointer the plan will replace.
+    if (active.textBlockId) {
+      this.endBlock(active.textBlockId, "completed");
+    }
+    if (active.reasoningBlockId) {
+      this.endBlock(active.reasoningBlockId, "completed");
+    }
+
     const text = update.entries
       .map((entry) => {
         const status = entry.status ? ` [${entry.status}]` : "";
