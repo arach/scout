@@ -9,6 +9,12 @@ import { SessionRegistry } from "../../registry.js";
 import { createAdapter } from "./adapter.js";
 
 const scratch: string[] = [];
+// These assertions test content, not latency. Allow cold/loaded child startup
+// and leave the outer test time for initialization, two turns, and shutdown.
+const RPC_TIMEOUT_MS = 15_000;
+const TURN_TIMEOUT_MS = 30_000;
+const TEST_TIMEOUT_MS = 120_000;
+
 afterEach(() => {
   for (const directory of scratch.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
@@ -58,9 +64,9 @@ for await (const line of readline.createInterface({ input: process.stdin, crlfDe
       args: [script],
       requireAuth: false,
       useKeychain: false,
-      startupTimeoutMs: 2_000,
-      requestTimeoutMs: 2_000,
-      promptTimeoutMs: 2_000,
+      startupTimeoutMs: RPC_TIMEOUT_MS,
+      requestTimeoutMs: RPC_TIMEOUT_MS,
+      promptTimeoutMs: RPC_TIMEOUT_MS,
     },
   };
 }
@@ -74,7 +80,7 @@ describe("ACP content boundaries", () => {
       const unsubscribe = registry.onEvent(({ event }) => events.push(event));
       try {
         const session = await registry.createSession("acp", { cwd, options });
-        await waitForTurnEnd({ registry, sessionId: session.id, text: "Inspect the file.", timeoutMs: 3_000 });
+        await waitForTurnEnd({ registry, sessionId: session.id, text: "Inspect the file.", timeoutMs: TURN_TIMEOUT_MS });
         const turn = registry.getSessionSnapshot(session.id)?.turns.at(-1);
         const blocks = turn?.blocks.map(({ block }) => block) ?? [];
         expect(blocks.filter(block => block.type === "text").map(block => block.text)).toEqual([
@@ -98,7 +104,7 @@ describe("ACP content boundaries", () => {
         unsubscribe();
         await registry.shutdown();
       }
-    });
+    }, TEST_TIMEOUT_MS);
   }
 
   const transports: Array<[LocalAgentHarness, LocalAgentTransport]> = [
@@ -108,7 +114,7 @@ describe("ACP content boundaries", () => {
   for (const [harness, transport] of transports) {
     test(`${transport} delivers all text blocks with a paragraph break`, async () => {
       const { cwd, options } = fixture();
-      const client = await createLocalAgentClient({ harness, transport, cwd, adapterOptions: options, timeoutMs: 3_000 });
+      const client = await createLocalAgentClient({ harness, transport, cwd, adapterOptions: options, timeoutMs: TURN_TIMEOUT_MS });
       try {
         for (let turn = 0; turn < 2; turn++) {
           const result = await client.turn("Inspect the file.");
@@ -118,6 +124,6 @@ describe("ACP content boundaries", () => {
       } finally {
         await client.close();
       }
-    });
+    }, TEST_TIMEOUT_MS);
   }
 });
