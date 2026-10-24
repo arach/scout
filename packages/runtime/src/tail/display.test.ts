@@ -61,3 +61,27 @@ describe("isTailNoiseEvent", () => {
     expect(filterTailEventsForDisplay(events).map((entry) => entry.id)).toEqual(["work"]);
   });
 });
+
+test("flags codex lifecycle and chunk noise", () => {
+  expect(isTailNoiseEvent(event({
+    source: "codex",
+    summary: "turn context · gpt-5.5 · xhigh",
+  }))).toBe(true);
+  expect(isTailNoiseEvent(event({
+    source: "codex",
+    summary: "tokens · 30991816",
+  }))).toBe(true);
+  expect(isTailNoiseEvent(event({
+    source: "codex",
+    summary: "agent_message",
+  }))).toBe(true);
+  expect(isTailNoiseEvent(event({
+    source: "codex",
+    summary: "-> Chunk ID: 66c6a0 Wall time: 0.0000 seconds Process exited with code 0",
+    kind: "tool-result",
+  }))).toBe(true);
+  expect(isTailNoiseEvent(event({
+    source: "codex",
+    summary: "task started",
+  }))).toBe(false);
+});
