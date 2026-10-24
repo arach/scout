@@ -1,14 +1,21 @@
-// Temporary, opt-in CLI hang diagnostics. Never materialize process.stdout,
-// spawn an observer in the test process, change budgets, or consume pipe data.
+// Temporary CLI hang diagnostics. No I/O on import; never materialize stdout,
+// change test budgets, consume pipe data, or add test-process observer pipes.
 import { readFileSync, readdirSync, readlinkSync, writeSync } from "node:fs";
 import { basename } from "node:path";
 
 let active = false;
 let phase = "idle";
 let started = 0;
+let sequence = 0;
 function emit(record: Record<string, unknown>): void {
-  try { writeSync(2, JSON.stringify({ event: "cli-env-diag", at: Date.now(), observerPid: process.pid, ...record }) + "\n"); }
-  catch { /* Diagnostics must not replace a test result. */ }
+  try {
+    const data = Buffer.from(JSON.stringify({ event: "cli-env-diag", schema: 2, at: Date.now(), observerPid: process.pid, iteration: process.env.SCOUT_CLI_ENV_DIAG_ITERATION, ...record }) + "\n");
+    for (let offset = 0; offset < data.length;) {
+      const written = writeSync(2, data, offset, data.length - offset);
+      if (written <= 0) break;
+      offset += written;
+    }
+  } catch { /* Diagnostics must not replace a test result. */ }
 }
 function read(path: string): string {
   try { return readFileSync(path, "utf8"); } catch { return ""; }
@@ -16,30 +23,91 @@ function read(path: string): string {
 function entries(path: string): string[] {
   try { return readdirSync(path); } catch { return []; }
 }
-function link(path: string): string {
-  try {
-    const value = readlinkSync(path);
-    return /^(?:pipe:|socket:|anon_inode:)/.test(value) ? value : basename(value);
-  } catch { return "gone"; }
+function rawLink(path: string): string | null {
+  try { return readlinkSync(path); } catch { return null; }
 }
-function descriptors(pid: number) {
-  return entries(`/proc/${pid}/fd`).sort((a, b) => Number(a) - Number(b)).slice(0, 128).map(fd => ({
-    fd: Number(fd), target: link(`/proc/${pid}/fd/${fd}`),
-    // Include epoll registrations and inode/flags, but never regular file contents.
-    info: read(`/proc/${pid}/fdinfo/${fd}`).split("\n").filter(line => /^(?:pos:|flags:|mnt_id:|ino:|tfd:)/.test(line)).slice(0, 32),
-  }));
+function safeLink(path: string): string {
+  const value = rawLink(path);
+  return value === null ? "gone" : /^(?:pipe:|socket:|anon_inode:)/.test(value) ? value : basename(value);
 }
-function snapshot(pid: number) {
-  const tids = entries(`/proc/${pid}/task`).slice(0, 128);
-  const childOwners = tids.flatMap(tid => read(`/proc/${pid}/task/${tid}/children`).trim().split(/\s+/).filter(Boolean).map(child => ({ pid: Number(child), ownerTid: Number(tid) })));
-  const children = childOwners.slice(0, 32).map(child => {
-    const args = read(`/proc/${child.pid}/cmdline`).split("\0").filter(Boolean);
-    return { ...child, exe: link(`/proc/${child.pid}/exe`), comm: read(`/proc/${child.pid}/comm`).trim(),
-      argc: args.length, script: args.find(arg => /\.(?:mjs|cjs|js|ts)$/.test(arg))?.split("/").pop(),
-      gitOperation: args.includes("symbolic-ref") ? "symbolic-ref" : args.includes("rev-parse") ? "rev-parse" : undefined,
-      state: /^State:.*$/m.exec(read(`/proc/${child.pid}/status`))?.[0], wchan: read(`/proc/${child.pid}/wchan`).trim(), fds: descriptors(child.pid) };
-  });
-  return { pid, threads: tids.map(tid => ({ tid: Number(tid), wchan: read(`/proc/${pid}/task/${tid}/wchan`).trim() })), fds: descriptors(pid), children };
+function descriptors(pid: number, procRoot: string) {
+  const names = entries(`${procRoot}/${pid}/fd`).filter(fd => /^\d+$/.test(fd)).sort((a, b) => Number(a) - Number(b));
+  const counts = { pipe: 0, socket: 0, anon_inode: 0, file: 0, device: 0, other: 0, gone: 0 };
+  const filesByBasename: Record<string, number> = Object.create(null);
+  const fds: { fd: number; target: string; info: string[] }[] = [];
+  const vanishedFds: number[] = [];
+  for (const fd of names) {
+    const target = rawLink(`${procRoot}/${pid}/fd/${fd}`);
+    const kind = target === null ? "gone" : target.startsWith("pipe:") ? "pipe" : target.startsWith("socket:") ? "socket"
+      : target.startsWith("anon_inode:") ? "anon_inode" : target.startsWith("/dev/") ? "device" : target.startsWith("/") ? "file" : "other";
+    counts[kind]++;
+    if (kind === "gone") vanishedFds.push(Number(fd));
+    else if (kind === "pipe" || kind === "socket" || kind === "anon_inode") {
+      // No descriptor or epoll-registration cap. Only kernel metadata is read.
+      fds.push({ fd: Number(fd), target: target!, info: read(`${procRoot}/${pid}/fdinfo/${fd}`).split("\n")
+        .filter(line => /^(?:pos:|flags:|mnt_id:|ino:|tfd:)/.test(line)) });
+    } else {
+      const name = basename(target!);
+      filesByBasename[name] = (filesByBasename[name] ?? 0) + 1;
+    }
+  }
+  return { fdCount: names.length, fdCounts: counts, filesByBasename, fds, vanishedFds };
+}
+function processRecord(pid: number, procRoot: string) {
+  const tids = entries(`${procRoot}/${pid}/task`).filter(tid => /^\d+$/.test(tid)).sort((a, b) => Number(a) - Number(b));
+  const childOwners = tids.flatMap(tid => read(`${procRoot}/${pid}/task/${tid}/children`).trim().split(/\s+/).filter(Boolean)
+    .map(child => ({ pid: Number(child), parentPid: pid, ownerTid: Number(tid) })));
+  const args = read(`${procRoot}/${pid}/cmdline`).split("\0").filter(Boolean);
+  const stat = read(`${procRoot}/${pid}/stat`);
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+  return { pid, exe: safeLink(`${procRoot}/${pid}/exe`), comm: read(`${procRoot}/${pid}/comm`).trim(),
+    argc: args.length, script: args.find(arg => /\.(?:mjs|cjs|js|ts)$/.test(arg))?.split("/").pop(),
+    gitOperation: args.includes("symbolic-ref") ? "symbolic-ref" : args.includes("rev-parse") ? "rev-parse" : undefined,
+    startTicks: fields[19], state: /^State:.*$/m.exec(read(`${procRoot}/${pid}/status`))?.[0],
+    wchan: read(`${procRoot}/${pid}/wchan`).trim(),
+    threads: tids.map(tid => ({ tid: Number(tid), wchan: read(`${procRoot}/${pid}/task/${tid}/wchan`).trim() })),
+    childOwners, ...descriptors(pid, procRoot) };
+}
+// procRoot permits a portable synthetic /proc witness without changing the
+// real test inventory. Production diagnostic calls always use /proc.
+export function cliEnvProcessSnapshot(pid: number, procRoot = "/proc") {
+  const root = { ...processRecord(pid, procRoot), parentPid: null as number | null, ownerTid: null as number | null };
+  const processes = [root];
+  const seen = new Set([pid]);
+  for (let index = 0; index < processes.length; index++) {
+    for (const child of processes[index]!.childOwners) {
+      if (seen.has(child.pid)) continue;
+      seen.add(child.pid);
+      processes.push({ ...processRecord(child.pid, procRoot), parentPid: child.parentPid, ownerTid: child.ownerTid });
+    }
+  }
+  return { pid, sampledAt: Date.now(), processes };
+}
+type Snapshot = ReturnType<typeof cliEnvProcessSnapshot>;
+function batches<T>(items: T[], visit: (batch: T[], part: number, parts: number) => void): void {
+  // This is transport framing, not a collection cap: emit EVERY batch. Small
+  // lines avoid truncating a whole inventory in hosted log readers.
+  const parts = Math.ceil(items.length / 8);
+  for (let part = 0; part < parts; part++) visit(items.slice(part * 8, (part + 1) * 8), part, parts);
+}
+export function emitCliEnvSnapshot(kind: string, snapshot: Snapshot, metadata: Record<string, unknown> = {}): void {
+  const snapshotId = `${process.pid}:${++sequence}`;
+  emit({ kind, snapshotId, pid: snapshot.pid, sampledAt: snapshot.sampledAt, processCount: snapshot.processes.length, ...metadata });
+  for (const record of snapshot.processes) {
+    const { threads, fds, filesByBasename, vanishedFds, childOwners, ...identity } = record;
+    const ref = { snapshotId, pid: record.pid };
+    emit({ kind: "snapshot-process", ...ref, ...identity, threadCount: threads.length, childCount: childOwners.length });
+    batches(threads, (items, part, parts) => emit({ kind: "snapshot-threads", ...ref, part, parts, items }));
+    batches(Object.entries(filesByBasename), (items, part, parts) => emit({ kind: "snapshot-file-counts", ...ref, part, parts, items }));
+    batches(vanishedFds, (items, part, parts) => emit({ kind: "snapshot-vanished-fds", ...ref, part, parts, items }));
+    batches(fds.map(fd => ({ ...fd, info: fd.info.filter(line => !line.startsWith("tfd:")),
+      epollRegistrationCount: fd.info.filter(line => line.startsWith("tfd:")).length })),
+    (items, part, parts) => emit({ kind: "snapshot-descriptors", ...ref, part, parts, items }));
+    for (const fd of fds) {
+      batches(fd.info.filter(line => line.startsWith("tfd:")), (items, part, parts) => emit({ kind: "snapshot-epoll", ...ref, epollFd: fd.fd, part, parts, items }));
+    }
+  }
+  emit({ kind: "snapshot-complete", snapshotId, pid: snapshot.pid });
 }
 export function cliEnvPhase(next: string): void {
   if (!active) return;
@@ -53,28 +121,39 @@ export function beginCliEnvDiagnostic(): () => void {
   active = true;
   started = Date.now();
   cliEnvPhase("test.begin");
-  if (process.platform === "linux") emit({ kind: "test-start-snapshot", ...snapshot(process.pid) });
+  if (process.platform === "linux") emitCliEnvSnapshot("test-start-snapshot", cliEnvProcessSnapshot(process.pid));
   // A synchronous Git wait cannot emit this pulse; the parent still samples it.
   const timer = setInterval(() => emit({ kind: "pulse", phase, elapsedMs: Date.now() - started }), 250);
-  return () => { clearInterval(timer); cliEnvPhase("test.end"); active = false; };
+  return () => {
+    clearInterval(timer);
+    cliEnvPhase("test.end");
+    if (process.platform === "linux") emitCliEnvSnapshot("test-end-snapshot", cliEnvProcessSnapshot(process.pid));
+    active = false;
+  };
 }
 export function watchCliEnvProcess(pid: number): () => void {
   if (process.platform !== "linux") {
     emit({ kind: "parent-watch-unavailable", platform: process.platform, pid });
     return () => {};
   }
-  // This runs in the existing runner, not in the isolated test process. It can
-  // observe a blocked synchronous spawn without adding test-process pipe FDs.
+  // Observe from the existing runner, without changing the test's FD table.
   let previous = "";
   let polls = 0;
+  let previousChildren = new Map<string, Snapshot["processes"][number]>();
   const sample = () => {
-    if (++polls > 1800) return;
     try {
-      const record = snapshot(pid);
-      const serialized = JSON.stringify(record);
-      if (serialized !== previous || polls % 20 === 0) {
+      const snapshot = cliEnvProcessSnapshot(pid);
+      const children = new Map(snapshot.processes.slice(1).map(child => [`${child.pid}:${child.startTicks}`, child]));
+      for (const [key, child] of previousChildren) if (!children.has(key)) {
+        emit({ kind: "child-not-observed", pid, childPid: child.pid, startTicks: child.startTicks,
+          exe: child.exe, script: child.script, gitOperation: child.gitOperation, lastState: child.state, lastWchan: child.wchan });
+      }
+      previousChildren = children;
+      const serialized = JSON.stringify(snapshot.processes);
+      polls++;
+      if (serialized !== previous || polls % 4 === 0) {
         previous = serialized;
-        emit({ kind: "parent-snapshot", poll: polls, ...record });
+        emitCliEnvSnapshot("parent-snapshot", snapshot, { poll: polls });
       }
     } catch { /* A process may exit during a snapshot. */ }
   };
