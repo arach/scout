@@ -585,6 +585,28 @@
           "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
         }
       ]
+    },
+    {
+      "id": "pr-143-mcp-pending-notification-soak",
+      "sourceHead": "4311278ef75a719896932b497eea410b8c35a558",
+      "reason": "Account for the two owned MCP pending-notification soak/probe test subprocess policies; no production execution allowances change.",
+      "fromCount": 147,
+      "toCount": 149,
+      "retired": [],
+      "added": [
+        {
+          "path": "packages/cli/src/mcp/fixtures/pending-memory-probe.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "9c31eaacaf0cdf57224813ad1ca39510db85f614903aaf3a4e937a33c0a226df",
+          "reason": "owned MCP test child reads disk capacity and its own vmmap footprint; never a live server"
+        },
+        {
+          "path": "packages/cli/src/mcp/scout-mcp.pending-soak.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "8724f54d091db319cdf0c99c53151033a5c417db806194a2fb9728ed8c108387",
+          "reason": "opt-in test starts only its scrubbed owned test child and reads disk capacity"
+        }
+      ]
     }
   ]
 }
