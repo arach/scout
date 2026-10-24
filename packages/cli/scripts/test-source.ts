@@ -33,14 +33,22 @@ export function sourceTestPlan(files: readonly string[]): string[][] {
 if (import.meta.main) {
   const root = resolve(import.meta.dir, "..");
   for (const files of sourceTestPlan(sourceTestFiles(root))) {
-    console.log(JSON.stringify({event:"cli-unit-process",files,version:Bun.version,revision:Bun.revision}));
-    const child = Bun.spawn([process.execPath, "test", "--isolate", ...files.map(file => `./${file}`)], {
-      cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit",
-      env: { ...process.env, SCOUT_CLI_ENV_DIAG: files.length > 1 ? "1" : "0" },
-    });
-    const stopWatch = files.length > 1 ? watchCliEnvProcess(child.pid) : () => {};
-    let code: number;
-    try { code = await child.exited; } finally { stopWatch(); }
-    if (code !== 0) process.exit(code || 1);
+    const ordinary = files.some(file => !(QUIET_PROCESS_FILES as readonly string[]).includes(file));
+    const repetitions = ordinary ? 5 : 1;
+    for (let iteration = 1; iteration <= repetitions; iteration++) {
+      console.log(JSON.stringify({event:"cli-unit-process",files,iteration,repetitions,ordinary,version:Bun.version,revision:Bun.revision}));
+      const child = Bun.spawn([process.execPath, "test", "--isolate", ...files.map(file => `./${file}`)], {
+        cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit",
+        env: { ...process.env, SCOUT_CLI_ENV_DIAG: ordinary ? "1" : "0", SCOUT_CLI_ENV_DIAG_ITERATION: String(iteration) },
+      });
+      console.log(JSON.stringify({event:"cli-unit-process-started",pid:child.pid,iteration,repetitions,ordinary}));
+      const stopWatch = ordinary ? watchCliEnvProcess(child.pid) : () => {};
+      let code: number;
+      try { code = await child.exited; } finally { stopWatch(); }
+      console.log(JSON.stringify({event:"cli-unit-process-exited",pid:child.pid,iteration,repetitions,ordinary,code}));
+      // Preserve the first failure and its aftermath; do not run another
+      // ordinary process or a quiet suite after it.
+      if (code !== 0) process.exit(code || 1);
+    }
   }
 }
