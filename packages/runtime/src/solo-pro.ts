@@ -265,6 +265,12 @@ const LOGIN: SoloProAction = { kind: "command", label: "Save a download key", co
 const MAKE_KEY: SoloProAction = { kind: "link", label: "Make a download key", href: SCOUT_DIST_KEYS_URL };
 const CHECK: SoloProAction = { kind: "check_access", label: "Check access" };
 
+/** A reason is read back inside a sentence; a raw socket error carries no stop. */
+function sentence(reason: string): string {
+  const trimmed = reason.trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 export function summarizeSoloProAccess(access: ExpandedWebAccess): SoloProAccessSummary {
   const base = {
     state: access.state,
@@ -315,7 +321,7 @@ export function summarizeSoloProAccess(access: ExpandedWebAccess): SoloProAccess
         confirmed: false,
         tier: null,
         title: "Not confirmed",
-        detail: `Scout couldn't get an answer: ${access.reason} Nothing installed stops working.`,
+        detail: `Scout couldn't get an answer: ${sentence(access.reason)} Nothing installed stops working.`,
         actions: [{ ...CHECK, label: "Try again" }],
       };
     case "unchecked":
