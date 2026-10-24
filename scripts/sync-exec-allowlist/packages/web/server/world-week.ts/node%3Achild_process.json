@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/world-week.ts",
-  "symbol": "node:child_process",
-  "category": "probe-exec",
-  "reason": "async git execFile with a 1.5s timeout and SIGKILL for Week history; no sync exec",
-  "owner": "web"
-}

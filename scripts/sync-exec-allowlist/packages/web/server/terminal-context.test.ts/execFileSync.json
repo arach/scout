@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/terminal-context.test.ts",
-  "symbol": "execFileSync",
-  "category": "test",
-  "reason": "git fixture setup",
-  "owner": "web"
-}

@@ -14,7 +14,7 @@ import { requestLocalApprovalPairingOpportunity, requestLocalPairingOpportunity 
 import { startRelay } from "../packages/runtime/src/relay-transport.ts";
 
 const flavor = process.argv[2]!, scenario = process.argv[3]!;
-const base = resolve(flavor === "web" ? "packages/web/server/core/pairing/runtime" : "apps/desktop/src/core/pairing/runtime");
+const base = resolve("packages/pairing/src/core/pairing/runtime");
 const { initTRPC } = await import(Bun.resolveSync("@trpc/server", base));
 const t = initTRPC.create();
 mock.module(resolve(base, "bridge/router.ts"), () => ({
@@ -135,7 +135,7 @@ async function probe(phone: Phone, ms = 750) {
 function record(value: object) {console.log(`APPROVAL_OBSERVATION ${JSON.stringify({id: scenario, flavor, ...value})}`);}
 // Keep the application sinks instrumented; exercise real HTTP route logic,
 // store transitions, own-key local control, relay carriers, Noise and owner.
-const web = resolve("packages/web/server");
+const web = resolve("packages/pairing/src");
 let beforeApprovalOpen: (() => Promise<void>) | undefined;
 mock.module(resolve(web, "pairing.ts"), () => ({
   controlScoutWebApprovalPairing: async (action: "open" | "read" | "cancel", request: any) => {

@@ -14,7 +14,8 @@ import { watchSharedScoutMessages } from "./broker-message-fanout.ts";
 import type { Bridge } from "./bridge.ts";
 import { handleRPC } from "./server.ts";
 import { bridgeRouter } from "./router.ts";
-import { callTRPCProcedure, getErrorShape, TRPCError } from "@trpc/server";
+import { callTRPCProcedure, getErrorShape, getTRPCErrorFromUnknown, isTrackedEnvelope, TRPCError, type TrackedEnvelope } from "@trpc/server";
+import { isObservable, observableToAsyncIterable } from "@trpc/server/observable";
 import { log } from "./log.ts";
 import {
   type ScoutBrokerConversationLifecycleRecord,
@@ -84,6 +85,7 @@ interface RelayEnvelope {
 }
 
 interface RelayPeerState {
+  subscriptions: Map<string | number, AbortController>;
   clientId: string;
   transport: SecureTransport;
   deviceId?: string;
@@ -249,6 +251,11 @@ export function connectToRelay(
       peer = createSecurePeer(clientId, handshakePattern);
     }
 
+    if (!peer && !handshakePattern && clientId !== LEGACY_CLIENT_ID) {
+      // A pre-reconnect session lost its keys. Ask the phone to handshake again.
+      sendRelayClose(clientId, 4002, "Transport reset");
+      return;
+    }
     peer?.transport.receive(payload);
   }
 
@@ -257,6 +264,7 @@ export function connectToRelay(
 
     const peer: RelayPeerState = {
       clientId,
+      subscriptions: new Map(),
       transport: undefined as unknown as SecureTransport,
       deviceId: undefined,
       trustedPeer: false,
@@ -346,6 +354,9 @@ export function connectToRelay(
   }
 
   function teardownSecurePeer(clientId: string): void {
+    const leaving = securePeers.get(clientId);
+    for (const subscription of leaving?.subscriptions.values() ?? []) subscription.abort();
+    leaving?.subscriptions.clear();
     if (!securePeers.has(clientId)) {
       return;
     }
@@ -455,14 +466,54 @@ export function connectToRelay(
     req: any,
     send: (json: string) => void,
     context: { deviceId?: string; secureTransport?: boolean; trustedPeer?: boolean; reconnectRoom?: string; relayUrls?: string[] } = {},
+    subscriptions?: Map<string | number, AbortController>,
   ): Promise<void> {
     const { id, method, params } = req;
-    const type = method as "query" | "mutation";
+
+    if (method === "subscription.stop") {
+      subscriptions?.get(id)?.abort();
+      subscriptions?.delete(id);
+      return;
+    }
+
+    const type = method as "query" | "mutation" | "subscription";
     const path = params?.path;
-    const input = params?.input;
+    let input = params?.input;
 
     if (!path) {
       send(JSON.stringify({ id, jsonrpc: "2.0", error: { code: -32600, message: "Missing path in params" } }));
+      return;
+    }
+
+    const sendError = (cause: unknown) => {
+      const error = getTRPCErrorFromUnknown(cause);
+      send(JSON.stringify({
+        id,
+        jsonrpc: "2.0",
+        error: getErrorShape({ config: bridgeRouter._def._config, error, type, path, input, ctx: undefined }),
+      }));
+    };
+
+    if (type === "subscription") {
+      // A resuming client names the last event it saw; the procedure reads it from its input.
+      if (params?.lastEventId !== undefined) {
+        input = input && typeof input === "object" && !Array.isArray(input)
+          ? { ...input, lastEventId: params.lastEventId }
+          : input ?? { lastEventId: params.lastEventId };
+      }
+      if (!subscriptions) {
+        sendError(new TRPCError({ code: "METHOD_NOT_SUPPORTED", message: "Subscriptions need a secure channel" }));
+        return;
+      }
+      if (subscriptions.has(id)) {
+        sendError(new TRPCError({ code: "BAD_REQUEST", message: `Duplicate id ${id}` }));
+        return;
+      }
+      const abort = new AbortController();
+      subscriptions.set(id, abort);
+      void runSubscription(id, path, input, abort, send, context, sendError).finally(() => {
+        if (subscriptions.get(id) === abort) subscriptions.delete(id);
+      });
       return;
     }
 
@@ -481,19 +532,66 @@ export function connectToRelay(
     } catch (cause) {
       const errMsg = cause instanceof Error ? cause.message : String(cause);
       log.error("rpc:err", `✗ ${path} — ${errMsg}`);
-      const error = cause instanceof TRPCError ? cause : new TRPCError({ code: "INTERNAL_SERVER_ERROR", cause });
-      send(JSON.stringify({
-        id,
-        jsonrpc: "2.0",
-        error: getErrorShape({
-          config: bridgeRouter._def._config,
-          error,
-          type,
-          path,
-          input,
-          ctx: undefined,
-        }),
-      }));
+      sendError(cause instanceof TRPCError ? cause : new TRPCError({ code: "INTERNAL_SERVER_ERROR", cause }));
+    }
+  }
+
+  /** One subscription's frames, as the bridge's own socket sends them: started, data (tracked ids kept), stopped. */
+  async function runSubscription(
+    id: string | number,
+    path: string,
+    input: unknown,
+    abort: AbortController,
+    send: (json: string) => void,
+    context: Record<string, unknown>,
+    sendError: (cause: unknown) => void,
+  ): Promise<void> {
+    let iterator: AsyncIterator<unknown>;
+    try {
+      const result = await callTRPCProcedure({
+        router: bridgeRouter,
+        path,
+        getRawInput: () => Promise.resolve(input),
+        ctx: { bridge, cwd: process.cwd(), ...context },
+        type: "subscription",
+        signal: abort.signal,
+        batchIndex: 0,
+      });
+      const iterable = isObservable(result)
+        ? observableToAsyncIterable(result, abort.signal)
+        : result as AsyncIterable<unknown>;
+      if (!iterable || typeof (iterable as AsyncIterable<unknown>)[Symbol.asyncIterator] !== "function") {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Subscription ${path} did not return a stream` });
+      }
+      iterator = iterable[Symbol.asyncIterator]();
+    } catch (cause) {
+      sendError(cause);
+      return;
+    }
+
+    send(JSON.stringify({ id, jsonrpc: "2.0", result: { type: "started" } }));
+    const aborted = new Promise<"abort">((resolve) => {
+      if (abort.signal.aborted) resolve("abort");
+      abort.signal.addEventListener("abort", () => resolve("abort"), { once: true });
+    });
+    try {
+      while (true) {
+        const next = await Promise.race([iterator.next(), aborted]);
+        if (next === "abort" || next.done) break;
+        const value = next.value;
+        if (isTrackedEnvelope(value)) {
+          const [eventId, data] = value as TrackedEnvelope<unknown>;
+          send(JSON.stringify({ id, jsonrpc: "2.0", result: { type: "data", id: eventId, data: { id: eventId, data } } }));
+        } else {
+          send(JSON.stringify({ id, jsonrpc: "2.0", result: { type: "data", data: value } }));
+        }
+      }
+      await iterator.return?.();
+      if (!abort.signal.aborted) send(JSON.stringify({ id, jsonrpc: "2.0", result: { type: "stopped" } }));
+    } catch (cause) {
+      log.error("rpc:err", `✗ ${path} — ${cause instanceof Error ? cause.message : String(cause)}`);
+      sendError(cause);
+      await iterator.return?.().catch(() => undefined);
     }
   }
 
@@ -543,7 +641,7 @@ export function connectToRelay(
         trustedPeer: peer.trustedPeer,
         reconnectRoom: options.reconnectRoom,
         relayUrls: [qrPayload.relay, ...(qrPayload.fallbackRelays ?? [])],
-      });
+      }, peer.subscriptions);
     } else {
       void handleRPC(bridge, req, {
         deviceId: peer.deviceId,

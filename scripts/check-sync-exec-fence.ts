@@ -39,9 +39,7 @@ const ALLOWLIST_ROOT = "scripts/sync-exec-allowlist";
 const SCAN_ROOTS = ["packages", "apps"];
 const PHASE_B_ROOTS = [
   "packages/pairing/src",
-  "packages/web/server",
   "packages/runtime/src",
-  "apps/desktop/src/core",
   "packages/cli/src/lib/core",
   "packages/cli/src/mcp",
 ];

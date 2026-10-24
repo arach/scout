@@ -1,0 +1,7 @@
+{
+  "path": "packages/pairing/src/pairing-pair-requests.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "spawns two real processes to race over one shared pair-request file; in-process stores cannot interleave a read-modify-write",
+  "owner": "pairing"
+}

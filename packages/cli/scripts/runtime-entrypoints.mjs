@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-import { REFLECT_METADATA_BANNER, verifyBundleStaticChecks } from "../../../scripts/bundle-scout-web.mjs";
+import { REFLECT_METADATA_BANNER, verifyBundleStaticChecks } from "../../../scripts/bundle-core.mjs";
 
 /** Build installed runtime entrypoints together with their sibling workers. */
 export function bundleRuntimeEntrypoints(repoRoot, outputDirectory) {

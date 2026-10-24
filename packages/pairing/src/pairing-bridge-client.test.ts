@@ -210,6 +210,7 @@ test("local readers reach a secure bridge with its own key and leave no paired-d
   ]);
   expect(exitCode, stderr).toBe(0);
   const result = JSON.parse(stdout.trim().split("\n").at(-1)!);
+  expect(result.ingress).toEqual({unauthenticated: 401, authenticated: 200, forwarded: 401, noClient: 404, pairKnock: 202});
   expect(result.sessions).toEqual([]);
   expect(result.strangerCloseCode).toBe(4003);
   expect(result.trustedPeersWritten).toBe(false);

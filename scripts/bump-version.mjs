@@ -19,14 +19,12 @@ const REPO_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "..");
 
 const RELEASE_MANIFESTS = [
   ".",
-  "apps/desktop",
   "packages/agent-sessions",
   "packages/cli",
   "packages/protocol",
   "packages/runtime",
   "packages/session-trace",
-  "packages/session-trace-react",
-  "packages/web",
+  "packages/pairing",
 ];
 
 const RELEASE_VERSION_SOURCES = [

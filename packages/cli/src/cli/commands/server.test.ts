@@ -8,6 +8,7 @@ import {
   requestScoutWebControl,
   renderServerCommandHelp,
   resolveBunExecutable,
+  resolveScoutWebServerEntry,
   resolveServerBrowserUrl,
 } from "./server.ts";
 
@@ -114,4 +115,24 @@ describe("server command helpers", () => {
       }), { status: 200, headers: { "content-type": "application/json" } }),
     })).rejects.toThrow("Scout web is running outside broker management.");
   });
+});
+
+
+test("web startup requires the apps' explicit server entry and refuses stale fallback", () => {
+  const root = mkdtempSync(join(tmpdir(), "scout-app-web-"));
+  const before = process.env.OPENSCOUT_WEB_SERVER_ENTRY;
+  try {
+    process.env.OPENSCOUT_WEB_SERVER_ENTRY = "";
+    expect(() => resolveScoutWebServerEntry()).toThrow("supplied by OpenScout apps");
+    const entry = join(root, "selected.mjs");
+    writeFileSync(entry, "export {};", {mode: 0o600});
+    process.env.OPENSCOUT_WEB_SERVER_ENTRY = entry;
+    expect(resolveScoutWebServerEntry()).toBe(entry);
+    process.env.OPENSCOUT_WEB_SERVER_ENTRY = join(root, "missing.mjs");
+    expect(() => resolveScoutWebServerEntry()).toThrow("Configured web entry is unavailable");
+  } finally {
+    if (before === undefined) delete process.env.OPENSCOUT_WEB_SERVER_ENTRY;
+    else process.env.OPENSCOUT_WEB_SERVER_ENTRY = before;
+    rmSync(root, {recursive: true, force: true});
+  }
 });
