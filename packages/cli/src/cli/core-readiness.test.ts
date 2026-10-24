@@ -150,8 +150,9 @@ test("owned mesh-bridge doctor worker reports both stored problems without secre
   writeFileSync(join(f.env.OPENSCOUT_SUPPORT_DIRECTORY, "mcp-bridge.json"), JSON.stringify({
     relayUrl: "https://issuer.example.test", dir: "/legacy/private", tokenKeychainService: "NeverResolveThisService",
   }));
-  const result = Bun.spawnSync([process.execPath, "packages/cli/src/cli/main.ts", "__doctor-check", "mesh-bridge"], {
-    cwd: process.cwd(), env: { ...f.env, OPENSCOUT_MESH_RENDEZVOUS_URL: "https://rendezvous.example.test" },
+  const main = resolve(import.meta.dir, "../main.ts");
+  const result = Bun.spawnSync([process.execPath, main, "__doctor-check", "mesh-bridge"], {
+    cwd: f.root, env: { ...f.env, OPENSCOUT_MESH_RENDEZVOUS_URL: "https://rendezvous.example.test" },
     timeout: 20000, killSignal: "SIGKILL",
   });
   expect(result.exitCode, result.stderr.toString()).toBe(0);
