@@ -22,7 +22,28 @@ const domain=new TransportDomain(bridge,bytesToHex(host.publicKey),fixture.owner
 let inCommandSink=false,refusalUsed=false;const oneShot=Object.assign(Error("fixture one-shot caller refusal"),{code:"ECONNREFUSED"});
 let entered=false,afterAck=false,effects=0,late=0,ownerReadsAfterAck=0,admissions=0,release!:()=>void;const pause=new Promise<void>(r=>release=r),admit=()=>{admissions++;requireTransportContext(peer.ctx,true);if(kind==="refusal"&&inCommandSink&&!refusalUsed){refusalUsed=true;throw oneShot;}};
 const sink=()=>{effects++;if(afterAck)late++;};let run!:()=>Promise<unknown>,cleanup=async()=>{};let siblingRun:(()=>Promise<void>)|undefined;
-if(kind==="router"){
+if(kind==="scope"){
+ // Unsupported harnesses must refuse before any broker request. This pins
+ // producer reach, not admission after an await or generic ACP invocation.
+ let brokerRequests=0;
+ fixtureRuntime.setHandler(request=>{
+  brokerRequests++;const path=new URL(request.url).pathname;
+  console.log("STAGE5_SCOPE_BROKER "+JSON.stringify({harness:target,path,brokerRequests}));
+  if(path==="/health")return Response.json({ok:true,nodeId:"fixture",meshId:"fixture"});
+  if(path==="/v1/node")return Response.json({id:"fixture",capabilities:["session-input-receipts/1"]});
+  if(path==="/v1/snapshot")return Response.json({actors:{},agents:{},endpoints:{},conversations:{},messages:{},flights:{}});
+  return Response.json({ok:false});
+ });
+ const {bridgeRouter}=await import(source("packages/web/server/core/pairing/runtime/bridge/router.ts"));
+ entered=true;
+ run=async()=>{
+  assert.equal(requireTransportContext(peer.ctx,true).publicKey,key);
+  const result=await bridgeRouter.createCaller(peer.ctx).mobile.askSession({sessionId:"fixture-session",harness:target,cwd:project,body:"fixture scope probe",clientMessageId:"fixture-scope-"+target});
+  console.log("STAGE5_SCOPE "+JSON.stringify({harness:target,liveBoundPhone:true,brokerRequests,result,nativeExecutions:0}));
+  assert.equal(brokerRequests,0,"unsupported ACP harness must not reach broker");
+  assert.equal(result.ok,false);assert.equal((result as any).code,"session_not_resumable");return result;
+ };
+}else if(kind==="router"){
  const path=source("packages/runtime/src/local-agents.ts"),actual=await import(path);
  const effect=async(hook?:()=>void)=>{entered=true;await pause;hook?.();sink();return {agentId:"fixture",accepted:true};};
  mock.module(path,()=>({...actual,stopLocalAgent:async(_id:string,hook?:()=>void)=>effect(hook),interruptLocalAgent:async(_id:string,hook?:()=>void)=>effect(hook),steerCodexDeckTurn:async(_id:string,_text:string,hook?:()=>void)=>effect(hook),interruptCodexDeckTurn:async(_id:string,hook?:()=>void)=>effect(hook)}));
@@ -116,7 +137,8 @@ try{
  const until=performance.now()+15_000;while(!entered){if(settled)throw Error("operation settled before seam: "+String(await operation));if(performance.now()>until)throw Error("pause not reached");await Bun.sleep(1);}
  if(state!=="live"){fixture.owner.mutate(fixture.owner.read().revision,crypto.randomUUID(),{type:"revoke",publicKey:key});assert.throws(()=>requireTransportContext(peer.ctx,true));afterAck=true;}release();const result=await operation;
  console.log("STAGE5_EFFECT "+JSON.stringify({kind,target,state,flavor,protocol,effects,late,ownerReadsAfterAck,admissions,nativeExecutions:0,result:String(result)}));
- if(kind==="refusal"){assert.equal(result,oneShot,"ordinary I/O handling must preserve the original one-shot refusal");assert.equal(effects,0);}
+ if(kind==="scope"){assert(!(result instanceof Error),String(result));assert.equal(effects,0);}
+ else if(kind==="refusal"){assert.equal(result,oneShot,"ordinary I/O handling must preserve the original one-shot refusal");assert.equal(effects,0);}
  else if(kind==="residue"){assert.equal(effects,1);assert.equal(late,1,"remaining harness-reply producer reaches runtime command after ACK");}
  else if(state==="accepted"){assert.equal(effects,1);assert.equal(ownerReadsAfterAck,1,"fixture owner first reads the accepted command after ACK");assert.equal(late,0,"queued receiver reads are earlier work");assert(!(result instanceof Error));}
  else if(state==="live"){if(kind!=="acp")assert.equal(effects,1);assert(!(result instanceof Error),String(result));}

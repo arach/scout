@@ -12,6 +12,8 @@ for(const target of ["steer","interrupt"])for(const state of ["live","revoke"])c
 for(const state of ["live","revoke"])cases.push(["pool","close",state]);
 cases.push(["residue","codex-invoke","revoke"]);
 for(const target of ["stop","interrupt"])cases.push(["refusal",target,"live"]);
+// Added after the failing baseline: pin the reach used by the narrowed limits.
+for(const harness of ["grok","kimi","cursor","opencode","devin"])cases.push(["scope",harness,"live"]);
 for(const args of cases)test(`local commands ${args.join("/")}`,async()=>{
  const root=mkdtempSync(join(tmpdir(),"pairing-capsule-local-command-")),home=join(root,"home"),store=join(root,"pairing-capsule-store");mkdirSync(home);mkdirSync(store);
  let requests=0;const sentinel=Bun.serve({hostname:"127.0.0.1",port:0,fetch(){requests++;return Response.json({fixture:true});}});

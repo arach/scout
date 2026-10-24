@@ -493,3 +493,11 @@ Codex invocation and warmup. Its witness uses a real phone RPC, broker client,
 runtime invocation and managed Codex client against an owned provider sink.
 Other adapters' prompt and live-input continuations remain in that family;
 forwarding a hook alone does not qualify those continuations.
+
+Harness replies target only Claude or Codex sessions at the phone and broker
+boundaries. The scope witnesses use a live bound phone and require all five ACP
+harness names to refuse before any broker request. ACP invocation/delivery is
+absent from the retained harness-reply limit by reach, not by a new invocation
+hook. Pending ACP permission answers remain live permission input; they do not
+start a new ACP turn or delivery. Previously guarded broker and seed submissions
+remain earlier work when their ACP owner first reads them after ACK.
