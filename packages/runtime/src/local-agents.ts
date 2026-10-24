@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "./effect-admission.js";
 import { receiveTransportLiveness } from "./local-endpoint-liveness.js";
 import { hasExplicitCompletion } from "@openscout/protocol";
 import { isExternalSessionEndpoint } from "./external-session-transport.js";
@@ -977,7 +978,7 @@ async function writeRelayAgentOverrides(overrides: Record<string, RelayAgentOver
   invalidateArchivedLocalAgentIdsCache();
 }
 
-async function writeLocalAgentRegistry(registry: Record<string, LocalAgentRecord>): Promise<void> {
+async function writeLocalAgentRegistry(registry: Record<string, LocalAgentRecord>, beforeEffect?: () => void): Promise<void> {
   const overrides = await readRelayAgentOverrides();
   const nextOverrides: Record<string, RelayAgentOverride> = {
     ...overrides,
@@ -987,7 +988,7 @@ async function writeLocalAgentRegistry(registry: Record<string, LocalAgentRecord
     nextOverrides[agentId] = relayAgentOverrideFromLocalAgentRecord(agentId, record, overrides[agentId]);
   }
 
-  await writeRelayAgentOverrides(nextOverrides);
+  await writeRelayAgentOverrides(nextOverrides, beforeEffect); // warmup registry writer forwarding
 }
 
 function expandHomePath(value: string): string {
@@ -4611,15 +4612,18 @@ export function areHarnessBinariesAvailable(record: Pick<LocalAgentRecord, "harn
   return true;
 }
 
-async function ensureLocalAgentOnline(agentName: string, record: LocalAgentRecord): Promise<LocalAgentRecord> {
+async function ensureLocalAgentOnline(agentName: string, record: LocalAgentRecord, beforeWarmupEffect?: () => void): Promise<LocalAgentRecord> {
+  admitSynchronousEffect(beforeWarmupEffect); // warmup admission after binding discovery
   const normalizedRecord = normalizeLocalAgentRecord(agentName, record);
   const flightKey = localAgentOnlineFlightKey(agentName, normalizedRecord);
   const existingFlight = localAgentOnlineFlights.get(flightKey);
   if (existingFlight) {
-    return await existingFlight;
+    const result = await existingFlight;
+    admitSynchronousEffect(beforeWarmupEffect); // a joined flight does not preserve caller authority
+    return result;
   }
 
-  const flight = ensureLocalAgentOnlineOnce(agentName, normalizedRecord);
+  const flight = ensureLocalAgentOnlineOnce(agentName, normalizedRecord, beforeWarmupEffect);
   localAgentOnlineFlights.set(flightKey, flight);
   try {
     return await flight;
@@ -4630,7 +4634,7 @@ async function ensureLocalAgentOnline(agentName: string, record: LocalAgentRecor
   }
 }
 
-async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentRecord): Promise<LocalAgentRecord> {
+async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentRecord, beforeWarmupEffect?: () => void): Promise<LocalAgentRecord> {
   const normalizedRecord = normalizeLocalAgentRecord(agentName, record);
   if (isLocalAgentRecordOnline(agentName, normalizedRecord)) {
     if (normalizedRecord.transport === "grok_acp" || normalizedRecord.transport === "kimi_acp" || normalizedRecord.transport === "devin_acp") {
@@ -4643,7 +4647,7 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
         startedAt: nowSeconds(),
         systemPrompt: normalizedRecord.systemPrompt,
       };
-      await writeLocalAgentRegistry(registry);
+      await writeLocalAgentRegistry(registry, beforeWarmupEffect); // lazy ACP warmup publication
       return registry[agentName];
     }
     return normalizedRecord;
@@ -5166,8 +5170,8 @@ export async function resolveLocalAgentIdentity(input: StartLocalAgentInput): Pr
   };
 }
 
-/** The optional hook covers configuration writes only. Harness warmup and
- * subsequent broker effects have separate owners and are not qualified here. */
+/** The optional hook covers configuration and lazy ACP registry publication.
+ * Process-launch warmup and subsequent broker effects remain separate owners. */
 export async function startLocalAgent(input: StartLocalAgentInput, beforeConfigEffect?: () => void): Promise<ScoutLocalAgentStatus> {
   const projectPath = normalizeProjectPath(input.projectPath);
   const preferredHarness = resolveRequestedLocalAgentHarness(input.harness);
@@ -5459,6 +5463,7 @@ export async function startLocalAgent(input: StartLocalAgentInput, beforeConfigE
       currentDirectory,
       ensureCurrentProjectConfig: false,
       harness: preferredHarness,
+      beforeWarmupEffect: beforeConfigEffect, // startup warmup forwarding
     });
   }
 
@@ -5889,7 +5894,7 @@ export async function listRelayAgentTmuxSessionOwners(): Promise<Map<string, str
 
 export async function loadRegisteredLocalAgentBindings(
   nodeId: string,
-  options: { ensureOnline?: boolean; agentIds?: string[]; harness?: AgentHarness } = {},
+  options: { ensureOnline?: boolean; agentIds?: string[]; harness?: AgentHarness; beforeWarmupEffect?: () => void } = {},
 ): Promise<LocalAgentBinding[]> {
   const [registry, overrides] = await Promise.all([
     readLocalAgentRegistry(),
@@ -5912,8 +5917,10 @@ export async function loadRegisteredLocalAgentBindings(
     let effectiveRecord: LocalAgentRecord;
     if (options.ensureOnline) {
       try {
-        effectiveRecord = await ensureLocalAgentOnline(agentId, harnessRecord);
+        effectiveRecord = await ensureLocalAgentOnline(agentId, harnessRecord, options.beforeWarmupEffect); // registered warmup forwarding
       } catch (error) {
+        // A protected caller must observe refusal, not continue with an offline binding.
+        if (options.beforeWarmupEffect) throw error;
         console.error(`[openscout-runtime] failed to warm agent ${agentId}: ${error instanceof Error ? error.message : error}`);
         effectiveRecord = normalizeLocalAgentRecord(agentId, harnessRecord);
       }
@@ -5962,6 +5969,9 @@ export async function ensureLocalAgentBindingOnline(
     currentDirectory?: string;
     ensureCurrentProjectConfig?: boolean;
     harness?: AgentHarness;
+    /** Per-call callback, not retained in agent/session configuration. Covers
+     * lazy ACP registry publication, not other engines' launch internals. */
+    beforeWarmupEffect?: () => void;
   } = {},
 ): Promise<LocalAgentBinding | null> {
   if (!agentId) {
@@ -5972,6 +5982,7 @@ export async function ensureLocalAgentBindingOnline(
     agentIds: [agentId],
     ensureOnline: true,
     harness: options.harness,
+    beforeWarmupEffect: options.beforeWarmupEffect, // binding warmup forwarding
   }))[0];
   if (registeredBinding) {
     return registeredBinding;
@@ -5997,6 +6008,7 @@ export async function ensureLocalAgentBindingOnline(
     const onlineRecord = await ensureLocalAgentOnline(
       agentId,
       recordForHarness(localAgentRecordFromResolvedConfig(configured), options.harness),
+      options.beforeWarmupEffect,
     );
     return buildLocalAgentBinding(
       agentId,
@@ -6016,6 +6028,7 @@ export async function ensureLocalAgentBindingOnline(
   const onlineRecord = await ensureLocalAgentOnline(
     agentId,
     recordForHarness(localAgentRecordFromRelayAgentOverride(agentId, override), options.harness),
+    options.beforeWarmupEffect,
   );
 
   return buildLocalAgentBinding(

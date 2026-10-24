@@ -294,9 +294,21 @@ project updates, existing project ignore updates, agent forks and warm override
 updates carry the same callback. Refusals propagate without a configuration
 fallback. Trusted local callers that omit the hook retain their behavior.
 
-This hook covers configuration effects only. Harness warmup, broker binding,
-peer-session creation and seed delivery have separate owners and still require
-their own resumed-effect qualification. A denied configuration write does not
+The hook also reaches lazy ACP warmup for `grok_acp`, `kimi_acp` and
+`devin_acp`. These branches publish a durable agent registry without starting
+an ACP process. Registry publication re-admits after its asynchronous reads,
+then re-admits the file after directory creation through the same configuration
+writer. A protected warmup refusal propagates instead of becoming an offline
+binding. Callers without the hook retain the existing best-effort fallback.
+The callback belongs to the current call; it is not stored in a session or
+agent record. Joining an existing warmup flight does not transfer authority
+from its initiating caller or cancel that caller's work.
+
+Process-launch warmup, broker binding, peer-session creation and seed delivery
+have separate owners and still require their own resumed-effect qualification.
+In particular, the warmup entry check does not qualify an engine's later
+filesystem, daemon, fallback or process submission after another await.
+A denied configuration or lazy ACP registry write does not
 roll back filesystem operations already submitted. These submission checks do
 not certify a private host's combined pairing-authority/journal ordering or
 remove separately issued credentials.
