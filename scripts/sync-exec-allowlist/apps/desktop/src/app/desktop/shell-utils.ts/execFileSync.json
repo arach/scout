@@ -1,7 +1,0 @@
-{
-  "path": "apps/desktop/src/app/desktop/shell-utils.ts",
-  "symbol": "execFileSync",
-  "category": "imperative",
-  "reason": "desktop shell utility remains a Phase A app-host direct command wrapper outside server request paths",
-  "owner": "desktop"
-}

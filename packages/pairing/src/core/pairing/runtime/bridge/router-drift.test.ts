@@ -1,51 +1,17 @@
-// iOS RPC drift tripwire — Phase 1 of plans/ios-rpc-swift-codegen.design.md.
-//
-// The iOS core dispatches RPCs by logical name through the hand-written
-// `trpcRouteMap` in RPCWire.swift; a map entry that points at a procedure the
-// bridge router no longer exposes surfaces on device as a misleading
-// `encodingFailed` error. The bridge router itself lives in two copies (this
-// canonical one and apps/desktop's), which have already drifted apart.
-//
-// This suite is a drift tripwire, not a compiler: it enumerates the real
-// routers by importing them, extracts the Swift route map with a tight
-// structured scan of the `trpcRouteMap` literal, and fails on any NEW
-// divergence. Known, deliberate gaps are frozen in explicit lists below that
-// must only ever shrink.
+// The host has one router. Pin the former procedure union and, when the
+// private iOS source overlay is available, verify its native wire map.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { bridgeRouter } from "./router.ts";
-import { bridgeRouter as desktopBridgeRouter } from "./router.ts";
 
-const REPO_ROOT = join(import.meta.dir, "../../../../../..");
+const REPO_ROOT = join(import.meta.dir, "../../../../../../..");
 const IOS_CORE_SOURCES_DIR = join(REPO_ROOT, "packages/scout-ios-core/Sources/ScoutIOSCore");
 const RPC_WIRE_PATH = join(IOS_CORE_SOURCES_DIR, "RPCWire.swift");
 
-// ---------------------------------------------------------------------------
-// KNOWN DRIFT — frozen 2026-07-01. These lists must only ever SHRINK.
-// ---------------------------------------------------------------------------
-
-// Copy-vs-copy divergence between the canonical web router and the
-// apps/desktop copy, as found when this tripwire landed (design doc F1 names
-// the four mobile.* procedures; the full-set scan also caught history.snapshot
-// and the desktop-only tail.events subscription). Phase 1 records the gap
-// instead of porting procedures — consolidating the two copies is Phase 4 of
-// the design doc and a separate effort.
-//
-//   - Adding a procedure to one copy but not the other fails the copy-drift
-//     test. Do NOT add entries here — port the procedure to both copies.
-//   - Healing an entry (porting it, or deleting the stale side) also fails
-//     the test, on purpose: remove the healed entry from this list so the
-//     list tracks reality.
-const KNOWN_COPY_DRIFT = { webOnly: [] as string[], desktopOnly: [] as string[] };
-
-// Route map entries in RPCWire.swift that no Swift code in the iOS core
-// invokes. `mobile/message/send` used to sit here (#912), but
-// BridgeBrokerClient.sendDirectMessage now calls it. Keep this list empty
-// until a new unused map entry appears; adding NEW dead entries fails the
-// dead-entry test, and deleting a live caller should put the name back.
+// The private Swift overlay must not carry unused route-map entries.
 const KNOWN_DEAD_ROUTE_MAP_ENTRIES: string[] = [];
 
 // ---------------------------------------------------------------------------
@@ -190,7 +156,6 @@ const { routes: swiftRoutes, sourceWithoutMap } = hasIosCoreSources
   ? extractTrpcRouteMap(readFileSync(RPC_WIRE_PATH, "utf8"))
   : { routes: [], sourceWithoutMap: "" };
 const webProcedures = procedureKinds(bridgeRouter, "canonical web");
-const desktopProcedures = procedureKinds(desktopBridgeRouter, "apps/desktop");
 
 describe("iOS RPC drift tripwire", () => {
   test("the canonical host preserves the web and desktop procedure union", () => {
@@ -231,27 +196,4 @@ describe("iOS RPC drift tripwire", () => {
     expect(deadEntries).toEqual([...KNOWN_DEAD_ROUTE_MAP_ENTRIES].sort());
   });
 
-  test("the desktop router copy exposes the same procedures as the canonical web copy, minus the frozen known drift", () => {
-    const webOnly = [...webProcedures.keys()].filter((path) => !desktopProcedures.has(path)).sort();
-    const desktopOnly = [...desktopProcedures.keys()].filter((path) => !webProcedures.has(path)).sort();
-
-    // Failing with an EXTRA entry: new copy drift — port the procedure to the
-    // other copy instead of extending KNOWN_COPY_DRIFT. Failing with a
-    // MISSING entry: drift healed — remove it from KNOWN_COPY_DRIFT.
-    expect(webOnly).toEqual([...KNOWN_COPY_DRIFT.webOnly].sort());
-    expect(desktopOnly).toEqual([...KNOWN_COPY_DRIFT.desktopOnly].sort());
-  });
-
-  test("procedures present in both copies agree on kind", () => {
-    const mismatches: string[] = [];
-
-    for (const [path, kind] of webProcedures) {
-      const desktopKind = desktopProcedures.get(path);
-      if (desktopKind && desktopKind !== kind) {
-        mismatches.push(`${path}: ${kind} (web) vs ${desktopKind} (desktop)`);
-      }
-    }
-
-    expect(mismatches).toEqual([]);
-  });
 });

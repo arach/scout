@@ -28,14 +28,12 @@ const PUBLIC_PACKAGES = [
 
 const VERSION_MANIFESTS = [
   ".",
-  "apps/desktop",
   "packages/agent-sessions",
   "packages/cli",
   "packages/protocol",
   "packages/runtime",
   "packages/session-trace",
-  "packages/session-trace-react",
-  "packages/web",
+  "packages/pairing",
 ];
 
 const APP_VERSION_SOURCE = "packages/cli/src/lib/shared/product.ts";

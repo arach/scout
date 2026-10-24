@@ -14,11 +14,19 @@ import { requestLocalPairingOpportunity } from "../packages/runtime/src/pairing-
 import { startRelay } from "../packages/runtime/src/relay-transport.ts";
 
 const flavor = process.argv[2] ?? "web", scenario = process.argv[3] ?? "revoked";
-const base = resolve(flavor === "web" ? "packages/web/server/core/pairing/runtime" : "apps/desktop/src/core/pairing/runtime");
-const { initTRPC } = await import(Bun.resolveSync("@trpc/server", base));
-let dispatches = 0, subscriptions = 0;
+const base = resolve("packages/pairing/src/core/pairing/runtime");
+const { initTRPC, tracked } = await import(Bun.resolveSync("@trpc/server", base));
+let dispatches = 0, subscriptions = 0, streamStops = 0;
 const t = initTRPC.create();
-mock.module(resolve(base, "bridge/router.ts"), () => ({lookupMobileInboxItemForEvent: () => null, bridgeRouter: t.router({probe: t.procedure.query(() => {dispatches++; return "rpc-secret";})})}));
+mock.module(resolve(base, "bridge/router.ts"), () => ({lookupMobileInboxItemForEvent: () => null, bridgeRouter: t.router({
+  probe: t.procedure.query(() => {dispatches++; return "rpc-secret";}),
+  stream: t.procedure.subscription(async function* ({signal}) {
+    try {
+      yield tracked("event-1", { summary: "relay-stream" });
+      await new Promise<void>(done => signal?.aborted ? done() : signal?.addEventListener("abort", () => done(), {once:true}));
+    } finally { streamStops++; }
+  }),
+})}));
 mock.module(resolve(base, "bridge/server.ts"), () => ({handleRPC: async () => {dispatches++; return {id: "probe", result: "rpc-secret"};}}));
 mock.module(resolve(base, "bridge/broker-message-fanout.ts"), () => ({watchSharedScoutMessages: async () => {subscriptions++;}}));
 const OriginalWebSocket = globalThis.WebSocket;
@@ -120,6 +128,18 @@ try {
     assert.equal(retrusted, false, "revoked phone was re-trusted by remembered-room reconnect");
     assert.equal(retry.state.closed, 4003); assert.equal(retry.data.length, 0); assert.equal(first.state.closed, 0);
     await denied("XX");
+  } else if (scenario === "subscriptions") {
+    seed(); const current = await accepted();
+    current.transport.send(JSON.stringify({id: 41, jsonrpc: "2.0", method: "subscription", params: {path: "stream"}}));
+    await until(() => current.data.some(x => x.includes("relay-stream")), "stream data");
+    const frames = current.data.map(x => JSON.parse(x)).filter(x => x.id === 41);
+    assert(frames.some(x => x.result?.type === "started"));
+    assert(frames.some(x => x.result?.id === "event-1" && x.result.data.id === "event-1"));
+    current.transport.send(JSON.stringify({id: 41, jsonrpc: "2.0", method: "subscription.stop"}));
+    await until(() => streamStops === 1, "subscription stop");
+    current.transport.send(JSON.stringify({id: 42, jsonrpc: "2.0", method: "subscription", params: {path: "stream"}}));
+    await until(() => current.data.some(x => JSON.parse(x).id === 42 && x.includes("relay-stream")), "second stream data");
+    current.ws.close(); await until(() => streamStops === 2, "peer-close cleanup");
   } else if (scenario === "lifecycle") {
     await denied("XX");
     begin(); opportunity!.cancel(); await denied("XX");

@@ -1,7 +1,0 @@
-{
-  "path": "apps/desktop/src/app/host/diagnostics.ts",
-  "symbol": "execFileSync",
-  "category": "cli",
-  "reason": "desktop diagnostics one-shot command collection",
-  "owner": "desktop"
-}

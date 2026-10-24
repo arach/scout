@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/local-terminal-open.ts",
-  "symbol": "node:child_process",
-  "category": "process-lifecycle",
-  "reason": "Owns asynchronous local terminal launch process lifecycle; no synchronous spawn in request path",
-  "owner": "web"
-}

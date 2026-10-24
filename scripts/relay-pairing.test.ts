@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pairingTrustOwner } from "../packages/runtime/src/pairing-security/trust-owner.ts";
 
 for (const flavor of ["web", "desktop"]) {
-  for (const scenario of ["revoked", "lifecycle", "workflow", "authority", "carrier"]) {
+  for (const scenario of ["revoked", "lifecycle", "workflow", "authority", "carrier", "subscriptions"]) {
     test(`${flavor}: relay ${scenario}`, async () => {
       const root = mkdtempSync(join(tmpdir(), "relay-pairing-"));
       const child = Bun.spawn([process.execPath, "scripts/relay-pairing-worker.ts", flavor, scenario], {
@@ -46,7 +46,7 @@ for (const flavor of ["web", "desktop"]) {
 }
 
 test("automatic controller refresh/restart never opens a pairing window", () => {
-  for (const base of ["packages/web/server/core/pairing", "apps/desktop/src/core/pairing"]) {
+  for (const base of ["packages/pairing/src/core/pairing"]) {
     const controller = readFileSync(join(base,"pairing-runtime-controller.ts"),"utf8");
     expect(controller).not.toContain(".openPairing(");
     expect(controller).not.toContain("openPairingOpportunity(");
@@ -55,7 +55,7 @@ test("automatic controller refresh/restart never opens a pairing window", () => 
 });
 
 test("maintenance restart is not pairing consent", () => {
-  for (const file of ["packages/web/server/pairing.ts", "apps/desktop/src/app/host/pairing.ts"]) {
+  for (const file of ["packages/pairing/src/pairing.ts"]) {
     const source = readFileSync(file,"utf8");
     const control = source.slice(source.indexOf("export async function controlScout"));
     const restart = control.slice(control.indexOf('case "restart":'),control.indexOf('break;',control.indexOf('case "restart":')));

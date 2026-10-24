@@ -84,9 +84,8 @@ jobs:
             bun run --cwd packages/protocol test
             bun run --cwd packages/agent-sessions test
             bun run --cwd packages/runtime test
-            bun run --cwd apps/desktop test:happy
-            bun run --cwd packages/web test:happy
-            bun test packages/session-trace/src/*.test.ts packages/session-trace-react/src/*.test.tsx
+            bun run --cwd packages/pairing test
+            bun test packages/session-trace/src/*.test.ts
           fi
 
   rust-scoutd:
@@ -100,11 +99,6 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Verify portable voice core
-        run: |
-          cargo check --manifest-path crates/openscout-voice-core/Cargo.toml --all-features
-          cargo test --manifest-path crates/openscout-voice-core/Cargo.toml --all-features
 
       - name: Verify scout-tui
         run: cargo check --manifest-path crates/scout-tui/Cargo.toml

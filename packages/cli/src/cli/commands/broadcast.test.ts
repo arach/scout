@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { namedChannelNaturalKey, stableChannelId, type ConversationDefinition } from "@openscout/protocol";
 
 import { sendScoutMessage as sendRuntimeMessage } from "../../../../runtime/src/scout-broker.ts";
-import { sendScoutMessage as sendWebMessage } from "../../../../web/server/core/broker/service.ts";
+import { sendScoutMessage as sendWebMessage } from "../../../../pairing/src/core/broker/service.ts";
 
 import { createScoutCommandContext } from "../context.ts";
 import { renderBroadcastCommandHelp, runBroadcastCommand } from "./broadcast.ts";

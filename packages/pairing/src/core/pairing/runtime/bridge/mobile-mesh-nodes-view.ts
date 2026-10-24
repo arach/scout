@@ -11,8 +11,6 @@ import { isDormantMeshNode } from "@openscout/runtime/mesh-peer-filter";
 // Agents whose node isn't in the registry are counted, never guessed onto a
 // host.
 //
-// NOTE: apps/desktop/src/core/pairing/runtime/bridge/mobile-mesh-nodes-view.ts
-// is a copy (the bridge router lives in two copies); keep them in step.
 
 import type {
   AgentDefinition,

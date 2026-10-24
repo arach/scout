@@ -1,7 +1,0 @@
-{
-  "path": "apps/desktop/src/core/setup/terminal-pty-dependencies.ts",
-  "symbol": "node:child_process",
-  "category": "boot",
-  "reason": "setup dependency probe runs during explicit setup/doctor flow",
-  "owner": "desktop"
-}

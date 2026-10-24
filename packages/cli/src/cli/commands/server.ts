@@ -1,3 +1,5 @@
+import { SCOUT_APP_VERSION } from "../../lib/shared/product.ts";
+import { resolveLegacyWebEntry } from "../../../../runtime/src/legacy-app-services.ts";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -18,12 +20,9 @@ import {
   type OpenScoutLocalEdgeScheme,
 } from "@openscout/runtime/local-edge";
 import { readTailscaleSelfWebHostsSync } from "@openscout/runtime/mesh/tailscale";
-import { readBundledScoutVersion, resolveInstalledWebFullClient } from "@openscout/runtime/web-full-client";
+import { resolveInstalledWebFullClient } from "@openscout/runtime/web-full-client";
 import {
   resolveBunExecutable as resolveResolvedBunExecutable,
-  resolveBundledEntrypoint,
-  resolveOpenScoutRepoRoot,
-  resolveRepoEntrypoint,
 } from "@openscout/runtime/tool-resolution";
 import { resolveOpenScoutSetupContextRoot } from "@openscout/runtime/setup";
 
@@ -120,34 +119,15 @@ export function renderServerCommandHelp(): string {
   ].join("\n");
 }
 
-/**
- * Resolved against `import.meta.url`: published CLI has `scout-control-plane-web.mjs` beside `main.mjs`;
- * in-repo dev uses the Bun application server at `packages/web/server/index.ts`.
- */
+/** The apps supply the web server; the broker remains its only process owner. */
 export function resolveScoutWebServerEntry(): string {
   return resolveScoutControlPlaneWebServerEntry();
 }
-
 export function resolveScoutControlPlaneWebServerEntry(): string {
-  const bundled = resolveBundledEntrypoint(import.meta.url, "scout-control-plane-web.mjs");
-  if (bundled) {
-    return bundled;
-  }
-
-  const repoRoot = resolveOpenScoutRepoRoot({
-    startDirectories: [
-      process.env.OPENSCOUT_SETUP_CWD,
-      process.cwd(),
-      dirname(fileURLToPath(import.meta.url)),
-    ],
-  });
-  const source = resolveRepoEntrypoint(repoRoot, "packages/web/server/index.ts");
-  if (source) {
-    return source;
-  }
-
+  const selected = resolveLegacyWebEntry(process.env, dirname(fileURLToPath(import.meta.url)));
+  if (selected) return selected;
   throw new ScoutCliError(
-    "Could not find Scout web server entry. Rebuild @openscout/scout or run from the OpenScout repository.",
+    "The web app is supplied by OpenScout apps, not the Scout core. Install the apps and configure OPENSCOUT_WEB_SERVER_ENTRY.",
   );
 }
 
@@ -358,22 +338,7 @@ function assertBrokerManagedLifecycleFlags(
 }
 
 function resolveBundledStaticClientRoot(entry: string, _mode: ScoutServerMode): string | null {
-  const entryDir = dirname(entry);
-  const clientDirectory = join(entryDir, "client");
-  const indexPath = join(clientDirectory, "index.html");
-  if (!existsSync(indexPath)) return null;
-  // The bundled client is the basic one; prefer the installed full client
-  // built for this same version (`scout web install`).
-  return resolveInstalledWebFullClient(readBundledScoutVersion(entryDir)) ?? clientDirectory;
-}
-
-/** Prefer a fresh Vite build from an OpenScout repo checkout over a stale published CLI bundle. */
-function resolveDevCheckoutWebClientRoot(env: NodeJS.ProcessEnv): string | null {
-  const setupCwd = env.OPENSCOUT_SETUP_CWD?.trim();
-  if (!setupCwd) return null;
-  const clientDirectory = join(setupCwd, "packages/web/dist/client");
-  const indexPath = join(clientDirectory, "index.html");
-  return existsSync(indexPath) ? clientDirectory : null;
+  return resolveInstalledWebFullClient(SCOUT_APP_VERSION);
 }
 
 export function resolveBunExecutable(env: NodeJS.ProcessEnv): string {
@@ -391,8 +356,7 @@ function buildMergedServerEnv(entry: string, mode: ScoutServerMode, flagEnv: Rec
   const wantsVite = Boolean(flagEnv.OPENSCOUT_WEB_VITE_URL ?? process.env.OPENSCOUT_WEB_VITE_URL);
   if (!wantsVite) {
     const mergedForLookup = { ...process.env, ...flagEnv } as NodeJS.ProcessEnv;
-    const devCheckoutClientRoot = resolveDevCheckoutWebClientRoot(mergedForLookup);
-    const staticClientRoot = devCheckoutClientRoot ?? bundledStaticClientRoot;
+    const staticClientRoot = bundledStaticClientRoot;
     if (staticClientRoot) {
       autoEnv.NODE_ENV = "production";
       autoEnv.OPENSCOUT_WEB_STATIC_ROOT = staticClientRoot;

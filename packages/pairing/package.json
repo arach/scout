@@ -5,13 +5,71 @@
   "type": "module",
   "description": "Host-side phone pairing, encrypted bridge and legacy phone RPC projections.",
   "exports": {
-    ".": "./src/core/pairing/index.ts",
-    "./terminal": "./src/terminal.ts",
-    "./*": "./src/*"
+    ".": {
+      "bun": "./src/core/pairing/index.ts",
+      "types": "./dist/core/pairing/index.d.ts",
+      "import": "./dist/core/pairing/index.js",
+      "default": "./dist/core/pairing/index.js"
+    },
+    "./terminal": {
+      "bun": "./src/terminal.ts",
+      "types": "./dist/terminal.d.ts",
+      "import": "./dist/terminal.js",
+      "default": "./dist/terminal.js"
+    },
+    "./runtime": {
+      "bun": "./src/core/pairing/runtime/index.ts",
+      "types": "./dist/core/pairing/runtime/index.d.ts",
+      "import": "./dist/core/pairing/runtime/index.js",
+      "default": "./dist/core/pairing/runtime/index.js"
+    },
+    "./controller": {
+      "bun": "./src/core/pairing/pairing-runtime-controller.ts",
+      "types": "./dist/core/pairing/pairing-runtime-controller.d.ts",
+      "import": "./dist/core/pairing/pairing-runtime-controller.js",
+      "default": "./dist/core/pairing/pairing-runtime-controller.js"
+    },
+    "./host": {
+      "bun": "./src/pairing.ts",
+      "types": "./dist/pairing.d.ts",
+      "import": "./dist/pairing.js",
+      "default": "./dist/pairing.js"
+    },
+    "./http": {
+      "bun": "./src/routes/pairing.ts",
+      "types": "./dist/routes/pairing.d.ts",
+      "import": "./dist/routes/pairing.js",
+      "default": "./dist/routes/pairing.js"
+    },
+    "./pair-requests": {
+      "bun": "./src/pairing-pair-requests.ts",
+      "types": "./dist/pairing-pair-requests.d.ts",
+      "import": "./dist/pairing-pair-requests.js",
+      "default": "./dist/pairing-pair-requests.js"
+    },
+    "./lan-beacon": {
+      "bun": "./src/pairing-lan-beacon.ts",
+      "types": "./dist/pairing-lan-beacon.d.ts",
+      "import": "./dist/pairing-lan-beacon.js",
+      "default": "./dist/pairing-lan-beacon.js"
+    },
+    "./web-handoff": {
+      "bun": "./src/core/pairing/runtime/bridge/web-handoff.ts",
+      "types": "./dist/core/pairing/runtime/bridge/web-handoff.d.ts",
+      "import": "./dist/core/pairing/runtime/bridge/web-handoff.js",
+      "default": "./dist/core/pairing/runtime/bridge/web-handoff.js"
+    },
+    "./artifacts": {
+      "bun": "./src/core/pairing/runtime/bridge/artifact-presentation.ts",
+      "types": "./dist/core/pairing/runtime/bridge/artifact-presentation.d.ts",
+      "import": "./dist/core/pairing/runtime/bridge/artifact-presentation.js",
+      "default": "./dist/core/pairing/runtime/bridge/artifact-presentation.js"
+    }
   },
   "scripts": {
     "check": "tsc -p tsconfig.json",
-    "test": "bun test --isolate ./src"
+    "test": "bun test --isolate ./src",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@openscout/protocol": "workspace:*",
@@ -19,9 +77,6 @@
     "@openscout/agent-sessions": "workspace:*",
     "@trpc/server": "^11.16.0",
     "@trpc/client": "^11.16.0",
-    "@noble/ciphers": "^2.1.1",
-    "@noble/curves": "^2.0.1",
-    "@noble/hashes": "^2.0.1",
     "hono": "^4.12.10",
     "uqr": "^0.1.2",
     "zod": "4.4.3"
@@ -31,5 +86,13 @@
     "@types/ws": "^8.5.13",
     "bun-types": "^1.3.11",
     "typescript": "^5"
-  }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "!src/**/*-worker.ts",
+    "!src/fixtures/**"
+  ]
 }

@@ -41,7 +41,7 @@ async function runScoutStatusline(input: {
     context_window: { used_percentage: 9 },
   });
   const child = Bun.spawn(
-    [process.execPath, "./apps/desktop/bin/scout.ts", "statusline", "claude", ...(input.args ?? [])],
+    [process.execPath, "./packages/cli/src/main.ts", "statusline", "claude", ...(input.args ?? [])],
     {
       cwd: repoRoot,
       env: {
