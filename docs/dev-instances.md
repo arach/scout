@@ -1,5 +1,8 @@
 # Dev instances: running a checkout beside the installed Scout
 
+Web port reservations in this guide apply only when a separate web client is
+configured. The core does not ship a web app.
+
 A checkout or worktree runs as its own OpenScout **instance**, never as the
 installed ("prod") one. One knob, `OPENSCOUT_INSTANCE`, derives everything;
 `prod` (the default) is the installed layout, unchanged.
@@ -12,8 +15,8 @@ installed ("prod") one. One knob, `OPENSCOUT_INSTANCE`, derives everything;
 | service | `app.openscout` / `scout.service` | `app.openscout.dev` / `scout-dev.service` | `app.openscout.dev-<folder>` / `scout-dev-<folder>.service` |
 | mesh | on | off (`OPENSCOUT_INSTANCE_MESH=1` opts in) | off |
 
-- `bun run dev`, `bun run runtime:broker`, `bun packages/runtime/src/broker-daemon.ts`
-  and `bun packages/web/server/pairing-runtime-controller.ts` default to `dev`
+- `bun run runtime:broker` and `bun packages/runtime/src/broker-daemon.ts`
+  default to `dev`
   (or `dev-<folder>` in a linked worktree). A second clone, or a folder whose
   name truncates like another, gets `<name>-<hash>`; the registry records which
   checkout owns which name. Set `OPENSCOUT_INSTANCE=<name>` to pick one.

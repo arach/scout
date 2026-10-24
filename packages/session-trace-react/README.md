@@ -31,7 +31,7 @@ npm --prefix packages/session-trace-react run check
 
 - [`../session-trace/README.md`](../session-trace/README.md) for the underlying
   trace model
-- [`../web/README.md`](../web/README.md) for the web UI package that consumes
-  trace presentation
+- [`../../docs/public-source-boundary.md`](../../docs/public-source-boundary.md)
+  for the separate app clients that can consume trace presentation
 - [`../../docs/architecture.md`](../../docs/architecture.md#the-data-model) for the
   observed-source versus Scout-owned record boundary

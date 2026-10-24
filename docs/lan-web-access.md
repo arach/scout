@@ -1,5 +1,9 @@
 # LAN-only access to Scout Web
 
+This guide requires a web client supplied by the separate apps layer. The
+public core ships no web app. App-specific server behavior below is not a
+core-only installation contract.
+
 A machine can publish its own `<name>.scout.local` address on the local network
 and serve the web app to authenticated browsers without cloud or Tailscale
 routing. This is an opt-in developer-pilot configuration. It requires Scout's

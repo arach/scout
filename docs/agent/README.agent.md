@@ -24,16 +24,17 @@ fork, and working-directory checks before making changes.
 | Primary state owner | local broker |
 | Protocol package | `@openscout/protocol` |
 
+The core has no web app. The Mac, iOS, Android, and web apps are separate
+clients. Host-side pairing is `@openscout/pairing` in `packages/pairing`. It is
+an internal workspace package bundled into the CLI, not a separate npm install.
+
 ## Main Paths
 
 | Area | Path |
 |---|---|
-| Transitional desktop/CLI source | `apps/desktop` |
-| Web UI/server | `packages/web` |
 | Broker/runtime | `packages/runtime` |
 | Shared protocol | `packages/protocol` |
 | Public CLI package | `packages/cli` |
-| Web package | `packages/web` |
 | Docs | `docs` |
 
 ## Semantic Specs (dense)
@@ -172,11 +173,9 @@ in `packages/runtime/src/support-paths.ts`. See `instances.agent.md`.
 ## Common Checks
 
 ```bash
-bun test apps/desktop/src/core/pairing/runtime/bridge/router.test.ts
-bun run --cwd apps/desktop check
-bun run --cwd packages/web build:server
-npm --prefix packages/protocol run check
-npm --prefix packages/runtime run check
+bun run --cwd packages/protocol check
+bun run --cwd packages/runtime check
+bun run --cwd packages/cli check
 ```
 
 Use narrower tests/checks when the root check is blocked by unrelated workspace tooling.

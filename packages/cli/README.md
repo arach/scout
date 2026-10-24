@@ -34,7 +34,8 @@ or the [discovery manifest](https://openscout.app/.well-known/scout.json).
 ## Start here
 
 Local agent coordination requires [Bun 1.3 or newer](https://bun.sh). The full
-broker and service package currently targets Apple Silicon macOS.
+runtime runs on Apple-silicon macOS and Linux. On Linux, run the foreground
+runtime under your process manager; see the [install guide](../../install.md).
 
 ```bash
 npm install -g @openscout/scout
@@ -272,21 +273,25 @@ Agent-card targets start fresh sessions.
 
 ```text
 Claude Code  ─┐
-Codex        ─┼── local Scout broker ── CLI · Web
+Codex        ─┼── local Scout runtime ── CLI · MCP · JSON
 Other agents ─┘   messages · work · routing
                          │
-                         └── optional surfaces: Rust TUI · macOS · iOS
+                         ├── core terminal interface: Rust TUI
+                         └── separate clients: Mac · iOS · Android · web
 ```
 
 `@openscout/scout` installs:
 
 - the `scout` command;
-- the bundled local broker and runtime;
-- the local web control surface opened by `scout server open`.
+- the bundled local runtime, harness adapters, and host-side phone pairing;
+- JSON output and the stdio MCP server.
 
-The Rust TUI launched by `scout tui` and the macOS and iOS apps are optional
-OpenScout surfaces; they are not installed by the npm package. They read and
-write the same coordination state when present.
+The Rust TUI launched by `scout tui` is part of the core. Its native binary is
+not installed by `npm install -g @openscout/scout`; the command resolves or
+downloads it separately. The Mac, iOS, Android, and web apps are separate clients
+built on the core; none ships in this package.
+`scout server` and `scout web` use a web client only when the apps layer supplies
+one. See the [source boundary](../../docs/public-source-boundary.md).
 
 ## CLI at a glance
 
@@ -447,9 +452,9 @@ scout ask --to <agent-from-scout-who> --prompt-file ./review-request.md
 scout send --channel triage --message-file ./status-update.md
 ```
 
-`scout server open` reuses or starts the bundled local web UI. `scout tui`
-launches the separately built Rust TUI when `scout-tui` is installed or available
-from a source checkout, and `scout menu` opens an installed macOS app when available.
+`scout server open` requires a separately supplied web client. `scout tui`
+launches the core Rust TUI. `scout menu` opens a separately installed macOS app
+when available; it does not install an app as part of the core.
 
 The legacy `scout monitor` console has been retired; use `scout tui` after
 installing the optional Rust TUI.
