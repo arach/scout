@@ -279,6 +279,28 @@ can migrate automatically; ambiguous or unknown legacy ownership requires local
 review or explicit re-provisioning. The registry does not complete credential
 revocation or the private consuming-graph proof.
 
+### Resumed mobile agent configuration
+
+Both bridge families forward a trusted local admission callback from legacy
+`mobile/session/create` and tRPC `mobile.createSession` through `upScoutAgent`
+and `startLocalAgent` into the configuration writers. The callback resolves the
+live transport again; no stamp, positive permission or callback is serialized.
+
+Configuration JSON is serialized before admission. Directory submission is
+checked next, and file submission is checked again after asynchronous directory
+creation. The project ignore-file write re-admits after its asynchronous read;
+legacy relay-link removal re-admits after project setup. Cold creation, imported
+project updates, existing project ignore updates, agent forks and warm override
+updates carry the same callback. Refusals propagate without a configuration
+fallback. Trusted local callers that omit the hook retain their behavior.
+
+This hook covers configuration effects only. Harness warmup, broker binding,
+peer-session creation and seed delivery have separate owners and still require
+their own resumed-effect qualification. A denied configuration write does not
+roll back filesystem operations already submitted. These submission checks do
+not certify a private host's combined pairing-authority/journal ordering or
+remove separately issued credentials.
+
 ### Synchronous delivery batches
 
 The runtime registry shares one verified authority view across a synchronous

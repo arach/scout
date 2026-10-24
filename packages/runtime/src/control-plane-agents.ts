@@ -195,8 +195,11 @@ export function createScoutAgentService<TBroker extends ScoutAgentServiceBrokerC
       });
     },
 
-    async upScoutAgent(input: UpScoutAgentInput): Promise<ScoutAgentStatus> {
-      const status = await localAgents.startLocalAgent(input);
+    // Configuration admission only; warmup and broker binding are separate effects.
+    async upScoutAgent(input: UpScoutAgentInput, beforeConfigEffect?: () => void): Promise<ScoutAgentStatus> {
+      const status = beforeConfigEffect
+        ? await localAgents.startLocalAgent(input, beforeConfigEffect)
+        : await localAgents.startLocalAgent(input);
       // Synchronously register the endpoint with the broker so the agent is
       // immediately routable without waiting on the broker's background sync.
       await deps.registerScoutLocalAgentBinding({ agentId: status.agentId }).catch(() => {});

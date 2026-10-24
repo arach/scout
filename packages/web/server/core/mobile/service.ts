@@ -1260,7 +1260,7 @@ export async function createScoutSession(
     reasoningEffort: input.reasoningEffort,
     permissionProfile: input.profile?.trim() || undefined,
     branch: input.branch,
-  });
+  }, beforeEffect); // mobile agent configuration admission forwarding
 
   const broker = await loadScoutBrokerContext();
   const bindingSync = await registerScoutLocalAgentBinding({

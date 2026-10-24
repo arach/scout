@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "./effect-admission.js";
 import type { RuntimeEnv } from "./portable-types.js";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -1327,9 +1328,17 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
   }
 }
 
-async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
+async function writeJsonFile(filePath: string, value: unknown, beforeEffect?: () => void): Promise<void> {
+  if (!beforeEffect) {
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, JSON.stringify(value, null, 2) + "\n", "utf8");
+    return;
+  }
+  const serialized = JSON.stringify(value, null, 2) + "\n";
+  admitSynchronousEffect(beforeEffect); // config-directory submission, after serialization
   await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, JSON.stringify(value, null, 2) + "\n", "utf8");
+  admitSynchronousEffect(beforeEffect); // config-file submission, after directory creation
+  await writeFile(filePath, serialized, "utf8");
 }
 
 function codexEnvironmentPath(projectRoot: string): string {
@@ -1654,7 +1663,7 @@ async function syncProjectConfigFromLocalSources(
   return { config: nextConfig, changed };
 }
 
-async function ensureProjectConfigIgnored(projectRoot: string): Promise<void> {
+async function ensureProjectConfigIgnored(projectRoot: string, beforeEffect?: () => void): Promise<void> {
   const gitignorePath = projectGitignorePath(projectRoot);
   const ignoreRule = ".openscout/project.json";
   const comment = "# OpenScout local state";
@@ -1673,6 +1682,7 @@ async function ensureProjectConfigIgnored(projectRoot: string): Promise<void> {
 
   const separator = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
   const header = lines.some((line) => line.trim() === comment) ? "" : `${comment}\n`;
+  admitSynchronousEffect(beforeEffect); // ignore-file submission, after asynchronous read
   await writeFile(gitignorePath, `${current}${separator}${header}${ignoreRule}\n`, "utf8");
 }
 
@@ -2524,7 +2534,7 @@ export async function readRelayAgentOverrides(): Promise<Record<string, RelayAge
   );
 }
 
-export async function writeRelayAgentOverrides(overrides: Record<string, RelayAgentOverride>): Promise<void> {
+export async function writeRelayAgentOverrides(overrides: Record<string, RelayAgentOverride>, beforeEffect?: () => void): Promise<void> {
   assertTestIsolatedUserData("write the relay-agents registry", "OPENSCOUT_SUPPORT_DIRECTORY");
   const registryPath = resolveOpenScoutSupportPaths().relayAgentsRegistryPath;
   const normalizedAgents = Object.fromEntries(
@@ -2579,7 +2589,7 @@ export async function writeRelayAgentOverrides(overrides: Record<string, RelayAg
   await writeJsonFile(registryPath, {
     version: 1,
     agents: normalizedAgents,
-  });
+  }, beforeEffect); // relay configuration writer forwarding
 }
 
 export async function findNearestProjectRoot(startDirectory: string): Promise<string | null> {
@@ -2671,16 +2681,17 @@ export async function readProjectConfig(projectRoot: string): Promise<OpenScoutP
   };
 }
 
-export async function writeProjectConfig(projectRoot: string, config: OpenScoutProjectConfig): Promise<void> {
-  await writeJsonFile(projectConfigPath(projectRoot), config);
-  await ensureProjectConfigIgnored(projectRoot);
+export async function writeProjectConfig(projectRoot: string, config: OpenScoutProjectConfig, beforeEffect?: () => void): Promise<void> {
+  await writeJsonFile(projectConfigPath(projectRoot), config, beforeEffect);
+  await ensureProjectConfigIgnored(projectRoot, beforeEffect); // project writer ignore forwarding
 }
 
-async function removeLegacyRelayLink(projectRoot: string): Promise<void> {
+async function removeLegacyRelayLink(projectRoot: string, beforeEffect?: () => void): Promise<void> {
+  admitSynchronousEffect(beforeEffect); // legacy-link removal, after project setup
   await rm(legacyLocalRelayLinkPath(projectRoot), { force: true });
 }
 
-export async function ensureProjectConfigForDirectory(currentDirectory: string, settings?: OpenScoutSettings): Promise<{
+export async function ensureProjectConfigForDirectory(currentDirectory: string, settings?: OpenScoutSettings, beforeEffect?: () => void): Promise<{
   projectRoot: string | null;
   projectConfigPath: string | null;
   config: OpenScoutProjectConfig | null;
@@ -2692,9 +2703,9 @@ export async function ensureProjectConfigForDirectory(currentDirectory: string, 
   if (existing) {
     const synced = await syncProjectConfigFromLocalSources(projectRoot, existing);
     if (synced.changed) {
-      await writeProjectConfig(projectRoot, synced.config);
+      await writeProjectConfig(projectRoot, synced.config, beforeEffect);
     }
-    await ensureProjectConfigIgnored(projectRoot);
+    await ensureProjectConfigIgnored(projectRoot, beforeEffect);
     return {
       projectRoot,
       projectConfigPath: projectConfigPath(projectRoot),
@@ -2709,8 +2720,8 @@ export async function ensureProjectConfigForDirectory(currentDirectory: string, 
     projectRoot,
     defaultProjectConfig(projectRoot, effectiveSettings, preferredHarness),
   );
-  await writeProjectConfig(projectRoot, synced.config);
-  await removeLegacyRelayLink(projectRoot);
+  await writeProjectConfig(projectRoot, synced.config, beforeEffect);
+  await removeLegacyRelayLink(projectRoot, beforeEffect);
 
   return {
     projectRoot,

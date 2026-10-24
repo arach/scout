@@ -972,8 +972,8 @@ function invalidateArchivedLocalAgentIdsCache(): void {
 }
 
 /** Every registry write in this module flows through here so the archived-id memo stays honest. */
-async function writeRelayAgentOverrides(overrides: Record<string, RelayAgentOverride>): Promise<void> {
-  await writeRelayAgentOverridesToDisk(overrides);
+async function writeRelayAgentOverrides(overrides: Record<string, RelayAgentOverride>, beforeEffect?: () => void): Promise<void> {
+  await writeRelayAgentOverridesToDisk(overrides, beforeEffect);
   invalidateArchivedLocalAgentIdsCache();
 }
 
@@ -5166,7 +5166,9 @@ export async function resolveLocalAgentIdentity(input: StartLocalAgentInput): Pr
   };
 }
 
-export async function startLocalAgent(input: StartLocalAgentInput): Promise<ScoutLocalAgentStatus> {
+/** The optional hook covers configuration writes only. Harness warmup and
+ * subsequent broker effects have separate owners and are not qualified here. */
+export async function startLocalAgent(input: StartLocalAgentInput, beforeConfigEffect?: () => void): Promise<ScoutLocalAgentStatus> {
   const projectPath = normalizeProjectPath(input.projectPath);
   const preferredHarness = resolveRequestedLocalAgentHarness(input.harness);
   const currentDirectory = input.currentDirectory ?? projectPath;
@@ -5227,7 +5229,7 @@ export async function startLocalAgent(input: StartLocalAgentInput): Promise<Scou
   if (!matchingOverride) {
     // Cold path only: hit the config-ensure helper (and its ~/.claude scan) to seed a
     // first-time agent override. Warm mobile createSession never lands here.
-    const ensuredProject = await ensureProjectConfigForDirectory(projectPath);
+    const ensuredProject = await ensureProjectConfigForDirectory(projectPath, undefined, beforeConfigEffect);
     projectRoot = ensuredProject.projectRoot ?? projectPath;
     coldProjectConfigPath = ensuredProject.projectConfigPath ?? null;
     coldProjectConfig = ensuredProject.config ?? null;
@@ -5304,7 +5306,7 @@ export async function startLocalAgent(input: StartLocalAgentInput): Promise<Scou
         wakePolicy: "on_demand",
       },
     };
-    await writeRelayAgentOverrides(overrides);
+    await writeRelayAgentOverrides(overrides, beforeConfigEffect);
     targetAgentId = instance.id;
   } else if (requestedDefinitionId && requestedDefinitionId !== matchingOverride.definitionId) {
     // Caller asked for a different definitionId than the stored override — fork a new instance.
@@ -5375,7 +5377,7 @@ export async function startLocalAgent(input: StartLocalAgentInput): Promise<Scou
         wakePolicy: "on_demand",
       },
     };
-    await writeRelayAgentOverrides(overrides);
+    await writeRelayAgentOverrides(overrides, beforeConfigEffect);
     targetAgentId = instance.id;
   } else {
     const operatorAugmentDefaults = operatorAugmentDefaultsForDefinitionId(
@@ -5431,7 +5433,7 @@ export async function startLocalAgent(input: StartLocalAgentInput): Promise<Scou
             }
           : matchingOverride.runtime,
       };
-      await writeRelayAgentOverrides(overrides);
+      await writeRelayAgentOverrides(overrides, beforeConfigEffect);
     }
     targetAgentId = matchingAgentId!;
   }
