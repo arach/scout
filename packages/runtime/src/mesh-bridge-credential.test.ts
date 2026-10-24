@@ -1,3 +1,4 @@
+import { DEFAULT_OPENSCOUT_MESH_RELAY_URL } from "@openscout/protocol";
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,7 +20,7 @@ function supportDirectory(): string {
 
 function writeConfig(directory: string, fields: Record<string, unknown>, mtimeMs?: number): void {
   const path = join(directory, "mcp-bridge.json");
-  writeFileSync(path, JSON.stringify({ relayUrl: "https://mcp.oscout.net", ...fields }));
+  writeFileSync(path, JSON.stringify({ relayUrl: DEFAULT_OPENSCOUT_MESH_RELAY_URL, ...fields }));
   if (mtimeMs !== undefined) utimesSync(path, new Date(mtimeMs), new Date(mtimeMs));
 }
 
@@ -99,7 +100,7 @@ describe("the host's bridge credential", () => {
     const directory = supportDirectory();
     const source = meshBridgeCredentialSource({ supportDirectory: directory });
     writeConfig(directory, { token: "osbr_inline" }, 1000);
-    expect(await source()).toEqual({ token: "osbr_inline", relayOrigin: "https://mcp.oscout.net" });
+    expect(await source()).toEqual({ token: "osbr_inline", relayOrigin: DEFAULT_OPENSCOUT_MESH_RELAY_URL });
     writeConfig(directory, { token: "osbr_inline", relayUrl: "https://other.example.test" }, 1000);
     expect(await source()).toEqual({ token: "osbr_inline", relayOrigin: "https://other.example.test" });
     writeConfig(directory, { token: "osbr_inline", tokenFile: "/unrelated/credential" }, 1000);
@@ -148,13 +149,13 @@ describe("the host's bridge credential", () => {
     expect(reads).toBe(1);
 
     clock += 5 * 60_000;
-    expect(await credential()).toEqual({ token: "osbr_later", relayOrigin: "https://mcp.oscout.net" });
-    expect(await credential()).toEqual({ token: "osbr_later", relayOrigin: "https://mcp.oscout.net" });
+    expect(await credential()).toEqual({ token: "osbr_later", relayOrigin: DEFAULT_OPENSCOUT_MESH_RELAY_URL });
+    expect(await credential()).toEqual({ token: "osbr_later", relayOrigin: DEFAULT_OPENSCOUT_MESH_RELAY_URL });
     expect(reads).toBe(2);
 
     keychain = "osbr_reapproved";
     writeConfig(directory, { tokenKeychainService: "OPENSCOUT_MCP_BRIDGE_CREDENTIAL" }, 2_000);
-    expect(await credential()).toEqual({ token: "osbr_reapproved", relayOrigin: "https://mcp.oscout.net" });
+    expect(await credential()).toEqual({ token: "osbr_reapproved", relayOrigin: DEFAULT_OPENSCOUT_MESH_RELAY_URL });
     expect(reads).toBe(3);
   });
 });

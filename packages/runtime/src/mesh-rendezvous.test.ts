@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  DEFAULT_OPENSCOUT_MESH_RELAY_URL,
+  DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
   OPENSCOUT_IROH_MESH_ALPN,
   OPENSCOUT_MESH_PROTOCOL_VERSION,
   type NodeDefinition,
@@ -65,12 +67,12 @@ describe("mesh rendezvous publisher", () => {
     expect(resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: "false" })).toBeUndefined();
     expect(resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: "0" })).toBeUndefined();
     expect(resolveMeshRendezvousPublishConfig({
-      OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net/",
+      OPENSCOUT_MESH_RENDEZVOUS_URL: `${DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL}/`,
       OPENSCOUT_MESH_RENDEZVOUS_TOKEN: "secret",
       OPENSCOUT_MESH_RENDEZVOUS_TTL_MS: "120000",
       OPENSCOUT_MESH_RENDEZVOUS_INTERVAL_MS: "45000",
     })).toEqual({
-      url: "https://mesh.oscout.net",
+      url: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
       token: "secret",
       sessionToken: undefined,
       ttlMs: 120_000,
@@ -80,10 +82,10 @@ describe("mesh rendezvous publisher", () => {
 
   test("resolves OSN session auth separately from shared bearer tokens", () => {
     expect(resolveMeshRendezvousPublishConfig({
-      OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net",
+      OPENSCOUT_MESH_RENDEZVOUS_URL: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
       OPENSCOUT_MESH_RENDEZVOUS_SESSION: "abc",
     })).toMatchObject({
-      url: "https://mesh.oscout.net",
+      url: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
       sessionToken: "abc",
     });
   });
@@ -112,7 +114,7 @@ describe("mesh rendezvous publisher", () => {
 
   test("publishes nothing until this host is approved, then publishes with its credential", async () => {
     const config = resolveMeshRendezvousPublishConfig({
-      OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net",
+      OPENSCOUT_MESH_RENDEZVOUS_URL: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
     });
     expect(config?.hostCredential).toBeDefined();
     const requests: Request[] = [];
@@ -143,10 +145,10 @@ describe("mesh rendezvous publisher", () => {
   test("anonymous publishing is opt-in and never reads the host's credential", () => {
     writeBridgeConfig({ token: "osbr_approved" });
     expect(resolveMeshRendezvousPublishConfig({
-      OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net",
+      OPENSCOUT_MESH_RENDEZVOUS_URL: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
       OPENSCOUT_MESH_RENDEZVOUS_ALLOW_ANONYMOUS: "true",
     })).toEqual({
-      url: "https://mesh.oscout.net",
+      url: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
       token: undefined,
       sessionToken: undefined,
       ttlMs: 60_000,
@@ -154,7 +156,7 @@ describe("mesh rendezvous publisher", () => {
     });
     // A caller that passes its own environment reads nothing from this machine.
     expect(resolveMeshRendezvousPublishConfig({
-      OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net",
+      OPENSCOUT_MESH_RENDEZVOUS_URL: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
     }, { includeSettings: false })).toBeUndefined();
   });
 
@@ -163,7 +165,7 @@ describe("mesh rendezvous publisher", () => {
     const sent: Array<string | null> = [];
     const warnings: string[] = [];
     const publisher = startMeshRendezvousPublisher(makeNode(), {
-      config: { ...resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net" })!, intervalMs: 60_000 },
+      config: { ...resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL })!, intervalMs: 60_000 },
       fetch: async (input, init) => {
         const authorization = new Request(input, init).headers.get("authorization");
         sent.push(authorization);
@@ -185,9 +187,48 @@ describe("mesh rendezvous publisher", () => {
     expect(sent).toEqual(["Bearer osbr_revoked", "Bearer osbr_reapproved"]);
   });
 
+  test("the real default relay publishes only to its closed audience", async () => {
+    writeBridgeConfig({ token: "osbr_default_pair" });
+    const requests: Request[] = [];
+    for (const url of [DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL, DEFAULT_OPENSCOUT_MESH_RELAY_URL]) {
+      const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: url })!;
+      expect(await publishMeshRendezvousPresence(makeNode(), { config, fetch: async (input, init) => {
+        expect(init?.redirect).toBe("error");
+        requests.push(new Request(input, init)); return Response.json({ ok: true });
+      } })).toBe(true);
+    }
+    expect(requests.map(request => request.url)).toEqual([
+      new URL("/v1/presence", DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).href,
+      new URL("/v1/presence", DEFAULT_OPENSCOUT_MESH_RELAY_URL).href,
+    ]);
+    expect(requests.map(request => request.headers.get("authorization"))).toEqual([
+      "Bearer osbr_default_pair", "Bearer osbr_default_pair",
+    ]);
+  });
+
+  test("non-default split pairs and HTTP default pairs publish nothing", async () => {
+    let requests = 0;
+    const httpRelay = DEFAULT_OPENSCOUT_MESH_RELAY_URL.replace("https:", "http:");
+    const httpRendezvous = DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL.replace("https:", "http:");
+    for (const [relayUrl, url] of [
+      [DEFAULT_OPENSCOUT_MESH_RELAY_URL, "https://other.example.test"],
+      ["https://other.example.test", DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL],
+      [httpRelay, httpRendezvous],
+      [httpRelay, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL],
+      [DEFAULT_OPENSCOUT_MESH_RELAY_URL, httpRendezvous],
+    ]) {
+      writeBridgeConfig({ token: "osbr_default_pair", relayUrl });
+      const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: url })!;
+      expect(await publishMeshRendezvousPresence(makeNode(), { config, fetch: async () => {
+        requests++; return Response.json({ ok: true });
+      } })).toBe(false);
+    }
+    expect(requests).toBe(0);
+  });
+
   test("host credentials refuse remote HTTP and cross-origin HTTPS before fetch", async () => {
     writeBridgeConfig({ token: "osbr_approved" });
-    for (const url of ["http://mesh.oscout.net", "https://other.example.test", "https://mesh.oscout.net:444", "not-a-url"]) {
+    for (const url of [DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL.replace("https:", "http:"), "https://other.example.test", `${DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL}:444`, "not-a-url"]) {
       let requests = 0;
       const warnings: string[] = [];
       const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: url })!;
@@ -206,7 +247,7 @@ describe("mesh rendezvous publisher", () => {
     writeBridgeConfig({ token: "osbr_approved", tokenFile: "/unrelated/private-key" });
     const logs: string[] = [];
     let requests = 0;
-    const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net" })!;
+    const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL })!;
     const publisher = startMeshRendezvousPublisher(makeNode(), { config: { ...config, intervalMs: 60_000 },
       logger: { log: message => logs.push(message), warn() {} },
       fetch: async () => { requests++; return Response.json({ ok: true }); },
@@ -225,7 +266,7 @@ describe("mesh rendezvous publisher", () => {
     writeBridgeConfig({ token: "osbr_approved" }, 1000);
     let requests = 0;
     const warnings: string[] = [];
-    const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net" })!;
+    const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL })!;
     const publisher = startMeshRendezvousPublisher(makeNode(), { config: { ...config, intervalMs: 60_000 },
       logger: { log() {}, warn: message => warnings.push(message) },
       fetch: async () => { requests++; return Response.json({ ok: true }); },
@@ -404,7 +445,7 @@ describe("mesh rendezvous publisher", () => {
     const requests: Request[] = [];
     const ok = await publishMeshRendezvousPresence(makeNode(), {
       config: {
-        url: "https://mesh.oscout.net",
+        url: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
         token: "secret",
         sessionToken: undefined,
         ttlMs: 60_000,
@@ -418,7 +459,7 @@ describe("mesh rendezvous publisher", () => {
 
     expect(ok).toBe(true);
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.url).toBe("https://mesh.oscout.net/v1/presence");
+    expect(requests[0]?.url).toBe(new URL("/v1/presence", DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).href);
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer secret");
     const payload = await requests[0]!.json();
     expect(payload.nodeId).toBe("node-a");
@@ -428,7 +469,7 @@ describe("mesh rendezvous publisher", () => {
     const requests: Request[] = [];
     await publishMeshRendezvousPresence(makeNode(), {
       config: {
-        url: "https://mesh.oscout.net",
+        url: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
         sessionToken: "abc",
         ttlMs: 60_000,
         intervalMs: 30_000,
@@ -447,7 +488,7 @@ describe("mesh rendezvous publisher", () => {
     let name = "Node A";
     const publisher = startMeshRendezvousPublisher(() => makeNode({ name }), {
       config: {
-        url: "https://mesh.oscout.net",
+        url: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
         token: "secret",
         sessionToken: undefined,
         ttlMs: 60_000,
@@ -474,7 +515,7 @@ describe("mesh rendezvous publisher", () => {
     let requests = 0;
     const publisher = startMeshRendezvousPublisher(makeNode(), {
       config: {
-        url: "https://mesh.oscout.net",
+        url: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
         token: "expired",
         sessionToken: undefined,
         ttlMs: 60_000,
@@ -505,7 +546,7 @@ function writeBridgeConfig(fields: Record<string, unknown>, mtimeMs?: number): v
   const supportDirectory = process.env.OPENSCOUT_SUPPORT_DIRECTORY!;
   mkdirSync(supportDirectory, { recursive: true });
   const path = join(supportDirectory, "mcp-bridge.json");
-  writeFileSync(path, JSON.stringify({ relayUrl: "https://mesh.oscout.net", ...fields }));
+  writeFileSync(path, JSON.stringify({ relayUrl: DEFAULT_OPENSCOUT_MESH_RELAY_URL, ...fields }));
   if (mtimeMs !== undefined) utimesSync(path, new Date(mtimeMs), new Date(mtimeMs));
 }
 

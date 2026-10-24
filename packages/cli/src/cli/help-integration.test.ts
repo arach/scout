@@ -119,7 +119,7 @@ describe("streamed doctor fixture", () => {
     expect(stdout).toContain("FAIL probes: Probe observation failed.");
     expect(stdout).toContain("? native: No result within 1s");
     expect(stdout.indexOf("OK broker:")).toBeLessThan(stdout.indexOf("? native:"));
-    expect(stdout).toContain("2 working, 1 impaired, 1 inconclusive");
+    expect(stdout).toContain("3 working, 1 impaired, 1 inconclusive");
     expect(stdout).toContain("Next: scout doctor --detail");
     expect(stdout.split("\n").length).toBeLessThan(17);
     expect(stdout).not.toContain("Discovering projects");

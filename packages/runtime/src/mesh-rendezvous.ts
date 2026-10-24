@@ -10,7 +10,7 @@ import {
 } from "@openscout/protocol";
 
 import { isLoopbackHost } from "./broker-process-manager.js";
-import { isMeshBridgeCredentialUrl } from "./mesh-bridge-config.js";
+import { isMeshBridgeCredentialAudience } from "./mesh-bridge-config.js";
 import { meshBridgeCredentialSource, type MeshBridgeCredential } from "./mesh-bridge-credential.js";
 import { readOpenScoutNetworkSettingsSync } from "./open-scout-network.js";
 import { resolveOpenScoutPairingHomeForEnv, resolveOpenScoutSupportPaths } from "./support-paths.js";
@@ -122,13 +122,13 @@ function hostCredentialAllowed(options: MeshRendezvousPublisherOptions, credenti
   if (credential) {
     try {
       const destination = new URL(options.config.url);
-      state = isMeshBridgeCredentialUrl(destination) && destination.origin === credential.relayOrigin ? "ready" : "issuer-mismatch";
+      state = isMeshBridgeCredentialAudience(new URL(credential.relayOrigin), destination) ? "ready" : "issuer-mismatch";
     } catch { state = "issuer-mismatch"; }
   }
   if (state !== hostCredentialStates.get(options)) {
     hostCredentialStates.set(options, state);
     if (state === "unavailable") options.logger?.log("[openscout-runtime] mesh rendezvous waits for this host's approval and valid bridge configuration: run `scout mesh bridge connect`");
-    if (state === "issuer-mismatch") options.logger?.warn("[openscout-runtime] mesh rendezvous skipped: host credential requires HTTPS (or loopback HTTP) and its bridge issuer's exact origin");
+    if (state === "issuer-mismatch") options.logger?.warn("[openscout-runtime] mesh rendezvous skipped: host credential requires HTTPS (or loopback HTTP) and an exact origin in its bridge issuer's audience");
   }
   return state === "ready";
 }

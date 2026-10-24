@@ -1,3 +1,4 @@
+import { DEFAULT_OPENSCOUT_MESH_RELAY_URL } from "@openscout/protocol";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
@@ -67,7 +68,7 @@ The installed bridge is a child of scout-base: it restarts, upgrades and stops
 with the rest of the Scout service.
 
 Options (run + install):
-  --relay <url>       MCP relay base URL (default: https://mcp.oscout.net)
+  --relay <url>       MCP relay base URL (default: ${DEFAULT_OPENSCOUT_MESH_RELAY_URL})
   --token <bearer>    Relay infra token; prefer --token-keychain
   --token-keychain <service>
                       Read the token from the macOS keychain (default:
@@ -167,7 +168,7 @@ function resolveRunOptions(context: ScoutCommandContext, args: string[]): {
   configPath: string;
 } | { error: string } {
   const configPath = readFlag(args, "--config") ?? defaultConfigPath();
-  const fromFile = loadConfigFile(configPath) ?? { relayUrl: "https://mcp.oscout.net" };
+  const fromFile = loadConfigFile(configPath) ?? { relayUrl: DEFAULT_OPENSCOUT_MESH_RELAY_URL };
   const explicitToken = Boolean(readFlag(args, "--token") || fromFile.token);
   const secrets = meshBridgeSecretDefaults({
     explicitToken,
@@ -179,7 +180,7 @@ function resolveRunOptions(context: ScoutCommandContext, args: string[]): {
   });
 
   const config: ScoutMeshBridgeConfigFile = {
-    relayUrl: readFlag(args, "--relay") ?? fromFile.relayUrl ?? "https://mcp.oscout.net",
+    relayUrl: readFlag(args, "--relay") ?? fromFile.relayUrl ?? DEFAULT_OPENSCOUT_MESH_RELAY_URL,
     token: readFlag(args, "--token") ?? fromFile.token,
     tokenKeychainService: secrets.tokenKeychainService,
     tokenFile: secrets.tokenFile,
@@ -409,7 +410,7 @@ function isProcessAlive(pid: number): boolean {
 
 async function connectBridge(context: ScoutCommandContext, args: string[]): Promise<void> {
   const existing = loadConfigFile(defaultConfigPath());
-  const relayUrl = readFlag(args, "--relay") ?? existing?.relayUrl ?? "https://mcp.oscout.net";
+  const relayUrl = readFlag(args, "--relay") ?? existing?.relayUrl ?? DEFAULT_OPENSCOUT_MESH_RELAY_URL;
   const node = (readFlag(args, "--node") ?? existing?.node ?? "default").toLowerCase();
   const label = readFlag(args, "--label") ?? hostname().replace(/\.local$/, "");
   const openBrowser = !args.includes("--no-open");
@@ -468,7 +469,7 @@ async function disconnectBridge(context: ScoutCommandContext): Promise<void> {
   const config = loadConfigFile(configPath);
   const credential = readKeychainSecret(MESH_BRIDGE_CREDENTIAL_KEYCHAIN_SERVICE);
   if (credential) {
-    const revoked = await revokeMeshBridgeCredential(config?.relayUrl ?? "https://mcp.oscout.net", credential).catch(() => false);
+    const revoked = await revokeMeshBridgeCredential(config?.relayUrl ?? DEFAULT_OPENSCOUT_MESH_RELAY_URL, credential).catch(() => false);
     if (!revoked) {
       context.stderr("Could not reach the gateway to revoke the credential; kept it so you can retry.");
       process.exitCode = 1;
@@ -486,7 +487,7 @@ async function disconnectBridge(context: ScoutCommandContext): Promise<void> {
 /** The infra bearer that may administer agent tokens: the operator relay token. */
 function tokenAdminBearer(): { relayUrl: string; node: string; bearer: string } | { error: string } {
   const config = loadConfigFile(defaultConfigPath());
-  const relayUrl = config?.relayUrl ?? "https://mcp.oscout.net";
+  const relayUrl = config?.relayUrl ?? DEFAULT_OPENSCOUT_MESH_RELAY_URL;
   const node = config?.node ?? "default";
   const service = config?.tokenKeychainService?.trim();
   if (service === MESH_BRIDGE_CREDENTIAL_KEYCHAIN_SERVICE) {
