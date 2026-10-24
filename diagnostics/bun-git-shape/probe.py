@@ -58,7 +58,11 @@ with tempfile.TemporaryDirectory(prefix='bun-git-shape-') as fixture:
       def read(name):
        try:return (p/name).read_text()
        except OSError:return None
-      records.append({'pid':pid,'stat':read('stat'),'syscall':read('syscall'),'fdCount':len(list((p/'fd').iterdir())) if (p/'fd').exists() else None,'specialFds':fds})
+      def count():
+       # Linux makes a zombie's fd directory root-owned; keep the zombie's row.
+       try:return len(list((p/'fd').iterdir()))
+       except OSError:return None
+      records.append({'pid':pid,'stat':read('stat'),'syscall':read('syscall'),'fdCount':count(),'specialFds':fds})
      proc.append({'elapsedMs':int((now-start)*1000),'processes':records})
     except OSError:pass
   for key,_ in sel.select(.05):
