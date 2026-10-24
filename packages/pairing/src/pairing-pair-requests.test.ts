@@ -1723,3 +1723,29 @@ describe("request Noise key binding", () => {
     } finally { store.dispose(); }
   });
 });
+
+describe("terminal owner decisions use the shared account-request store", () => {
+  test("separate terminal processes list/show and race approve/deny exactly once", async () => {
+    const home=mkdtempSync(join(tmpdir(),"pair-request-terminal-"));
+    const store=createPendingPairRequestStore({statePath:pairRequestStatePath(home)});
+    const request=store.create({requesterIp:"key aaaaaaaaaaaa",requesterPublicKey:"a".repeat(64),requesterLabel:"Account device",route:"account"});
+    const run=async (...args:string[])=>{
+      const child=Bun.spawn([process.execPath,join(import.meta.dir,"fixtures/pairing-cli-worker.ts"),"requests",...args],{
+        env:{...process.env,OPENSCOUT_HOME:home},stdout:"pipe",stderr:"pipe",
+      });
+      const [exit,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
+      return {exit,out,err};
+    };
+    try {
+      const list=await run("list"),show=await run("show",request.token);
+      expect(list.exit).toBe(0);expect(JSON.parse(list.out).requests[0].token).toBe(request.token);
+      expect(show.exit).toBe(0);expect(JSON.parse(show.out).request.requesterPublicKey).toBe("a".repeat(64));
+      const results=await Promise.all([run("approve",request.token),run("deny",request.token)]);
+      expect(results.map(r=>r.exit).sort()).toEqual([0,1]);
+      expect(results.find(r=>r.exit!==0)!.err).toContain("already answered");
+      expect((await run("approve",request.token)).exit).toBe(1);
+      expect((await run("deny",request.token)).exit).toBe(1);
+      expect(store.get(request.token)?.status).not.toBe("pending");
+    } finally {store.dispose();rmSync(home,{recursive:true,force:true});}
+  },15_000);
+});

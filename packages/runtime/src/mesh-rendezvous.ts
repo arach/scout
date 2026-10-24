@@ -272,8 +272,11 @@ export function mobilePairingMeshEntrypointFromSnapshot(
   now: number = Date.now(),
 ): MobilePairingMeshEntrypoint | undefined {
   if (!isRecord(input)) return undefined;
-  const pairing = isRecord(input["pairing"]) ? input["pairing"] : undefined;
-  if (!pairing) return undefined;
+  // A present top-level lease is authoritative even when withdrawn or invalid.
+  // Legacy QR snapshots are read only when that property is absent.
+  const current = Object.hasOwn(input, "accountPairing");
+  const pairing = current ? input["accountPairing"] : input["pairing"];
+  if (!isRecord(pairing)) return undefined;
 
   const relay = readString(pairing["relay"]);
   // The account room asks the host's owner before admitting a device; the
@@ -285,7 +288,9 @@ export function mobilePairingMeshEntrypointFromSnapshot(
     return undefined;
   }
 
-  const fallbackRelays = readFallbackRelays(pairing);
+  // The new discovery lease never parses QR invitation fields for fallbacks.
+  const fallbackRelays = [...new Set(current
+    ? readStringArray(pairing["fallbackRelays"]) : readFallbackRelays(pairing))];
   const lastSeenAt = readNumber(input["updatedAt"]);
   return {
     kind: "mobile_pairing",
