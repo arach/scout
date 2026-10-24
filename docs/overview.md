@@ -48,6 +48,10 @@ Routing is explicit and independent of the calling surface:
 | Host phone pairing | `packages/pairing` |
 | Native services and TUI | `crates` |
 
+Host pairing lives in `packages/pairing` (`@openscout/pairing`), an internal
+workspace package bundled into the CLI. `scout pair` is its terminal entry
+point. It is not a separately published npm package.
+
 ## Product boundary
 
 Scout contains the public core: protocol, runtime, harness adapters, session

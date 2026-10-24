@@ -28,8 +28,11 @@ adopting those apps or services.
 - public integration contracts, terminal integrations, tests, documentation,
   and release tooling.
 
-**Placeholder:** name the host-pairing package and its public exports after the
-pairing move is merged. Pairing remains a core capability, not an app extension.
+Host pairing is `@openscout/pairing` in `packages/pairing`, an internal core
+workspace package bundled into the CLI. It provides the pairing service,
+runtime/controller, terminal rendering, host controls, HTTP mounts and existing
+handoff helpers through closed exports. It is not an app extension or a
+separately published npm package.
 
 The core does not import app source or require an app checkout. Its npm artifact
 contains no web client, app source, app assets, or private credentials. The Mac,
