@@ -1,5 +1,5 @@
 /** Repeatable source census, not confinement against arbitrary same-user code. */
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
 const OWNER = "packages/runtime/src/pairing-security/trust-owner.ts";
@@ -30,7 +30,8 @@ export function pairingTrustCensus(root: string) {
       inspect(file);
     }
   }
-  visit(join(root,"packages")); visit(join(root,"apps"));
+  visit(join(root,"packages"));
+  if (existsSync(join(root,"apps"))) visit(join(root,"apps"));
   return {schema:"scout.pairing-trust-census/v1", canonicalOwner: OWNER, directWriters:directWriters.sort(),
     adapterInstallers:adapterInstallers.sort(), managedAdopters:managedAdopters.sort(), ownerConsumers:ownerConsumers.sort()};
 }
