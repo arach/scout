@@ -1,1 +1,2 @@
-export * from "@openscout/runtime/pairing-security/identity";
+// Host implementation lives in the core pairing package.
+export * from "../../../../../../pairing/src/core/pairing/runtime/security/identity.ts";

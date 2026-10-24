@@ -1,0 +1,7 @@
+{
+  "path": "packages/pairing/src/core/pairing/runtime/relay-runtime.test.ts",
+  "symbol": "spawnSync",
+  "category": "test",
+  "reason": "test subprocess fixture",
+  "owner": "pairing"
+}

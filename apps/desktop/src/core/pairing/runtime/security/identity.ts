@@ -1,2 +1,2 @@
-// Identity and trust persistence have one runtime owner, including retained callers.
-export * from "@openscout/runtime/pairing-security/identity";
+// Host implementation lives in the core pairing package.
+export * from "../../../../../../../packages/pairing/src/core/pairing/runtime/security/identity.ts";

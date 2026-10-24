@@ -9,7 +9,7 @@ import {
   type ScoutAttentionEvidence,
   type ScoutAttentionProject,
   type ScoutAttentionReport,
-} from "../../../../../apps/desktop/src/core/broker/attention.ts";
+} from "../../lib/core/broker/attention.ts";
 
 const HELP_FLAGS = new Set(["--help", "-h", "help"]);
 const DEFAULT_ATTENTION_SINCE_MS = 2 * 24 * 60 * 60 * 1000;

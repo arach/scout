@@ -319,7 +319,7 @@ function buildAndPackageScoutd() {
   return true;
 }
 
-const pairingRuntimeControllerEntry = resolve(repoRoot, "packages", "web", "server", "pairing-runtime-controller.ts");
+const pairingRuntimeControllerEntry = resolve(repoRoot, "packages", "pairing", "src", "pairing-runtime-controller.ts");
 const pairingRuntimeControllerResult = spawnSync(
   "bun",
   ["build", pairingRuntimeControllerEntry, "--target=bun", "--format=esm", "--outfile", pairingRuntimeControllerOutput, REFLECT_METADATA_BANNER],
