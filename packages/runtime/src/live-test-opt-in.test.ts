@@ -13,15 +13,53 @@ test("package unit selection includes nested tests and scenarios but excludes ev
   expect(pkg.scripts["test:live:codex-app-server"]).toContain("OPENSCOUT_LIVE_CODEX_APP_SERVER=1");
 });
 
+// Expand only exact root-script delegations. Package --cwd commands remain
+// leaves, so their package-owned scenario/live selection stays authoritative.
+function rootCommands(scripts: Record<string, string>, name: string, stack: string[] = []): string[] {
+  if (stack.includes(name)) throw Error(`root script cycle: ${[...stack, name].join(" -> ")}`);
+  if (typeof scripts[name] !== "string") throw Error(`missing root script: ${name}`);
+  return scripts[name].split(" && ").flatMap((part) => {
+    const delegate = /^bun run ([\w:-]+)$/.exec(part);
+    return delegate ? rootCommands(scripts, delegate[1]!, [...stack, name]) : [part];
+  });
+}
+
+function assertRuntimeDelegation(scripts: Record<string, string>, workflow: any) {
+  const command = "bun run --cwd packages/runtime test";
+  const runtimeTests = (commands: string[]) => commands.filter((part) => /^bun run --cwd packages\/runtime test(?:\b|:)/.test(part));
+  expect(runtimeTests(rootCommands(scripts, "test:unit:source"))).toEqual([command]);
+  const steps = workflow.jobs.checks.steps.filter((step: any) => step.name === "Unit tests");
+  expect(steps).toHaveLength(1);
+  // The selected branch, not the legacy fallback or another job, must invoke
+  // the exact core script that is also a member of the local full chain.
+  const selected = steps[0].run.split("\n").map((line: string) => line.trim());
+  expect(selected.filter((line: string) => /^bun run [\w:-]+$/.test(line))).toEqual(["bun run test:unit:source:core"]);
+  expect(scripts["test:unit:source"].split(" && ")).toContain("bun run test:unit:source:core");
+  expect(runtimeTests(rootCommands(scripts, "test:unit:source:core"))).toEqual([command]);
+  expect(selected.filter((line: string) => line === command)).toHaveLength(1); // legacy fallback
+  expect(steps[0].run).not.toContain("--path-ignore-patterns='**/scenario-suite.test.ts'");
+}
+
 test("root and hosted CI delegate runtime selection to the scenario-inclusive package script", () => {
   const root = join(runtime, "..", "..");
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  const workflow = Bun.YAML.parse(readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8"));
+  assertRuntimeDelegation(pkg.scripts, workflow);
+});
+
+test("delegation guard rejects duplicates, wrong commands, substring matches and broken chains", () => {
+  const root = join(runtime, "..", "..");
+  const scripts = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts;
+  const workflow: any = Bun.YAML.parse(readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8"));
   const command = "bun run --cwd packages/runtime test";
-  expect(pkg.scripts["test:unit:source"].split(" && ").filter((part: string) => part.includes("packages/runtime"))).toEqual([command]);
-  const workflow = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8");
-  expect(workflow).toContain("            bun run test:unit:source");
-  expect(workflow.split("\n").filter((line: string) => line.trim() === command)).toHaveLength(1);
-  expect(workflow).not.toContain("--path-ignore-patterns='**/scenario-suite.test.ts'");
+  for (const replacement of [command + " && " + command, command + ":unit", "bun run missing-script", "bun run test:unit:source"]) {
+    expect(() => assertRuntimeDelegation({...scripts, "test:unit:source:core": replacement}, workflow)).toThrow();
+  }
+  for (const selected of ["bun run test:unit:source:owners", "prefix bun run test:unit:source:core", "bun run test:unit:source:core-extra"]) {
+    const changed = structuredClone(workflow);
+    changed.jobs.checks.steps.find((step: any) => step.name === "Unit tests").run = selected + "\n" + command;
+    expect(() => assertRuntimeDelegation(scripts, changed)).toThrow();
+  }
 });
 
 test("direct live files refuse credentials and target settings without exact opt-in", async () => {

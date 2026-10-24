@@ -59,9 +59,11 @@ spot; it is not a completed entry or a claim that its program is checked here.
 bun run test:remote-target-programs
 ```
 
-The root `test:unit:source` chain runs this named check before the package
-suites. Hosted CI already invokes that chain. A failing registry check stops
-the chain through `&&`; it does not require a separate workflow step.
+The root `test:unit:source` chain delegates to `test:unit:source:core`, which
+runs this named check before the package suites. Hosted CI runs that core
+partition in `checks`; `pairing-owners` runs the separate owners partition.
+A failing registry check stops the core chain through `&&`; it does not require
+a separate workflow step.
 
 The negative check pins only the two named source declarations. It fails if
 either changes without the registry digest, or if the entry disappears. It
