@@ -225,6 +225,28 @@
           "reason": "New child-only regression fixture forces GC during the legacy synchronous native-call negative control; production installation does not use it."
         }
       ]
+    },
+    {
+      "id": "pr-134-host-keep-awake-and-bridge-credential",
+      "sourceHead": "6c19d6c10c2e93192a5b7b4296bbf10531a55fb8",
+      "reason": "PR #134 adds exactly two node:child_process pairs: the process-owned macOS caffeinate hold and bounded argv-only bridge keychain lookup. The delta from 6c19d6c10c2e93192a5b7b4296bbf10531a55fb8 to d07bd390bc195042493359637c2d69b6fc2bf65a changes no other policy entry; nothing is retired or edited.",
+      "fromCount": 174,
+      "toCount": 176,
+      "retired": [],
+      "added": [
+        {
+          "path": "packages/runtime/src/host-keep-awake.ts",
+          "symbol": "node:child_process",
+          "policySha256": "06f74b7439802af40e8eba323dadfca13a8fb4d345fc310dd1b7fcd2e04583aa",
+          "reason": "PR #134 owns a fixed /usr/bin/caffeinate -i -w runtime-PID hold, released on runtime exit or explicit shutdown/grace expiry; argv-only spawning, no shell."
+        },
+        {
+          "path": "packages/runtime/src/mesh-bridge-credential.ts",
+          "symbol": "node:child_process",
+          "policySha256": "d8ea676e13063f4185084b8ce0448b01ed3a7fbf7c3ff4f1875ea0cbc5b2657e",
+          "reason": "PR #134 performs an argv-only local security keychain lookup with a five-second SIGKILL timeout and child-exit settlement; no shell. Credential validation and issuer binding do not change this policy."
+        }
+      ]
     }
   ]
 }
