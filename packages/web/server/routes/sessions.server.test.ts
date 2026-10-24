@@ -71,11 +71,13 @@ describe("createOpenScoutWebServer: sessions routes", () => {
       scoutbot: { enabled: true, brokerBaseUrl: "http://broker.test" },
     });
     try {
+      const brokerReadsBeforeLookup = stubs.loadScoutBrokerContextCalls;
       const response = await server.app.request(
         "http://localhost/api/session/dm.operator.scoutbot.default",
       );
 
       expect(response.status).toBe(200);
+      expect(stubs.loadScoutBrokerContextCalls).toBeGreaterThan(brokerReadsBeforeLookup);
       const session = await response.json() as { id: string };
       expect(session.id).not.toBe("dm.operator.scoutbot.default");
       expect(session.id.startsWith("chn-")).toBe(true);
