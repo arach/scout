@@ -3040,6 +3040,9 @@ function isLocalAgentRecordOnline(agentName: string, record: LocalAgentRecord): 
 // its first tmux session is visible. Coalesce those starts so they share one
 // `tmux new-session` call instead of racing to create the same named session.
 const localAgentOnlineFlights = new Map<string, Promise<LocalAgentRecord>>();
+// Refusal provenance belongs to one flight, not to a shared Error object.
+// This is not a cached admission decision and is never serialized.
+const localAgentOnlineRefusals = new WeakMap<Promise<LocalAgentRecord>, { refused: boolean; error: unknown }>();
 
 function localAgentOnlineFlightKey(agentName: string, record: LocalAgentRecord): string {
   return [agentName, record.transport, record.tmuxSession].join("\u0000");
@@ -4618,12 +4621,36 @@ async function ensureLocalAgentOnline(agentName: string, record: LocalAgentRecor
   const flightKey = localAgentOnlineFlightKey(agentName, normalizedRecord);
   const existingFlight = localAgentOnlineFlights.get(flightKey);
   if (existingFlight) {
-    const result = await existingFlight;
+    let result: LocalAgentRecord;
+    try {
+      result = await existingFlight;
+    } catch (error) {
+      const refusal = localAgentOnlineRefusals.get(existingFlight);
+      if (beforeWarmupEffect || !refusal?.refused || !Object.is(refusal.error, error)) {
+        throw error;
+      }
+      // Do not discard a newer flight another trusted joiner already started.
+      if (localAgentOnlineFlights.get(flightKey) === existingFlight) {
+        localAgentOnlineFlights.delete(flightKey);
+      }
+      return await ensureLocalAgentOnline(agentName, normalizedRecord); // trusted caller retries a foreign refusal
+    }
     admitSynchronousEffect(beforeWarmupEffect); // a joined flight does not preserve caller authority
     return result;
   }
 
-  const flight = ensureLocalAgentOnlineOnce(agentName, normalizedRecord, beforeWarmupEffect);
+  const refusal = { refused: false, error: undefined as unknown };
+  const beforeFlightEffect = beforeWarmupEffect ? () => {
+    try {
+      admitSynchronousEffect(beforeWarmupEffect);
+    } catch (error) {
+      refusal.refused = true;
+      refusal.error = error;
+      throw error;
+    }
+  } : undefined;
+  const flight = ensureLocalAgentOnlineOnce(agentName, normalizedRecord, beforeFlightEffect);
+  localAgentOnlineRefusals.set(flight, refusal);
   localAgentOnlineFlights.set(flightKey, flight);
   try {
     return await flight;
@@ -5919,7 +5946,7 @@ export async function loadRegisteredLocalAgentBindings(
       try {
         effectiveRecord = await ensureLocalAgentOnline(agentId, harnessRecord, options.beforeWarmupEffect); // registered warmup forwarding
       } catch (error) {
-        // A protected caller must observe refusal, not continue with an offline binding.
+        // A protected caller must observe refusal, not continue with a fallback binding.
         if (options.beforeWarmupEffect) throw error;
         console.error(`[openscout-runtime] failed to warm agent ${agentId}: ${error instanceof Error ? error.message : error}`);
         effectiveRecord = normalizeLocalAgentRecord(agentId, harnessRecord);

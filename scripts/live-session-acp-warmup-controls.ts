@@ -32,7 +32,7 @@ for(const flavor of ["web","desktop"]){
   {id:"startup-forward",key:"local",path:local,stage:"publication",anchor:"      beforeWarmupEffect: beforeConfigEffect, // startup warmup forwarding",replacement:"      // planted startup warmup omission"},
   {id:"binding-forward",key:"local",path:local,stage:"publication",anchor:"    beforeWarmupEffect: options.beforeWarmupEffect, // binding warmup forwarding",replacement:"    // planted binding warmup omission"},
   {id:"registered-forward",key:"local",path:local,stage:"publication",anchor:"ensureLocalAgentOnline(agentId, harnessRecord, options.beforeWarmupEffect)",replacement:"ensureLocalAgentOnline(agentId, harnessRecord)"},
-  {id:"flight-forward",key:"local",path:local,stage:"publication",anchor:"ensureLocalAgentOnlineOnce(agentName, normalizedRecord, beforeWarmupEffect)",replacement:"ensureLocalAgentOnlineOnce(agentName, normalizedRecord)"},
+  {id:"flight-forward",key:"local",path:local,stage:"publication",anchor:"ensureLocalAgentOnlineOnce(agentName, normalizedRecord, beforeFlightEffect)",replacement:"ensureLocalAgentOnlineOnce(agentName, normalizedRecord)"},
   {id:"lazy-publication-forward",key:"local",path:local,stage:"publication",anchor:"writeLocalAgentRegistry(registry, beforeWarmupEffect)",replacement:"writeLocalAgentRegistry(registry)"},
   {id:"registry-forward",key:"local",path:local,stage:"publication",anchor:"writeRelayAgentOverrides(nextOverrides, beforeEffect)",replacement:"writeRelayAgentOverrides(nextOverrides)"},
   {id:"refusal-swallowed",key:"local",path:local,stage:"directory",anchor:"        if (options.beforeWarmupEffect) throw error;",replacement:"        // planted swallowed authority refusal"},

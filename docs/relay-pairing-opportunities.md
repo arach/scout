@@ -279,6 +279,25 @@ can migrate automatically; ambiguous or unknown legacy ownership requires local
 review or explicit re-provisioning. The registry does not complete credential
 revocation or the private consuming-graph proof.
 
+### Staged revocation limits
+
+An operation a phone started before the revoke ACK can still complete its effects in:
+
+- process warmup/launch (Codex app-server, Claude stream-JSON, Pi RPC, tmux)
+- mobile post-startup effects (binding registration, peer-session opening, seed send)
+- broker sends/updates/delivery with routing and fallbacks
+- local-agent and Codex commands and ACP invocation/delivery
+- harness replies and live terminal/permission input
+- artifact/attachment/web handoff parsers
+
+PTY output rides its own terminal WebSocket path outside SecureTransport; mobile
+terminal provisioning installs SSH access that a pairing revoke does not remove;
+credentials are PR B.
+
+Later stages remove fenced entries from this list. They do not soften the
+remaining entries or add entries without a new review ruling. The final census
+stage removes this limit text after qualification of the complete surface.
+
 ### Resumed mobile agent configuration
 
 Both bridge families forward a trusted local admission callback from legacy
@@ -298,11 +317,15 @@ The hook also reaches lazy ACP warmup for `grok_acp`, `kimi_acp` and
 `devin_acp`. These branches publish a durable agent registry without starting
 an ACP process. Registry publication re-admits after its asynchronous reads,
 then re-admits the file after directory creation through the same configuration
-writer. A protected warmup refusal propagates instead of becoming an offline
+writer. A protected warmup refusal propagates instead of becoming a fallback
 binding. Callers without the hook retain the existing best-effort fallback.
 The callback belongs to the current call; it is not stored in a session or
 agent record. Joining an existing warmup flight does not transfer authority
-from its initiating caller or cancel that caller's work.
+from its initiating caller or cancel that caller's work. If that flight rejects
+with its initiating caller's original admission refusal, a trusted local joiner
+without a hook retries its own warmup through the same flight map. Concurrent
+trusted retry callers still coalesce. Ordinary warmup failures do not trigger
+this retry, and a protected joiner never drops its own hook.
 
 Process-launch warmup, broker binding, peer-session creation and seed delivery
 have separate owners and still require their own resumed-effect qualification.
