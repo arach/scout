@@ -70,9 +70,8 @@ Commands, from the repository root:
 
 ```sh
 bun test --isolate packages/runtime/src/knowledge.test.ts packages/runtime/src/knowledge
-bun test --isolate packages/web/server/routes/knowledge-basic-search.test.ts packages/web/server/routes/knowledge-child-path.test.ts
 bun run --cwd packages/runtime check
-bun run --cwd packages/web check
+bun run --cwd packages/runtime check
 ```
 
 For pinned Bun, prefix the commands with
@@ -93,3 +92,8 @@ Local evidence in the lane checkout:
   typechecks.
 
 These logs are local evidence, not published harness transcripts.
+
+The former web search-route/child-path tests belonged to the removed app tree.
+Run app search-route verification in the separate apps checkout. The retained
+CI records above are historical; core indexing-worker ownership is now
+`packages/runtime/src/knowledge-index-child.ts`, bundled by the CLI.
