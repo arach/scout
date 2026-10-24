@@ -2029,6 +2029,9 @@ function sendScoutReplyNotification(
 }
 
 const notificationLifetimes = new WeakMap<McpServer, AbortSignal>();
+// Active subscriptions only: terminal history remains in the broker. Retries
+// of the same canonical flight must not create more infinite polling tasks.
+const notificationFlights = new WeakMap<McpServer, Set<string>>();
 
 function scheduleScoutReplyNotification(input: {
   server: McpServer;
@@ -2040,7 +2043,17 @@ function scheduleScoutReplyNotification(input: {
     "status" | "flight" | "output" | "error"
   >;
 }): void {
-  const signal = notificationLifetimes.get(input.server);
+  const { server, deps, brokerUrl, context } = input;
+  // Do not retain the caller's full FlightRecord (metadata/output/result reply)
+  // while waiting. Current flight state is read back by its durable identifiers.
+  const flightId = input.flight.id;
+  const invocationId = input.flight.invocationId;
+  const signal = notificationLifetimes.get(server);
+  if (signal?.aborted) return;
+  const active = notificationFlights.get(server) ?? new Set<string>();
+  notificationFlights.set(server, active);
+  if (active.has(flightId)) return;
+  active.add(flightId);
   void (async () => {
     try {
       // A queued dispatch may not have materialized the flight yet; give it
@@ -2048,10 +2061,10 @@ function scheduleScoutReplyNotification(input: {
       let completedFlight: ScoutFlightRecord | undefined;
       for (let attempt = 0; ; attempt += 1) {
         try {
-          completedFlight = await input.deps.waitForFlight(
-            input.brokerUrl,
-            input.flight.id,
-            { signal, invocationId: input.flight.invocationId },
+          completedFlight = await deps.waitForFlight(
+            brokerUrl,
+            flightId,
+            { signal, invocationId },
           );
           break;
         } catch (error) {
@@ -2059,8 +2072,8 @@ function scheduleScoutReplyNotification(input: {
           await delay(2_000, undefined, { signal });
         }
       }
-      await sendScoutReplyNotification(input.server, {
-        ...input.context,
+      await sendScoutReplyNotification(server, {
+        ...context,
         status: "completed",
         flight: completedFlight,
         output: completedFlight.output ?? completedFlight.summary ?? null,
@@ -2068,13 +2081,17 @@ function scheduleScoutReplyNotification(input: {
       });
     } catch (error) {
       if (signal?.aborted) return;
-      await sendScoutReplyNotification(input.server, {
-        ...input.context,
+      await sendScoutReplyNotification(server, {
+        ...context,
         status: "failed",
         flight: null,
         output: null,
         error: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      // Failures, completion and disconnect all release ownership. No terminal
+      // IDs accumulate in a long-lived MCP process.
+      active.delete(flightId);
     }
   })().catch(() => {
     // The MCP client may have disconnected by the time the flight finishes.

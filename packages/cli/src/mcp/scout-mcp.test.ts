@@ -3907,3 +3907,66 @@ describe("explicit completion MCP contract", () => {
       parentCompletion: { flightId: "parent-flight", revision: 5 } });
   });
 });
+
+test("pending reply subscriptions coalesce retries by canonical flight and release terminal ownership", async () => {
+  const flight = { id: "retry-flight", invocationId: "retry-invocation", requesterId: "operator", targetAgentId: "worker", state: "running" as const };
+  let waits = 0;
+  let complete!: (flight: any) => void;
+  let terminal = false;
+  const { client } = await connectTestServer({
+    resolveSenderId: async () => "operator",
+    resolveBrokerUrl: () => "http://broker.test",
+    askAgentById: async () => ({ usedBroker: true, conversationId: "conversation", messageId: "message", flight }),
+    waitForFlight: async () => {
+      waits++;
+      if (terminal) return { ...flight, state: "completed", output: "late result" };
+      return new Promise(resolve => { complete = resolve; });
+    },
+  }, { OPENSCOUT_MCP_ENABLE_NOTIFICATIONS: "1" });
+  const replies: unknown[] = [];
+  client.setNotificationHandler(z.object({ method: z.literal("notifications/scout/reply"), params: z.any() }), note => { replies.push(note.params); });
+  const retry = () => client.callTool({ name: "invocations_ask", arguments: { body: "Retry the same accepted work", targetAgentId: "worker", replyMode: "notify" } });
+  for (let i = 0; i < 1000; i++) await retry();
+  expect(waits).toBe(1);
+  expect(replies).toHaveLength(0);
+  terminal = true;
+  complete({ ...flight, state: "completed", output: "late result" });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(replies).toHaveLength(1);
+  expect(replies[0]).toMatchObject({ flightId: flight.id, status: "completed", output: "late result" });
+  // Only active ownership is cached. A later terminal lookup can notify again;
+  // the client does not accumulate a permanent deduplication history.
+  await retry();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(waits).toBe(2);
+  expect(replies).toHaveLength(2);
+});
+
+test("reply coalescing is per MCP server and disconnect cancels only its owned wait", async () => {
+  const flight = { id: "shared-flight", invocationId: "shared-invocation", requesterId: "operator", targetAgentId: "worker", state: "running" as const };
+  const signals: AbortSignal[] = [];
+  let cancellations = 0;
+  const dependencies = {
+    resolveSenderId: async () => "operator",
+    resolveBrokerUrl: () => "http://broker.test",
+    askAgentById: async () => ({ usedBroker: true, conversationId: "conversation", messageId: "message", flight }),
+    waitForFlight: async (_url: string, _id: string, options?: { signal?: AbortSignal }) => {
+      const signal = options!.signal!;
+      signals.push(signal);
+      return new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => { cancellations++; reject(signal.reason); }, { once: true });
+      });
+    },
+  };
+  const first = await connectTestServer(dependencies, { OPENSCOUT_MCP_ENABLE_NOTIFICATIONS: "1" });
+  const second = await connectTestServer(dependencies, { OPENSCOUT_MCP_ENABLE_NOTIFICATIONS: "1" });
+  for (let i = 0; i < 10; i++) {
+    for (const { client } of [first, second]) await client.callTool({ name: "invocations_ask", arguments: { body: "still pending", targetAgentId: "worker", replyMode: "notify" } });
+  }
+  expect(signals).toHaveLength(2);
+  await first.client.close();
+  expect(cancellations).toBe(1);
+  expect(signals.map(signal => signal.aborted)).toEqual([true, false]);
+  await second.client.close();
+  expect(cancellations).toBe(2);
+});

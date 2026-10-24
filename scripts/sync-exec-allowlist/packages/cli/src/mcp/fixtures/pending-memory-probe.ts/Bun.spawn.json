@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/mcp/fixtures/pending-memory-probe.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "owned MCP test child reads disk capacity and its own vmmap footprint; never a live server",
+  "owner": "cli-tests"
+}
