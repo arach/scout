@@ -1,3 +1,4 @@
+import { WatchFrameAccumulator, WatchReferenceCache } from "./watch-retention.ts";
 import { assertLocalAttachmentBroker, postOperatorAttachment } from "../../../cli/notify-attachment-runtime.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import { resolveScoutMachines } from "../mesh/machine-selector.ts";
@@ -5086,7 +5087,7 @@ export async function loadScoutActivityItems(
 export async function watchScoutMessages(
   options: ScoutWatchOptions,
 ): Promise<void> {
-  const broker = await requireScoutBrokerContext();
+  const baseUrl = resolveScoutBrokerUrl();
   const conversationId = options.conversationId ?? (
     options.allConversations ? undefined : scoutConversationIdForChannel(options.channel)
   );
@@ -5094,7 +5095,11 @@ export async function watchScoutMessages(
     throw new Error(`Channel "${options.channel?.trim() || "shared"}" does not have a chat yet.`);
   }
   const controller = new AbortController();
-  const abort = () => controller.abort();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const abort = () => {
+    controller.abort();
+    void reader?.cancel().catch(() => {});
+  };
 
   if (options.signal) {
     if (options.signal.aborted) controller.abort();
@@ -5102,8 +5107,9 @@ export async function watchScoutMessages(
   }
 
   try {
+    controller.signal.throwIfAborted();
     const response = await fetch(
-      new URL(scoutBrokerPaths.v1.eventsStream, broker.baseUrl),
+      new URL(scoutBrokerPaths.v1.eventsStream, baseUrl),
       {
         headers: { accept: "text/event-stream" },
         signal: controller.signal,
@@ -5114,29 +5120,50 @@ export async function watchScoutMessages(
         `${scoutBrokerPaths.v1.eventsStream} returned ${response.status}`,
       );
     }
-    const reader = response.body.getReader();
+    reader = response.body.getReader();
+    controller.signal.throwIfAborted();
     const decoder = new TextDecoder();
-    let buffer = "";
-    const messagesById = new Map(
-      Object.values(broker.snapshot.messages ?? {}).map((message) => [
-        message.id,
-        message,
-      ]),
-    );
-    const invocationsById = new Map(
-      Object.values(broker.snapshot.invocations ?? {}).map((invocation) => [
-        invocation.id,
-        invocation,
-      ]),
-    );
-
-    const clientMessageIdFor = (
-      message: ScoutBrokerMessageRecord | undefined,
-    ): string | null => {
-      const raw = message?.metadata?.clientMessageId;
-      return typeof raw === "string" && raw.trim().length > 0
-        ? raw.trim()
-        : null;
+    const frames = new WatchFrameAccumulator();
+    type MessageReference = { id: string; conversationId: string; clientMessageId: string | null };
+    type InvocationReference = Pick<InvocationRequest, "id" | "conversationId" | "messageId" | "targetAgentId" | "ensureAwake">;
+    const messagesById = new WatchReferenceCache<MessageReference>();
+    const invocationsById = new WatchReferenceCache<InvocationReference>();
+    const messageReference = (message: ScoutBrokerMessageRecord): MessageReference => ({
+      id: message.id, conversationId: message.conversationId,
+      clientMessageId: typeof message.metadata?.clientMessageId === "string"
+        ? message.metadata.clientMessageId.trim() || null : null,
+    });
+    const invocationReference = (invocation: InvocationRequest): InvocationReference => ({
+      id: invocation.id, conversationId: invocation.conversationId, messageId: invocation.messageId,
+      targetAgentId: invocation.targetAgentId, ensureAwake: invocation.ensureAwake,
+    });
+    const recover = async <T>(read: () => Promise<T>): Promise<T | undefined> => {
+      try { return await read(); } catch {
+        controller.signal.throwIfAborted();
+        return undefined;
+      }
+    };
+    const findMessage = async (id: string | undefined): Promise<MessageReference | undefined> => {
+      if (!id) return undefined;
+      const cached = messagesById.get(id);
+      if (cached) return cached;
+      // Exact durable reads survive both local cache and runtime hot-set eviction.
+      const stored = await recover(() => brokerReadJson<{ record: ScoutBrokerMessageRecord }>(
+        baseUrl, `/v1/history/records/message/${encodeURIComponent(id)}`, controller.signal,
+      ));
+      if (!stored?.record) return undefined;
+      const reference = messageReference(stored.record);
+      messagesById.set(reference);
+      return reference;
+    };
+    const findInvocation = async (id: string): Promise<InvocationReference | undefined> => {
+      const cached = invocationsById.get(id);
+      if (cached) return cached;
+      const stored = await recover(() => loadScoutInvocationSnapshot(baseUrl, id, controller.signal));
+      if (!stored?.invocation) return undefined;
+      const reference = invocationReference(stored.invocation);
+      invocationsById.set(reference);
+      return reference;
     };
 
     const lifecycleStateForFlight = (
@@ -5159,19 +5186,6 @@ export async function watchScoutMessages(
           return "cancelled";
         default:
           return null;
-      }
-    };
-
-    const maybeRefreshMaps = async () => {
-      const latest = await loadScoutBrokerContext().catch(() => null);
-      if (!latest) return;
-      for (const message of Object.values(latest.snapshot.messages ?? {})) {
-        messagesById.set(message.id, message);
-      }
-      for (const invocation of Object.values(
-        latest.snapshot.invocations ?? {},
-      )) {
-        invocationsById.set(invocation.id, invocation);
       }
     };
 
@@ -5205,7 +5219,7 @@ export async function watchScoutMessages(
           event as Extract<ControlEvent, { kind: "message.posted" }>
         ).payload?.message as ScoutBrokerMessageRecord | undefined;
         if (!message) return;
-        messagesById.set(message.id, message);
+        if (options.onLifecycle) messagesById.set(messageReference(message));
         if (conversationId && message.conversationId !== conversationId) return;
         options.onMessage(message);
         return;
@@ -5218,14 +5232,12 @@ export async function watchScoutMessages(
           event as Extract<ControlEvent, { kind: "invocation.requested" }>
         ).payload?.invocation;
         if (!invocation?.conversationId) return;
-        invocationsById.set(invocation.id, invocation);
-        const message = invocation.messageId
-          ? messagesById.get(invocation.messageId)
-          : undefined;
+        invocationsById.set(invocationReference(invocation));
+        const message = await findMessage(invocation.messageId);
         emitLifecycle({
           conversationId: invocation.conversationId,
           messageId: invocation.messageId ?? null,
-          clientMessageId: clientMessageIdFor(message),
+          clientMessageId: message?.clientMessageId ?? null,
           invocationId: invocation.id,
           targetAgentId: invocation.targetAgentId,
           state: invocation.ensureAwake ? "dispatching" : "queued",
@@ -5238,19 +5250,13 @@ export async function watchScoutMessages(
           event as Extract<ControlEvent, { kind: "flight.updated" }>
         ).payload?.flight;
         if (!flight) return;
-        let invocation = invocationsById.get(flight.invocationId);
-        if (!invocation) {
-          await maybeRefreshMaps();
-          invocation = invocationsById.get(flight.invocationId);
-        }
+        const invocation = await findInvocation(flight.invocationId);
         if (!invocation?.conversationId) return;
-        const message = invocation.messageId
-          ? messagesById.get(invocation.messageId)
-          : undefined;
+        const message = await findMessage(invocation.messageId);
         emitLifecycle({
           conversationId: invocation.conversationId,
           messageId: invocation.messageId ?? null,
-          clientMessageId: clientMessageIdFor(message),
+          clientMessageId: message?.clientMessageId ?? null,
           invocationId: invocation.id,
           flightId: flight.id,
           targetAgentId: flight.targetAgentId,
@@ -5271,22 +5277,15 @@ export async function watchScoutMessages(
           delivery.status !== "acknowledged" &&
           delivery.status !== "running"
         ) return;
-        let invocation = delivery.invocationId
-          ? invocationsById.get(delivery.invocationId)
-          : undefined;
-        if (delivery.invocationId && !invocation) {
-          await maybeRefreshMaps();
-          invocation = invocationsById.get(delivery.invocationId);
-        }
-        const message = delivery.messageId
-          ? messagesById.get(delivery.messageId)
-          : undefined;
+        const invocation = delivery.invocationId
+          ? await findInvocation(delivery.invocationId) : undefined;
+        const message = await findMessage(delivery.messageId ?? invocation?.messageId);
         const lifecycleConversationId = invocation?.conversationId ?? message?.conversationId;
         if (!lifecycleConversationId) return;
         emitLifecycle({
           conversationId: lifecycleConversationId,
           messageId: delivery.messageId ?? invocation?.messageId ?? null,
-          clientMessageId: clientMessageIdFor(message),
+          clientMessageId: message?.clientMessageId ?? null,
           invocationId: delivery.invocationId ?? invocation?.id ?? null,
           flightId:
             typeof delivery.metadata?.flightId === "string"
@@ -5298,22 +5297,21 @@ export async function watchScoutMessages(
       }
     };
 
-    while (true) {
+    while (!controller.signal.aborted) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      while (true) {
-        const delimiterIndex = buffer.indexOf("\n\n");
-        if (delimiterIndex === -1) break;
-        const block = buffer.slice(0, delimiterIndex);
-        buffer = buffer.slice(delimiterIndex + 2);
+      for (const block of frames.push(decoder.decode(value, { stream: true }))) {
+        controller.signal.throwIfAborted();
         await handleBlock(block);
       }
     }
   } catch (error) {
     const isAbort = error instanceof Error && error.name === "AbortError";
-    if (!isAbort) throw error;
+    if (!isAbort && !controller.signal.aborted) throw error;
   } finally {
+    controller.abort();
+    await reader?.cancel().catch(() => {});
+    reader?.releaseLock();
     if (options.signal) {
       options.signal.removeEventListener("abort", abort);
     }
