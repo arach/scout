@@ -1,45 +1,26 @@
-# Packages
+# Core packages
 
-This directory contains OpenScout's shared TypeScript packages. The apps use
-these packages to speak one broker/runtime/protocol model instead of each host
-surface inventing its own state shape.
+These packages implement Scout's host core. Apps consume the core; the core
+never imports app source. The web and native interfaces live with OpenScout apps.
 
-Packages are distribution and dependency boundaries, not only libraries. A
-package may expose an executable or bundled server. The long-term rule is that
-package code should not import from `apps/`; shared behavior moves down into
-`packages/runtime`, `packages/protocol`, `packages/cli`, or another package-owned
-boundary before an app consumes it. The current known exception is
-`packages/cli/src/main.ts`, which temporarily imports the old
-`packages/cli/src/cli/main.ts` command tree until the CLI implementation moves.
+| Path | Purpose |
+| --- | --- |
+| [protocol](./protocol) | Contracts, identities, routing metadata, and durable record types |
+| [runtime](./runtime) | Broker, persistence, service custody, mesh, and delivery |
+| [cli](./cli) | Public command and bundled distribution |
+| [pairing](./pairing) | Encrypted phone bridge, controller, host ingress, and phone RPC projections |
+| [agent-sessions](./agent-sessions) | Harness adapters and session extraction |
+| [session-trace](./session-trace) | Headless live-session trace model |
 
-## Directory Map
+From the repository root:
 
-| Path | Purpose | Start here |
-| --- | --- | --- |
-| [`protocol`](./protocol) | Shared contracts, identity grammar, route metadata, and durable record types | [`protocol/README.md`](./protocol/README.md) |
-| [`runtime`](./runtime) | Local broker, SQLite store, service management, discovery, mesh, and delivery planning | [`runtime/README.md`](./runtime/README.md) |
-| [`cli`](./cli) | Public `@openscout/scout` package and installed `scout` command | [`cli/README.md`](./cli/README.md) |
-| [`web`](./web) | Local web UI server/client bundled into the public CLI package | [`web/README.md`](./web/README.md) |
-| [`agent-sessions`](./agent-sessions) | Harness session adapters, event snapshots, and browser-safe trace boundary | [`agent-sessions/README.md`](./agent-sessions/README.md) |
-| [`session-trace`](./session-trace) | Framework-agnostic live session trace model | [`session-trace/README.md`](./session-trace/README.md) |
-| [`session-trace-react`](./session-trace-react) | React presentation layer for live session traces | [`session-trace-react/README.md`](./session-trace-react/README.md) |
-
-## Common Checks
-
-From the repo root:
-
-```bash
-npm --prefix packages/protocol run check
-npm --prefix packages/runtime run check
-npm --prefix packages/cli run build
-bun run --cwd packages/web build
+```sh
+bun run --cwd packages/protocol check
+bun run --cwd packages/runtime check
+bun run --cwd packages/pairing check
+bun run --cwd packages/cli build
+bun run check:core
 ```
 
-Use narrower package checks when working in a specific area.
-
-## Read Next
-
-- [`../README.md`](../README.md) for the repo overview
-- [`../apps/README.md`](../apps/README.md) for runnable app surfaces
-- [`../docs/architecture.md`](../docs/architecture.md) for the package boundaries
-- [`../docs/architecture.md`](../docs/architecture.md#the-data-model) before changing persistence
+See the [repository overview](../README.md) and
+[source boundary](../docs/public-source-boundary.md) for ownership and release status.

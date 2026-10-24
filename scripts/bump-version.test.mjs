@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
-const manifests = ["package.json", "apps/desktop/package.json", ...["agent-sessions", "cli", "protocol", "runtime", "session-trace", "session-trace-react", "web"].map(p => `packages/${p}/package.json`)];
+const manifests = ["package.json", ...["agent-sessions", "cli", "protocol", "runtime", "session-trace", "pairing"].map(p => `packages/${p}/package.json`)];
 
 test("dev bumps lockstep versions and workspace pack ranges, orders dev numerically and promotes to stable", () => {
   const fixture = mkdtempSync(join(tmpdir(), "scout-dev-bump."));

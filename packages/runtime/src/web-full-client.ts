@@ -1,7 +1,5 @@
-// Where `scout web install` puts the full web client, and how the web server
-// finds it. The npm package bundles the basic client (Home, DMs, Tail) beside
-// its server; when the full client for the same version is installed under
-// the support directory, packaged servers serve that instead.
+// OpenScout apps supply the web server and client. The core can resolve an
+// explicitly installed client for the exact running version; it bundles none.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -78,3 +76,6 @@ export function readBundledScoutVersion(distDirectory: string): string | null {
   }
   return null;
 }
+
+// Reuse the existing explicit app-entry selector; do not rediscover app trees.
+export { resolveLegacyWebEntry } from "./legacy-app-services.js";

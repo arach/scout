@@ -5,17 +5,12 @@
 // crisp half-block output (two pixel rows per terminal line).
 
 import { renderUnicodeCompact } from "uqr";
+import { SCOUT_PAIRING_WEB_LINK_BASE } from "../../../../shared/pairing-link.js";
 import type { QRPayload } from "../security/index.ts";
 
-// Mirrors pairingWebLink in packages/web/shared/pairing-link.js. The iOS app
-// claims this path as a universal link, so the phone's Camera opens Scout;
-// without the app the page offers the install. The app's own scanner reads
-// the same link. The payload rides in the fragment, which browsers never
-// send, so it stays out of server logs.
-const PAIRING_WEB_LINK_BASE = "https://openscout.app/pair";
-
+// The payload stays in the fragment, outside HTTP request logs.
 export function pairingWebLink(payload: QRPayload): string {
-  return `${PAIRING_WEB_LINK_BASE}#payload=${encodeURIComponent(JSON.stringify(payload))}`;
+  return `${SCOUT_PAIRING_WEB_LINK_BASE}#payload=${encodeURIComponent(JSON.stringify(payload))}`;
 }
 
 /**

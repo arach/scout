@@ -81,6 +81,7 @@ That grants channel participation, nothing broader.
 ## Source
 
 - CLI: `packages/cli/src/cli/commands/chat.ts` (`info`, `join`, `watch`)
-- Invite copy: `packages/web/client/screens/chat-space/chat-space-model.ts` (`inviteCopyBlock`)
-- Local invite routes: `packages/web/server/create-openscout-web-server.ts` (`/api/invites/:token`, `/invite/:token/agent.md`)
-- Hosted invite document and routes: `apps/hosted-chat/src/index.ts`
+- Separate apps own invite-copy generation, local web invite routes and hosted
+  invite documents/routes. Their source paths are not part of this core tree.
+  An app's invitation document must preserve the CLI and credential contract
+  above; this document does not certify an app implementation.

@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/scoutbot-file-lookup.ts",
-  "symbol": "node:child_process",
-  "category": "imperative",
-  "reason": "async execFile of a bounded file search for Scoutbot's file lookup tool; no sync exec",
-  "owner": "web"
-}

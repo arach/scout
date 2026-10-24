@@ -38,6 +38,9 @@ been adopted. No live service, relay or enabled configuration was changed.
 
 Exact suite command (run once with each Bun):
 
+Current core verification paths are shown below. The dated counts and
+retained logs record the earlier tree; they are not a fresh run after the move.
+
 ```bash
 bun test \
   packages/runtime/src/mesh-bridge-supervisor.test.ts \
@@ -46,8 +49,8 @@ bun test \
   packages/runtime/src/mesh-bridge-preflight.test.ts \
   packages/runtime/src/mesh-bridge-management.test.ts \
   packages/runtime/src/room-listening-supervisor.test.ts \
-  apps/desktop/src/cli/extensions.test.ts \
-  apps/desktop/src/cli/extension-install.test.ts
+  packages/cli/src/cli/extensions.test.ts \
+  packages/cli/src/cli/extension-install.test.ts
 ```
 
 For 1.3.13, prepend

@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/routes/knowledge.ts",
-  "symbol": "Bun.spawn",
-  "category": "process-lifecycle",
-  "reason": "owns the isolated session knowledge index child lifecycle so heavy indexing cannot block the web server event loop",
-  "owner": "web"
-}

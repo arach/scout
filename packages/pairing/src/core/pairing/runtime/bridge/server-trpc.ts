@@ -1,3 +1,8 @@
+import { timingSafeEqual } from "node:crypto";
+import { localConfigHome, resolveWebAuthToken } from "@openscout/runtime/local-config";
+import { mountPairingRoutes } from "../../../../routes/pairing.ts";
+import { createPendingPairRequestStore, pairRequestStatePath, type PendingPairRequestStore } from "../../../../pairing-pair-requests.ts";
+import { isSameMacScoutRequest } from "../../../../pairing-request-trust.ts";
 import type { PairingOpportunityControlAction, PairingRequestBinding } from "@openscout/runtime/pairing-local-socket";
 import { watchSharedScoutMessages } from "./broker-message-fanout.ts";
 // Bridge server — Hono + tRPC edition.
@@ -6,8 +11,8 @@ import { watchSharedScoutMessages } from "./broker-message-fanout.ts";
 // same signature as `startBridgeServer` so runtime.ts can swap between them.
 //
 // Architecture:
-//   - Hono handles HTTP (health, future REST endpoints)
-//   - @hono/trpc-server serves tRPC queries/mutations over HTTP
+//   - Hono handles health and host pairing HTTP ingress only
+//   - Bridge tRPC queries, mutations, and subscriptions remain Noise-only
 //   - WebSocket connections are upgraded manually and go through the same
 //     Noise Protocol handshake as the original server.  Once the secure
 //     channel is established, decrypted messages are parsed as tRPC wire
@@ -241,6 +246,33 @@ export function startBridgeServerTRPC(options: {
   // -------------------------------------------------------------------------
   // Hono app — HTTP surface
   // -------------------------------------------------------------------------
+
+  // The existing bridge listener also owns host pairing ingress. It serves no
+  // browser client and never exposes the bridge tRPC router over plaintext HTTP.
+  const requestPeers = new WeakMap<Request, string>();
+  let pairingIngress: Hono | null = null;
+  let pairRequests: PendingPairRequestStore | null = null;
+  function hostPairingIngress(): Hono {
+    if (pairingIngress) return pairingIngress;
+    const ingress = new Hono();
+    ingress.use("/api/*", async (c, next) => {
+      const supplied = Buffer.from(c.req.header("authorization") ?? "");
+      const expected = Buffer.from(`Bearer ${resolveWebAuthToken()}`);
+      if (!isSameMacScoutRequest(c.req.raw, requestPeers.get(c.req.raw))
+        || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+        return c.json({ error: "Local pairing operator authentication required" }, 401);
+      }
+      return next();
+    });
+    pairRequests = createPendingPairRequestStore({ statePath: pairRequestStatePath(localConfigHome()) });
+    mountPairingRoutes(ingress, {
+      options: { webPort: port, resolvePeerAddress: c => requestPeers.get(c.req.raw) },
+      currentDirectory: resolveCurrentDirectory(), pendingPairRequests: pairRequests,
+      shellStateCache: { invalidate() {} },
+    });
+    pairingIngress = ingress;
+    return ingress;
+  }
 
   let connectionCount = 0;
   const app = new Hono();
@@ -683,7 +715,12 @@ export function startBridgeServerTRPC(options: {
         return undefined;
       }
 
-      // Delegate all HTTP to Hono.
+      const pathname = new URL(req.url).pathname;
+      if (options.pairingControl && (pathname === "/pair" || pathname.startsWith("/api/"))) {
+        const address = server.requestIP(req)?.address;
+        if (address) requestPeers.set(req, address);
+        return hostPairingIngress().fetch(req);
+      }
       return app.fetch(req);
     },
 
@@ -850,6 +887,7 @@ export function startBridgeServerTRPC(options: {
 
   return {
     stop() {
+      pairRequests?.dispose();
       server.stop(true);
     },
   };

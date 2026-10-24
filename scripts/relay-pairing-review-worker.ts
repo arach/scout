@@ -14,7 +14,7 @@ import { requestLocalPairingOpportunity } from "../packages/runtime/src/pairing-
 import { startRelay } from "../packages/runtime/src/relay-transport.ts";
 
 const flavor = process.argv[2]!, scenario = process.argv[3]!;
-const base = resolve(flavor === "web" ? "packages/web/server/core/pairing/runtime" : "apps/desktop/src/core/pairing/runtime");
+const base = resolve("packages/pairing/src/core/pairing/runtime");
 const { initTRPC } = await import(Bun.resolveSync("@trpc/server", base));
 const t = initTRPC.create();
 mock.module(resolve(base, "bridge/router.ts"), () => ({

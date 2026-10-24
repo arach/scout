@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/core/attention/herdr-continuation-host.test.ts",
-  "symbol": "Bun.spawn",
-  "category": "test",
-  "reason": "spawns a plain NODE_ENV=production script to prove injected continuation authority is ignored outside the test runner",
-  "owner": "web"
-}

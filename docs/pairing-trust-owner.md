@@ -1,9 +1,10 @@
 # Pairing trust owner contract
 
 The public runtime owns pairing trust persistence for one resolved pairing root.
-Runtime pairing, retained desktop pairing, reconnect membership checks and the web
-peer-delete route use this owner. A desktop identity module delegates to runtime;
-it has no independent trust writer. Phone pairing is not operator-decision
+The unified core host pairing, reconnect membership checks and host peer-delete
+route use this owner. `packages/pairing/src/core/pairing/runtime/security`
+re-exports runtime identity/security; it has no independent trust writer.
+Separately built apps must consume this authority rather than copy its writer. Phone pairing is not operator-decision
 entitlement. This mechanism introduces no host policy, input actuator, session
 registry, authorization endpoint or automatic adapter installation.
 
@@ -209,8 +210,7 @@ can complete an already committed cutover; they never initiate one.
 The completed-store engine and cutover ship together. **No upstream milestone
 may carry the engine without the cutover.** See the
 [cutover runbook](./pairing-capsule-cutover.md) for the one-time drain, actual
-320 MiB reservation, recovery and same-release verification for desktop, CLI and
-web runtime. The live-session registry is a separate follow-up. Storage cutover
+320 MiB reservation, recovery and compatible-artifact verification for every core and app store opener. The live-session registry is a separate follow-up. Storage cutover
 does not add transport close codes or credential behavior.
 
 ### Retained authority and logical identity
@@ -461,7 +461,7 @@ current advisory timestamps, unsafe-file replacement, old-binary timestamp
 merging, unmanaged adoption and managed refusal, ACK loss and publication
 interruption. Crash tests recover both unmanaged and managed publications;
 a two-process live-writer race proves a helper and later revoke survive the
-original writer resuming. Real runtime and desktop Noise handshakes also complete through
+original writer resuming. Real Noise handshakes through the unified core bridge also complete through
 injected advisory sync/rename failures. The suite instruments actual
 file/directory barrier calls. Its instrumentation must observe operations; no-op
 instrumentation fails. The negative controls use disposable mutated source

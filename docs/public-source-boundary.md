@@ -1,101 +1,53 @@
 # Public-source boundary
 
-Scout is the public infrastructure core of OpenScout. The destination is
-single-source ownership, not mirroring: public modules live here once, and the
-private product consumes exact released packages without keeping duplicate
-source. This repository should be useful, reviewable, and releasable on its own
-without pretending to contain every OpenScout product surface.
+Scout is the public core. It owns the protocol, runtime, harness adapters,
+session extraction, CLI, TUI, and host side of phone pairing. It has no web app.
 
-> **Migration status:** this document defines the target boundary. At the
-> proposal snapshot, public-core source still overlaps the private workspace and
-> public release ownership has not fully moved here. Statements below about one
-> canonical source, exact package consumption, and web composition are
-> invariants to complete and enforce—not claims that the cutover is finished.
+## Three layers
 
-## Temporary overlay
-
-Until public Scout is the canonical source, the private workspace may export an
-allowlisted snapshot onto this repository. That is a migration export, not a
-recurring two-repository merge and not proof that the cutover is finished. The
-inverse remains the destination: public modules become canonical here, then the
-private product consumes exact released packages.
-
-The current overlay copies a source dump of `packages/web`, including product
-UI that has not been split into the baseline control plane. Native-surface
-scripts (`build:native-surfaces`, `check:native-surfaces`) write into the
-private iOS app and are not part of the public supported check surface.
-
-## Target at a glance
-
-| Public `oscout/scout` | Private product |
+| Layer | Source ownership |
 | --- | --- |
-| Canonical source for protocol, runtime, harness adapters, CLI/daemon, and reusable primitives | Consumes exact released public package versions |
-| Complete baseline web server and operator control plane | Adds native apps, hosted services, advanced operations, and product-specific UI |
-| Trusted composition contracts and a standalone public build | Builds a private web distribution through those contracts |
-| Never imports or requires private code | Never copies public packages, mirrors `packages/web`, or becomes a source dependency of public Scout |
+| Core | Public `oscout/scout`: the code required on every host |
+| Apps | OpenScout apps: web, macOS, iOS, and Android interfaces at every account level |
+| Hosted services | OpenScout apps for now |
 
-## What belongs here
+Apps consume exact released core artifacts. The core never imports or requires
+an apps checkout. The React trace presentation layer belongs with apps; the
+headless session trace model remains in core. Private credentials, operational data, product artwork, and
+hosted-service implementation stay outside this repository.
 
-- the public `scout` CLI and package bundle;
-- the broker, runtime, shared protocol, and harness-session model;
-- the complete baseline web control plane, including its server, application
-  shell, ordinary operator workflows, and reusable UI primitives;
-- trusted web-composition contracts for routes, navigation, slots, namespaced
-  server routes, and capability providers;
-- portable native services required by the public runtime;
-- public integration contracts, documentation, tests, and release tooling;
-- the optional Omarchy popup and launcher in `integrations/omarchy`, the
-  Linux notification integration in `scripts/linux`, its
-  documentation, and the synthetic standalone usage study in
-  `examples/linux-usage`; these sources do not require the private Studio;
-- assets and community files needed to operate a healthy public project.
+## Host pairing
 
-Code in this repository must not require a checkout of the private companion
-workspace to install, build the public packages, run their focused tests, or
-understand their supported architecture.
+`packages/pairing` owns one encrypted bridge implementation, its runtime
+controller, the existing phone RPC projections, approval-request store,
+pairing HTTP route mount, and LAN beacon. Security primitives and the trust
+owner remain in `packages/runtime`.
 
-When the migration is complete, each module has one canonical home. A
-public-core change is made and reviewed here, released from here, and adopted by
-the private product through an exact dependency bump. There is no public-source
-export, mirrored subtree, recurring two-repository merge, or reverse dependency
-to keep synchronized.
+The CLI and controller use the same implementation. Pairing does not require a
+web client. The existing bridge listener mounts the host pairing routes, and
+the controller owns the LAN beacon. Operator HTTP routes require both a
+same-Mac request and the runtime bearer token. The unauthenticated `/pair`
+knock requests approval; it does not grant consent. Apps can reuse those route
+mounts. Core adds no second web application or plugin API.
 
-## Web layering
+A daemon restart does not grant pairing consent. Discovery does not publish a
+QR invitation. The legacy Herdr permission-answer adapter retains its existing
+version, claim, and audit guards; moving it does not activate a newer authority.
 
-The public web package is responsible for a complete baseline control plane,
-not a deliberately thin shell. A developer should be able to install Scout and
-complete the core local loop through useful setup and health, agents and
-sessions, conversations and send/ask, flights and work, activity, runtimes and
-capabilities, projects, mesh and pairing, and settings views.
+## Optional web app
 
-The target extension mechanism is trusted, build-time composition. The public
-package supplies the app shell, design tokens, components, broker client, and
-typed contracts for routes, navigation, slots, namespaced server routes, and
-capability providers. The private product compiles those exports with its own
-contributions into a separate distribution. React and other UI singletons
-resolve once in that composed build.
+The npm CLI contains no web server, browser client, app assets, or compatibility
+web bundle. A reused build directory is cleaned before packaging.
 
-That dependency runs in one direction: private code imports only documented
-public exports, while public code never imports private modules, assumes private
-routes exist, or relies on private assets. Missing private capabilities must not
-break the baseline app. Until the composition API and package release cutover
-land, documentation should describe them as the target rather than implying the
-private product already consumes them.
+Apps select their server through `OPENSCOUT_WEB_SERVER_ENTRY` or the existing
+instance-scoped app-service configuration. No source-tree or stale installed
+bundle is discovered implicitly. An explicitly installed client is selected only
+for the matching version. Without apps, web commands explain where the web app
+comes from rather than claiming to serve a basic fallback.
 
-## What stays outside
-
-- OpenScout native macOS and iOS application composition;
-- hosted account, relay, push, entitlement, and managed-service behavior;
-- advanced fleet, mission, repository, and worktree operations built on public
-  records;
-- product-specific web presentation, onboarding, and proprietary integrations;
-- credentials, signing material, operational data, and private release notes;
-- private experiments or integrations that have not become supported public
-  interfaces.
-
-Public documentation may describe the boundary and link to product surfaces,
-but it should not disclose private implementation details or imply that private
-features are available in the public package.
+There is no pairing add-on, extension-context cutover gate, or rollback window
+in this ownership decision. Release adoption and hosted CI remain explicit
+checkpoints, not claims made by a source move.
 
 ## Broker-owned working set
 
@@ -106,13 +58,13 @@ set instead: current routable agents and endpoints, active work, and a recent
 window of coordination records with the referenced identities needed to render
 it.
 
-The ordinary web context path already asks the broker for a 24-hour working
+The host phone context path already asks the broker for a 24-hour working
 set, coalesces concurrent reads, and keeps the result behind a short in-process
 TTL. An expired or invalidated cache is rehydrated from the broker. Conversation
 history outside that working set is loaded through its dedicated bounded APIs,
 not by growing the registry payload.
 
-This migration is not complete. Rich agent views and desktop context still have
+This migration is not complete. Some rich host projections still have
 full-snapshot reads, and the time-windowed projection is not yet protected by an
 explicit cardinality or byte ceiling. Those paths must move to scoped,
 paginated broker reads before this boundary can be considered enforced. A
@@ -140,132 +92,11 @@ something to fix by editing version strings alone. A private product may
 deliberately consume an older public-core revision, but that revision must be
 explicit and its source must remain canonical here.
 
-### The transition release
+## Publication status
 
-`0.2.89` moved canonical source and GitHub OIDC publication authority for
-`@openscout/scout` and `@openscout/protocol` to this repository, but published
-no npm artifacts. npm had accepted only the protocol artifact from the earlier
-`0.2.88` cutover. The first OIDC run published both `0.2.90` artifacts under an
-unpromoted staging tag, then exposed that OIDC does not authorize a later
-`npm dist-tag` transaction. Those versions are historical and unsupported.
-`0.2.91` is the first complete supported pair from the public authority. It does
-not claim that the complete component-package boundary is already finished.
-Supported publication of `@openscout/agent-sessions`, `@openscout/runtime`, and
-`@openscout/web` from this repository remains deferred until they have supported
-exports, standalone pack/install tests, and a zero-extension web-composition
-fixture. Historical registry artifacts are not the supported lockstep family.
-
-The first full pre-`1.0` component release is one exact five-package set:
-protocol, agent sessions, runtime, web, and Scout. Its manifests, packed
-first-party dependencies, public source tag, npm dist-tags, and distribution BOM
-must all resolve to one version. The private product can have an independent
-product version, but it consumes one complete public set without ranges or
-source paths.
-
-## Scout distributions
-
-A **Scout Distribution** is a reproducible product assembly: one exact public
-core release plus zero or more trusted build-time extensions. It is not a sixth
-npm package, a runtime plugin loader, or a source mirror.
-
-The first full five-package release—not the `0.2.91` transition release—will
-define the reference zero-extension Scout Distribution. `0.2.91` establishes
-two-package source and publication authority; it does not claim a resolved
-distribution BOM or private BOM-based consumption.
-
-A private product will extend the zero-extension baseline by immutable BOM
-digest, contribute product routes, navigation, semantic UI slots, namespaced
-server routes, and capability providers, and emit one flattened resolved BOM
-for diagnostics. It will not restate or copy the public package source.
-
-An eventual resolved BOM records source identity, registry integrity,
-provenance, composition-contract identity, and extensions:
-
-```jsonc
-// Illustrative v1alpha1 shape; field names are not yet normative.
-{
-  "apiVersion": "scout.openscout.dev/v1alpha1",
-  "kind": "ScoutDistribution",
-  "metadata": {
-    "id": "org.oscout.scout",
-    "version": "<distribution-version>"
-  },
-  "core": {
-    "version": "<core-version>",
-    "source": {
-      "repository": "https://github.com/oscout/scout",
-      "tag": "v<core-version>",
-      "commit": "<40-character-commit>"
-    },
-    "packages": [
-      {
-        "name": "@openscout/protocol",
-        "version": "<core-version>",
-        "integrity": "sha512-<registry-sri>",
-        "provenance": "<attestation-reference>"
-      },
-      {
-        "name": "@openscout/agent-sessions",
-        "version": "<core-version>",
-        "integrity": "sha512-<registry-sri>",
-        "provenance": "<attestation-reference>"
-      },
-      {
-        "name": "@openscout/runtime",
-        "version": "<core-version>",
-        "integrity": "sha512-<registry-sri>",
-        "provenance": "<attestation-reference>"
-      },
-      {
-        "name": "@openscout/web",
-        "version": "<core-version>",
-        "integrity": "sha512-<registry-sri>",
-        "provenance": "<attestation-reference>"
-      },
-      {
-        "name": "@openscout/scout",
-        "version": "<core-version>",
-        "integrity": "sha512-<registry-sri>",
-        "provenance": "<attestation-reference>"
-      }
-    ]
-  },
-  "composition": {
-    "contract": {
-      "package": "@openscout/web",
-      "export": "./composition",
-      "version": "<core-version>"
-    },
-    "extensions": []
-  },
-  "capabilities": {
-    "requires": [],
-    "declares": []
-  }
-}
-```
-
-The normative full-family BOM contains exactly the five public package names,
-all at the same pre-`1.0` version. A private overlay repeats only the public
-distribution id, version, BOM URL, and digest, then lists its own extension
-identities and digests. Live availability and authorization remain
-broker-owned; BOM capabilities describe build-time requirements and
-declarations only.
-
-The resolved BOM is created after registry publication and attached to the
-release with a signature or attestation. It cannot live inside a tarball whose
-own integrity it records.
-
-## Moving a surface across the boundary
-
-When code becomes public, move a coherent slice with its tests, documentation,
-license metadata, dependency declarations, and history or provenance notes.
-Then update the private consumer and remove its old copy. Remove private-only
-assumptions first. Review the moved diff for secrets, internal endpoints,
-customer data, signing details, and unsupported product claims before
-publishing it.
-
-When public code returns to a private surface, preserve compatibility for any
-published contract or document the breaking change. Move ownership rather than
-forking a second copy, and do not leave a public package pointing at source
-users can no longer inspect.
+The supported npm publish set remains protocol and CLI. The pairing package is
+an internal core workspace package bundled into the CLI. Its closed module
+exports and build support source-level consumers; a separate component-package
+publication must have its own exact artifact and pack/install qualification.
+This source split does not assert that private artifact adoption or a milestone
+release has completed.

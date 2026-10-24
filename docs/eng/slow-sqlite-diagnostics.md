@@ -1,6 +1,6 @@
 # Slow SQLite diagnostics
 
-The runtime SQLite adapter and the web server's shared control-plane read
+The runtime SQLite adapter and core pairing's shared read-only control-plane
 connection emit a structured `[scout-db]` warning for synchronous SQLite calls
 that take at least 100 ms. Set `OPENSCOUT_SLOW_DB_MS` before starting a process
 to change this threshold; `0` disables instrumentation. Invalid values use the
@@ -30,12 +30,12 @@ plan on a consistent snapshot to distinguish expensive reads from contention.
 This instrumentation changes no WAL, locking, busy timeout, durability, migration,
 or retention settings. It identifies slow operations; it does not itself repair them.
 
-## Bounded web reads
+## Bounded core pairing reads
 
-Web history ordering accepts both legacy epoch seconds and epoch milliseconds.
+Host history ordering accepts both legacy epoch seconds and epoch milliseconds.
 Its `CASE` expression must match an expression index; a raw `created_at` index
-cannot satisfy that order. The broker installs the web read indexes through the
-managed migration and the idempotent repair path. Web connections remain read
+cannot satisfy that order. The broker installs the host read indexes through the
+managed migration and the idempotent repair path. Host projection connections remain read
 only. The failed-delivery query selects the ordered partial index explicitly:
 otherwise SQLite can choose the status index and sort/join all old failures
 before applying the page limit.
@@ -46,9 +46,14 @@ the unused fleet activity feed, execution-envelope joins, and metadata payloads.
 Session-to-agent mapping is skipped when there is no pairing attention to join. The fleet ask query selects its bounded page
 before correlated activity/endpoint joins. Active-agent reads use the invocation
 state index rather than scanning completed invocation payloads. Query-plan and
-mixed-timestamp tests live in `packages/web/server/db-queries.test.ts`.
+mixed-timestamp tests live in `packages/pairing/src/db-queries.test.ts`.
 
-## Polling backoff and admission
+## App polling backoff and admission
+
+The following policy describes the separately supplied app's Observe and
+attention routes. Those routes are not shipped by the core. App builds must
+verify their own routing, cache and admission behavior.
+
 
 Observe and operator attention share each unfinished refresh across callers.
 The completed-result TTL starts when the refresh finishes: 900 ms for Observe,
@@ -72,7 +77,11 @@ SQLite projection worker keeps derived database work off the broker event loop;
 the worker entrypoint must ship beside the broker bundle. Never acknowledge work
 that has not reached its canonical durable journal.
 
-## Managed web recovery
+## Managed app web recovery
+
+The runtime applies this policy only to an explicitly configured app server.
+It contains no implicit source-tree or bundled web fallback.
+
 
 The broker probes only its own web child with an authenticated health request
 every ten seconds. One missed probe records `suspect` without emitting a warning
@@ -111,7 +120,7 @@ Transient `suspect`, startup, and recovery states expose unknown health rather
 than a definitive unhealthy result. Persistent unavailable and paused states
 remain unhealthy; consumers can inspect the recovery state for detail.
 
-Intentional voice-command long polls declare their expected wait to the API
+In separately supplied apps, intentional voice-command long polls declare their expected wait to the API
 middleware. A successful 25-second poll is retained in the timing buffer with
 `expectedWaitMs`, but does not produce a slow-request warning merely for waiting.
 Excess delay and failed responses still warn. Client query parameters alone

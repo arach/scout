@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/core/repo-identity.test.ts",
-  "symbol": "execFileSync",
-  "category": "test",
-  "reason": "git fixture setup",
-  "owner": "tests"
-}

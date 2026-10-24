@@ -75,7 +75,7 @@ export function expectedFenceInventory(value: unknown, baselineDigest: string): 
 }
 
 export function readFenceInventory(root: string): Map<string, FencePair> {
-  for (const directory of ["packages", "apps", "scripts/sync-exec-allowlist"]) {
+  for (const directory of ["packages", "scripts/sync-exec-allowlist"]) {
     if (!lstatSync(join(root, directory)).isDirectory()) refuse("scan root missing");
   }
   const actual = new Map<string, FencePair>();
