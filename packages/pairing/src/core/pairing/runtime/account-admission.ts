@@ -33,6 +33,8 @@ export interface AccountAdmissionOptions {
 }
 
 export function createAccountAdmission(options: AccountAdmissionOptions = {}): AdmitAccountDevice {
+  // One callback belongs to the controller process, not a single runtime.
+  // Runtime restarts reuse it; the lazy store has only an unref'd sweep timer.
   let store = options.store ?? null;
   const pollMs = options.pollMs ?? POLL_MS;
   const maxWaitMs = options.maxWaitMs ?? MAX_WAIT_MS;
