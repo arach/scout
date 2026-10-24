@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "./effect-admission.js";
 import { normalizeAgentSelectorSegment } from "@openscout/protocol";
 import type { AgentHarness, ScoutAgentCard, ScoutPermissionProfile } from "@openscout/protocol";
 import { basename } from "node:path";
@@ -97,6 +98,7 @@ export type ScoutAgentServiceDeps<TBroker extends ScoutAgentServiceBrokerContext
   loadScoutBrokerContext: () => Promise<TBroker | null>;
   registerScoutLocalAgentBinding: (input: {
     agentId: string;
+    beforeEffect?: () => void;
     broker?: TBroker | null;
   }) => Promise<ScoutLocalAgentBindingSyncResult | null>;
   retireScoutLocalAgentBinding?: (input: {
@@ -195,14 +197,27 @@ export function createScoutAgentService<TBroker extends ScoutAgentServiceBrokerC
       });
     },
 
-    // Configuration admission only; warmup and broker binding are separate effects.
+    // Per-call admission follows configuration and the post-startup binding.
     async upScoutAgent(input: UpScoutAgentInput, beforeConfigEffect?: () => void): Promise<ScoutAgentStatus> {
       const status = beforeConfigEffect
         ? await localAgents.startLocalAgent(input, beforeConfigEffect)
         : await localAgents.startLocalAgent(input);
       // Synchronously register the endpoint with the broker so the agent is
       // immediately routable without waiting on the broker's background sync.
-      await deps.registerScoutLocalAgentBinding({ agentId: status.agentId }).catch(() => {});
+      admitSynchronousEffect(beforeConfigEffect); // binding after startup wait
+      let admissionRefused = false;
+      const beforeBindingEffect = beforeConfigEffect ? () => {
+        try { admitSynchronousEffect(beforeConfigEffect); }
+        catch (error) { admissionRefused = true; throw error; }
+      } : undefined;
+      await deps.registerScoutLocalAgentBinding({ agentId: status.agentId,
+        ...(beforeBindingEffect ? {beforeEffect: beforeBindingEffect} : {}),
+      }).catch((error) => {
+        // A negative result belongs to this call, even if a later callback
+        // would return normally. Ordinary live broker errors stay best-effort.
+        if (admissionRefused) throw error;
+        admitSynchronousEffect(beforeConfigEffect);
+      });
       return status;
     },
 

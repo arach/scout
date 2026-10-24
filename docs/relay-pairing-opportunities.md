@@ -284,7 +284,7 @@ revocation or the private consuming-graph proof.
 An operation a phone started before the revoke ACK can still complete its effects in:
 
 - process warmup/launch (Codex app-server, Claude stream-JSON, Pi RPC, tmux) reached through broker delivery routing or local-agent/Codex commands
-- mobile post-startup effects (binding registration, peer-session opening, seed send)
+- mobile post-startup effects (binding registration, peer-session opening, seed send) reached through broker sends/updates/delivery with routing and fallbacks or local-agent and Codex commands and ACP invocation/delivery
 - broker sends/updates/delivery with routing and fallbacks
 - local-agent and Codex commands and ACP invocation/delivery
 - harness replies and live terminal/permission input
@@ -397,3 +397,32 @@ SSH/PTY sessions, and does not revoke HTTP bearers. This is credential-record
 ownership, not per-device OS account or tmux isolation: shared SSH key material
 or an already-issued SSH session retains its existing authority. The standing
 revocation limits above and the later owner-family work remain unchanged.
+
+### Resumed mobile post-startup effects
+
+Both mobile session-creation surfaces carry their per-call admission callback
+through post-startup binding registration, peer-session opening and seed send.
+The shared agent controller also forwards the callback to its automatic binding
+registration. The broker helpers recheck at each actor, agent, endpoint, direct
+conversation and seed-delivery submission after asynchronous work. HTTP and
+Unix-socket requests use the existing final request guard. The in-process broker
+path checks immediately before handing the command to its canonical owner.
+No callback or positive admission result is serialized or retained as authority.
+
+A refusal from the shared controller's binding callback is not a best-effort
+broker error. It propagates unchanged, including an I/O-shaped refusal. Ordinary
+live broker failures retain their existing best-effort behavior. Once the broker
+accepts an effect, that effect is earlier work; a later revoke does not undo the
+accepted mutation or discard its receipt. The next submission requires a fresh
+admission.
+
+The remaining local-agent and broker producers can reach these same helpers
+without a paired callback. The narrowed limit line retains those producers.
+Tests witness their post-ACK binding records, direct conversation and seed
+delivery at fixture sinks, alongside the refused paired continuations. These
+traces are not native harness execution or cancellation guarantees. The remaining
+local-agent configuration and broker routing families keep their own limits.
+
+`bun run test:mobile-post-startup-fences` runs the isolated mobile/controller and
+in-process broker witnesses. It joins `test:unit:source:owners`; the full local
+source chain includes it through that partition.
