@@ -18,7 +18,7 @@ Code.
 ## Quickstart
 
 This path installs the public `scout` command, initializes its machine-local
-state, and routes one real request through the broker.
+state, and routes one real request through the runtime.
 
 ## Extensions
 

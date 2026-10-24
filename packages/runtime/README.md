@@ -22,11 +22,11 @@ Bun monorepo checkout, the package export map keeps the `bun` condition pointed
 at `src/` so local development can type-check without building `dist` first.
 Published Node/ESM consumers resolve `dist/`.
 
-## Transitional app supervision
+## Separate app supervision
 
-Web and Scoutbot source entries require explicit configuration. See the
-[durable entry contract](./SUPERVISION.md) for installer ordering, reload
-boundaries and the temporary installed-npm web compatibility exception.
+The core contains no web app. App service entries require explicit configuration.
+See the [durable entry contract](./SUPERVISION.md) for installer ordering and
+reload boundaries. Apps are clients of this runtime, not its source dependencies.
 
 ### Mesh bridge upgrade requirement
 
