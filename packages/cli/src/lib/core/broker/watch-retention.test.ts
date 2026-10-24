@@ -1,11 +1,35 @@
-import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { watchScoutMessages } from "./service.ts";
+import { resolveScoutBrokerUrl, watchScoutMessages } from "./service.ts";
+import { resolveBrokerSocketPathForBaseUrl } from "@openscout/runtime/broker-process-manager";
 import { WatchFrameAccumulator, WatchReferenceCache, WATCH_FRAME_CHARACTER_LIMIT, WATCH_REFERENCE_LIMIT } from "./watch-retention.ts";
 const originalFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = originalFetch; });
+let fixtureHome: string;
+let originalEnvironment: Record<string, string | undefined>;
+const ownsEnvironmentKey = (key: string) => key === "HOME" || key.startsWith("SCOUT_") || key.startsWith("OPENSCOUT_");
+beforeEach(() => {
+  originalEnvironment = Object.fromEntries(Object.entries(process.env).filter(([key]) => ownsEnvironmentKey(key)));
+  for (const key of Object.keys(process.env)) if (ownsEnvironmentKey(key)) delete process.env[key];
+  fixtureHome = mkdtempSync(join(tmpdir(), "scout-watch-test-"));
+  process.env.HOME = fixtureHome;
+  process.env.OPENSCOUT_HOME = join(fixtureHome, ".openscout");
+  process.env.OPENSCOUT_BROKER_INTERNAL_URL = "http://watch-retention.test";
+  process.env.OPENSCOUT_BROKER_URL = "http://watch-retention.test";
+  process.env.OPENSCOUT_BROKER_SOCKET_PATH = join(fixtureHome, "absent.sock");
+  // Unix transport checks existence before connecting. Its only fallback is the
+  // fetch stub each test owns, never the developer's broker URL or live socket.
+  const socket = resolveBrokerSocketPathForBaseUrl(resolveScoutBrokerUrl());
+  expect(socket).toBe(join(fixtureHome, "absent.sock"));
+  expect(existsSync(socket!)).toBe(false);
+});
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  for (const key of Object.keys(process.env)) if (ownsEnvironmentKey(key)) delete process.env[key];
+  Object.assign(process.env, originalEnvironment);
+  rmSync(fixtureHome, { recursive: true, force: true });
+});
 const frame = (kind: string, key: string, value: unknown) =>
   new TextEncoder().encode(`event: ${kind}\ndata: ${JSON.stringify({ kind, payload: { [key]: value } })}\n\n`);
 const message = (id: string) => ({ id, conversationId: "conversation", body: "payload", metadata: { clientMessageId: `client-${id}` } });
