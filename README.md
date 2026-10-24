@@ -200,9 +200,17 @@ submit commands through its APIs; they do not write its database or maintain a
 competing registry. Harness transcripts remain observed source material, not
 imported Scout conversation history.
 
-The host side of phone pairing also belongs to the core. **Placeholder:** its
-package name and public exports must be filled in after the pairing move is
-merged. Use `scout pair` as the terminal entry point.
+The host side of phone pairing lives in `packages/pairing` as
+`@openscout/pairing`. Its closed exports are `.`, `/runtime`, `/controller`,
+`/terminal`, `/host`, `/http`, `/pair-requests`, `/lan-beacon`, `/web-handoff`
+and `/artifacts`. Bun resolves source; ESM and types resolve the package's
+compiled `dist`. Use `scout pair` as the terminal entry point.
+
+The package is internal to the core workspace and bundled into
+`@openscout/scout`; it is not a separately published npm package. A standalone
+controller build starts from `packages/pairing/src/pairing-runtime-controller.ts`,
+which applies instance isolation before launching the controller. Importing
+`/controller` supplies its function, not an automatically started process.
 
 ### Add a CLI extension
 

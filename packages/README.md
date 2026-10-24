@@ -10,8 +10,10 @@ core package code must not import from app source; shared behavior moves down in
 `packages/runtime`, `packages/protocol`, `packages/cli`, or another package-owned
 boundary before a client consumes it. The Mac, iOS, Android, and web apps are
 separate clients, not packages in this repository. The core ships no web app.
-The host side of phone pairing belongs to the core; its package name is a
-**placeholder** until the pairing move is merged.
+Host phone pairing lives in `pairing` (`@openscout/pairing`), an internal
+workspace package bundled into `@openscout/scout`, not a separately published
+npm dependency. Its closed export map supports Bun source and compiled
+ESM/declaration loading.
 
 ## Directory Map
 

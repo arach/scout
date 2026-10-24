@@ -64,10 +64,12 @@ exactly-once delivery.
 | Runtime | `packages/runtime` |
 | Shared protocol | `packages/protocol` |
 | Harness adapters and session observation | `packages/agent-sessions` |
+| Host phone pairing | `packages/pairing` |
 | Native services and TUI | `crates` |
 
-The host-pairing package name is a **placeholder** until the pairing move is
-merged. `scout pair` remains the terminal entry point.
+Host pairing lives in `packages/pairing` (`@openscout/pairing`), an internal
+workspace package bundled into the CLI. `scout pair` is its terminal entry
+point. It is not a separately published npm package.
 
 ## Product boundary
 

@@ -25,8 +25,8 @@ fork, and working-directory checks before making changes.
 | Protocol package | `@openscout/protocol` |
 
 The core has no web app. The Mac, iOS, Android, and web apps are separate
-clients. Host-side pairing stays in the core; its package path is a
-**placeholder** until the pairing move is merged.
+clients. Host-side pairing is `@openscout/pairing` in `packages/pairing`. It is
+an internal workspace package bundled into the CLI, not a separate npm install.
 
 ## Main Paths
 
