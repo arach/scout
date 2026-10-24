@@ -13,6 +13,7 @@ import {
 import {
   buildMeshRendezvousPresence,
   mobilePairingMeshEntrypointFromSnapshot,
+  readMobilePairingMeshEntrypoint,
   publishMeshRendezvousPresence,
   resolveMeshRendezvousPublishConfig,
   startMeshRendezvousPublisher,
@@ -235,6 +236,24 @@ describe("mesh rendezvous publisher", () => {
         expiresAt: 9_999,
       },
     }, 10_000)).toBeUndefined();
+  });
+
+  test("reads the selected pairing home and never falls back to another instance", () => {
+    const home = mkdtempSync(join(tmpdir(), "rendezvous-pairing-home-"));
+    testDirectories.add(home);
+    const production = join(home, ".scout", "pairing");
+    const selected = join(home, "isolated-pairing");
+    mkdirSync(production, { recursive: true });
+    mkdirSync(selected);
+    const snapshot = { pairing: { relay: "wss://relay.example.test", accountRoom: "selected-account",
+      publicKey: "a".repeat(64), expiresAt: Date.now() + 60_000 } };
+    writeFileSync(join(production, "runtime.json"), JSON.stringify(snapshot));
+    expect(readMobilePairingMeshEntrypoint({ HOME: home, OPENSCOUT_INSTANCE: "rendezvous-test" })).toBeUndefined();
+    expect(readMobilePairingMeshEntrypoint({ HOME: home, OPENSCOUT_PAIRING_HOME: selected })).toBeUndefined();
+    writeFileSync(join(selected, "runtime.json"), JSON.stringify(snapshot));
+    expect(readMobilePairingMeshEntrypoint({ HOME: home, OPENSCOUT_PAIRING_HOME: selected })?.room).toBe("selected-account");
+    expect(readMobilePairingMeshEntrypoint({ HOME: home, OPENSCOUT_PAIRING_HOME: selected,
+      OPENSCOUT_PAIRING_RUNTIME_STATE_PATH: join(home, "missing.json") })).toBeUndefined();
   });
 
   test("publishes only the host runtime's account room, never node-supplied invitations", async () => {

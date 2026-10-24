@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { RuntimeEnv } from "./portable-types.js";
 import {
@@ -13,7 +12,7 @@ import {
 import { isLoopbackHost } from "./broker-process-manager.js";
 import { meshBridgeCredentialSource } from "./mesh-bridge-credential.js";
 import { readOpenScoutNetworkSettingsSync } from "./open-scout-network.js";
-import { resolveOpenScoutSupportPaths } from "./support-paths.js";
+import { resolveOpenScoutPairingHomeForEnv, resolveOpenScoutSupportPaths } from "./support-paths.js";
 
 export interface MeshRendezvousPublishConfig {
   url: string;
@@ -237,8 +236,8 @@ export function readMobilePairingMeshEntrypoint(
   env: RuntimeEnv = process.env,
   now: number = Date.now(),
 ): MobilePairingMeshEntrypoint | undefined {
-  const runtimeStatePath = env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH
-    ?? join(env.HOME ?? homedir(), ".scout", "pairing", "runtime.json");
+  const runtimeStatePath = env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH?.trim()
+    || join(resolveOpenScoutPairingHomeForEnv(env), "runtime.json");
   if (!existsSync(runtimeStatePath)) {
     return undefined;
   }
