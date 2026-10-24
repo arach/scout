@@ -811,7 +811,7 @@ async function handleRPCInner(
         };
         return {
           id: req.id,
-          result: await sendScoutMobileMessage(p, resolveMobileCurrentDirectory(), rpcContext.deviceId),
+          result: await sendScoutMobileMessage(p, resolveMobileCurrentDirectory(), rpcContext.deviceId, () => { requireTransportContext(rpcContext); }),
         };
       }
 
@@ -905,6 +905,7 @@ async function handleRPCInner(
             },
             resolveMobileCurrentDirectory(),
             rpcContext.deviceId,
+            () => { requireTransportContext(rpcContext); },
           ),
         };
       }

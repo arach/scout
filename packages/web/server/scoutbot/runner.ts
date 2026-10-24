@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "@openscout/runtime/effect-admission";
 import { assistantClaimHeaders, startAssistantAnswerer } from "./answerer-claim.ts";
 import { handleDiagnosticCommand } from "./report.ts";
 import type {
@@ -89,6 +90,7 @@ export type PostScoutbotOperatorMessageInput = {
   bootstrap?: boolean;
   log?: ScoutbotRunnerLog;
   threadMap?: ScoutbotThreadMapStore;
+  beforeEffect?: () => void;
 };
 
 const defaultLog: ScoutbotRunnerLog = {
@@ -211,7 +213,7 @@ export async function postScoutbotOperatorMessage(
       baseUrl, thread: currentThread, body: input.body, attachments: input.attachments,
       source: input.source ?? "scout-web", clientMessageId: input.clientMessageId,
       replyToMessageId: input.replyToMessageId, referenceMessageIds: input.referenceMessageIds,
-      deviceId: input.deviceId, log,
+      deviceId: input.deviceId, log, beforeEffect: input.beforeEffect,
     });
   };
   if (!thread.model) return post();
@@ -301,11 +303,12 @@ async function postScoutbotThreadConversation(
   baseUrl: string,
   snapshot: ScoutBrokerSnapshot,
   conversation: ScoutBrokerConversationRecord,
+  beforeEffect?: () => void,
 ): Promise<void> {
   if (!snapshot.actors?.[SCOUTBOT_OPERATOR_ACTOR_ID]) {
-    await postJson(baseUrl, "/v1/actors", buildScoutbotOperatorActor());
+    await postJson(baseUrl, "/v1/actors", buildScoutbotOperatorActor(), {beforeEffect});
   }
-  await postJson(baseUrl, "/v1/conversations", conversation);
+  await postJson(baseUrl, "/v1/conversations", conversation, {beforeEffect});
 }
 
 const SCOUTBOT_OPERATOR_ACTOR_ID = "operator";
@@ -531,6 +534,7 @@ async function postOperatorThreadMessage(input: {
   referenceMessageIds?: string[];
   deviceId?: string;
   log: ScoutbotRunnerLog;
+  beforeEffect?: () => void;
 }): Promise<ScoutbotThreadMessageResult> {
   const ctx = await loadScoutBrokerContext(input.baseUrl);
   if (!ctx) {
@@ -539,7 +543,7 @@ async function postOperatorThreadMessage(input: {
   const conversation = ctx.snapshot.conversations[input.thread.conversationId]
     ?? buildScoutbotThreadConversation(input.thread, ctx.snapshot, ctx.node.id);
   if (conversation && !ctx.snapshot.conversations[input.thread.conversationId]) {
-    await postScoutbotThreadConversation(input.baseUrl, ctx.snapshot, conversation);
+    await postScoutbotThreadConversation(input.baseUrl, ctx.snapshot, conversation, input.beforeEffect);
   }
 
   const parsed = parseScoutbotDirectives(input.body);
@@ -580,7 +584,7 @@ async function postOperatorThreadMessage(input: {
         ...(transportSessionId ? { sessionId: transportSessionId } : {}),
       },
     },
-  });
+  }, {beforeEffect: input.beforeEffect});
 
   return {
     usedBroker: true,
@@ -931,19 +935,22 @@ async function postJson<T = { ok: true }>(
   baseUrl: string,
   path: string,
   body: unknown,
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; beforeEffect?: () => void } = {},
 ): Promise<T> {
   const controller = options.timeoutMs ? new AbortController() : null;
   const timer = controller && options.timeoutMs
     ? setTimeout(() => controller.abort(), options.timeoutMs)
     : null;
   try {
-    const res = await fetch(new URL(path, baseUrl), {
+    const url = new URL(path, baseUrl);
+    const init = {
       method: "POST",
       headers: { "content-type": "application/json", ...assistantClaimHeaders() },
       body: JSON.stringify(body),
       ...(controller ? { signal: controller.signal } : {}),
-    });
+    };
+    admitSynchronousEffect(options.beforeEffect); // final submission, after serialization
+    const res = await fetch(url, init);
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(`POST ${path} ${res.status}${text ? ` - ${text}` : ""}`);

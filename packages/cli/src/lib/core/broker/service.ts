@@ -2714,6 +2714,7 @@ async function ensureBrokerConversation(
   channel: string | undefined,
   senderId: string,
   targetParticipantIds: string[] = [],
+  beforeEffect?: () => void,
 ): Promise<ScoutBrokerConversationRecord> {
   const definition = conversationDefinition(
     snapshot,
@@ -2748,7 +2749,7 @@ async function ensureBrokerConversation(
     await brokerPostJson(
       baseUrl,
       scoutBrokerPaths.v1.conversations,
-      nextConversation,
+      nextConversation, {beforeEffect},
     );
     snapshot.conversations[nextConversation.id] = nextConversation;
     return nextConversation;
@@ -3283,6 +3284,7 @@ export async function sendScoutMessage(input: {
   wake?: boolean;
   operatorSignal?: ScoutDeliverRequest["operatorSignal"];
   aliasScope?: RouteAliasScope;
+  beforeEffect?: () => void;
 }): Promise<ScoutMessagePostResult> {
   const currentDirectory = input.currentDirectory ?? process.cwd();
   const source = input.source?.trim() || "scout-cli";
@@ -3322,6 +3324,8 @@ export async function sendScoutMessage(input: {
       contextResult.context.node.id,
       input.senderId,
       currentDirectory,
+      undefined,
+      input.beforeEffect,
     );
     const { target, renderedTarget, isBindingRef } = routeTargetForTargetLabel(
       requestedTargetLabel ?? "",
@@ -3357,7 +3361,7 @@ export async function sendScoutMessage(input: {
       },
       invocationMetadata: wakeInvocationMetadata,
       operatorSignal: input.operatorSignal,
-    });
+    }, input.beforeEffect);
     if (delivery.kind !== "delivery") {
       return {
         usedBroker: true,
@@ -3389,6 +3393,8 @@ export async function sendScoutMessage(input: {
     broker.node.id,
     input.senderId,
     currentDirectory,
+    undefined,
+    input.beforeEffect,
   );
 
   // A channel is a complete destination. Package names and other @ text in
@@ -3430,7 +3436,7 @@ export async function sendScoutMessage(input: {
       },
       invocationMetadata: wakeInvocationMetadata,
       operatorSignal: input.operatorSignal,
-    });
+    }, input.beforeEffect);
     if (delivery.kind !== "delivery") {
       return {
         usedBroker: true,
@@ -3459,7 +3465,7 @@ export async function sendScoutMessage(input: {
           broker.snapshot,
           broker.node.id,
           target.agentId,
-          currentDirectory,
+          currentDirectory, input.beforeEffect,
         ))
           ? target
           : null,
@@ -3513,7 +3519,7 @@ export async function sendScoutMessage(input: {
       broker.snapshot,
       broker.node.id,
       senderId,
-      validTargets[0],
+      validTargets[0], input.beforeEffect,
     );
     conversation = dm.conversation;
   } else {
@@ -3523,7 +3529,7 @@ export async function sendScoutMessage(input: {
       broker.node.id,
       input.channel,
       senderId,
-      validTargets,
+      validTargets, input.beforeEffect,
     );
   }
   const messageId = `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -3562,7 +3568,7 @@ export async function sendScoutMessage(input: {
       ...clientMessageMetadata(input.clientMessageId),
       returnAddress,
     },
-  });
+  }, {beforeEffect: input.beforeEffect});
 
   return {
     usedBroker: true,
@@ -3630,6 +3636,7 @@ export async function replyToScoutMessage(input: {
   createdAtMs?: number;
   currentDirectory?: string;
   source?: string;
+  beforeEffect?: () => void;
 }): Promise<ScoutReplyPostResult> {
   if (input.completion && !input.requestId?.trim()) {
     throw new Error("Explicit completion replies require a stable requestId; reuse it when retrying.");
@@ -3693,6 +3700,8 @@ export async function replyToScoutMessage(input: {
     broker.node.id,
     input.senderId,
     currentDirectory,
+    undefined,
+    input.beforeEffect,
   );
   const createdAtMs = input.createdAtMs ?? Date.now();
   const messageId = input.requestId
@@ -3731,7 +3740,7 @@ export async function replyToScoutMessage(input: {
       ...clientMessageMetadata(input.clientMessageId),
       returnAddress,
     },
-  } satisfies MessageRecord);
+  } satisfies MessageRecord, {beforeEffect: input.beforeEffect});
 
   if (input.completion && accepted?.message?.id !== messageId) {
     throw new Error("Broker did not return the canonical explicit reply receipt; retry with the same requestId.");

@@ -7,6 +7,12 @@
     "openscout-runtime": "./bin/openscout-runtime.mjs"
   },
   "exports": {
+    "./effect-admission": {
+      "bun": "./src/effect-admission.ts",
+      "types": "./dist/effect-admission.d.ts",
+      "import": "./dist/effect-admission.js",
+      "default": "./dist/effect-admission.js"
+    },
     ".": {
       "bun": "./src/index.ts",
       "types": "./dist/index.d.ts",

@@ -14,7 +14,7 @@ import {TransportDomain,requireTransportContext} from "../packages/runtime/src/p
 await fixtureRuntime.probe();
 const [flavor,protocol,harness,stage,configPath]=process.argv.slice(2);
 assert(["web","desktop"].includes(flavor!));assert(["legacy","trpc"].includes(protocol!));
-assert(["claude"].includes(harness!));assert(["warmup-directory","happy","broker-residue"].includes(stage!));
+assert(["claude"].includes(harness!));assert(["warmup-directory","happy","broker-residue","command-residue"].includes(stage!));
 const config=configPath?JSON.parse(readFileSync(configPath,"utf8")):{};
 const base=resolve(flavor==="web"?"packages/web/server/core":"apps/desktop/src/core"),home=process.env.HOME!;
 const project=join(home,"agent-project"),support=process.env.OPENSCOUT_SUPPORT_DIRECTORY!,registry=join(support,"relay-agents.json");mkdirSync(project);
@@ -39,11 +39,11 @@ mock.module("node:fs/promises",()=>({...fs,
   }
   return (read as any)(...args);
  },
- mkdir:async(...args:Parameters<typeof fs.mkdir>)=>{mutation("mkdir",args[0]);const value=await (mkdir as any)(...args);if((stage==="warmup-directory"||stage==="broker-residue")&&String(args[0])!==support&&registryWrites===1)await stop();return value;},
+ mkdir:async(...args:Parameters<typeof fs.mkdir>)=>{mutation("mkdir",args[0]);const value=await (mkdir as any)(...args);if((stage==="warmup-directory"||stage==="broker-residue"||stage==="command-residue")&&String(args[0])!==support&&registryWrites===1)await stop();return value;},
  writeFile:async(...args:Parameters<typeof fs.writeFile>)=>{mutation("write",args[0]);const value=await (write as any)(...args);if(String(args[0])===registry)registryWrites++;return value;},
 }));
 if(config.local){const m=await import(pathToFileURL(config.local).href);mock.module(pathToFileURL(resolve("packages/runtime/src/local-agents.ts")).href,()=>m);}
-if(stage==="broker-residue"){
+if(stage==="broker-residue"||stage==="command-residue"){
  fixtureRuntime.setHandler(async request=>{
   const path=new URL(request.url).pathname;
   if(path==="/health"){brokerEntered=true;await brokerPause;return Response.json({ok:true,nodeId:"fixture",meshId:"fixture"});}
@@ -59,7 +59,7 @@ const brokerPath=flavor==="web"?join(base,"broker/service.ts"):resolve("packages
 const broker=await import(pathToFileURL(brokerPath).href);
 mock.module(pathToFileURL(brokerPath).href,()=>({...broker,
  registerScoutLocalAgentBinding:async()=>{bindings++;return null;},
- ...(stage==="broker-residue"?{}:{loadScoutBrokerContext:async()=>{throw Error("warmup witness stops before subsequent broker effects");}}),
+ ...((stage==="broker-residue"||stage==="command-residue")?{}:{loadScoutBrokerContext:async()=>{throw Error("warmup witness stops before subsequent broker effects");}}),
 }));
 const {bridgeRouter}=await import(pathToFileURL(join(base,"pairing/runtime/bridge/router.ts")).href);
 const {handleRPC}=await import(pathToFileURL(join(base,"pairing/runtime/bridge/server.ts")).href);
@@ -72,7 +72,7 @@ try{
  const outcome=(protocol==="legacy"?handleRPC(bridge,{id:"acp-warmup",method:"mobile/session/create",params:input},ctx):bridgeRouter.createCaller(ctx).mobile.createSession(input)).catch((error:unknown)=>error);outcome.then(()=>{settled=true;});
  if(stage!=="happy"){
   const end=performance.now()+20_000;while(!entered){if(settled){const result:any=await outcome;throw Error("warmup settled before pause: "+(result?.message??result?.error?.message));}if(performance.now()>end)throw Error("warmup pause not reached");await Bun.sleep(2);}
-  if(stage==="broker-residue"){
+  if(stage==="broker-residue"||stage==="command-residue"){
    const {ensureLocalAgentBindingOnline,ensureLocalSessionEndpointOnline}=await import(pathToFileURL(resolve("packages/runtime/src/local-agents.ts")).href);
    const {BrokerLocalEndpointResolver}=await import(pathToFileURL(resolve("packages/runtime/src/broker-local-endpoint-resolver.ts")).href);
    const {readRelayAgentOverrides}=await import(pathToFileURL(resolve("packages/runtime/src/setup.ts")).href);
@@ -83,14 +83,24 @@ try{
     await resolver.resolveLocalEndpointForInvocation({...body,id:"fixture-invocation",conversationId:"fixture-conversation",requesterId:"operator",targetAgentId:ids[0],execution:{session:"new"},ensureAwake:true} as any);
    };
    const send={agentId:ids[0],body:"fixture residue only"};
-   brokerOutcome=Promise.resolve(protocol==="legacy"?handleRPC(bridge,{id:"broker-residue",method:"mobile/message/send",params:send},ctx):bridgeRouter.createCaller(ctx).mobile.sendMessage(send)).catch((error:unknown)=>error);
+   brokerOutcome=Promise.resolve(stage==="command-residue"?broker.sendScoutDirectMessage(send):protocol==="legacy"?handleRPC(bridge,{id:"broker-residue",method:"mobile/message/send",params:send},ctx):bridgeRouter.createCaller(ctx).mobile.sendMessage(send)).catch((error:unknown)=>error);
    let brokerSettled=false;brokerOutcome.then(()=>{brokerSettled=true;});
    const until=performance.now()+10_000;while(!brokerEntered){if(brokerSettled)throw Error("broker stopped before health: "+String(await brokerOutcome));if(performance.now()>until)throw Error("broker health pause not reached");await Bun.sleep(2);}
   }
   fixture.owner.mutate(fixture.owner.read().revision,crypto.randomUUID(),{type:"revoke",publicKey:key});assert.throws(()=>requireTransportContext(peer.ctx,true));revoked=true;release();
  }
  const result=await outcome;const directLateMutations=lateMutations;const directLaunches=launches;
- if(stage==="broker-residue"){brokerRelease();await brokerOutcome;assert.equal(brokerPosts,1);assert(brokerRoutedAfterAck);assert.equal(launches,1,"unfenced broker routing must reach fixture launch after ACK");assert(lateMutations>0,"broker residue must remain observable");}
+ if(stage==="broker-residue"||stage==="command-residue"){
+  brokerRelease();const brokerResult:any=await brokerOutcome;
+  if(stage==="command-residue"){
+   // Explicit host/local producer without a phone callback. This is not a
+   // complete phone-to-local-command routing qualification.
+   assert.equal(brokerPosts,1);assert(brokerRoutedAfterAck);assert.equal(launches,1,"remaining local broker producer must reach fixture launch after ACK");assert(lateMutations>0,"local producer residue must remain observable");
+  }else{
+   assert.equal(brokerPosts,0,"resumed phone broker submission must refuse after ACK");assert(!brokerRoutedAfterAck);assert.equal(launches,0);assert.equal(lateMutations,0);
+   assert.match(brokerResult?.message??brokerResult?.error?.message??"",/Unauthorized|live authenticated/i);
+  }
+ }
  const message=result instanceof Error?result.message:(result as any)?.error?.message;
  console.log("A2_WARMUP_BASELINE "+JSON.stringify({flavor,protocol,harness,stage,entered,revoked,directLateMutations,directLaunches,brokerPosts,brokerRoutedAfterAck,launchSubmissions:launches,nativeLaunches:0,lateMutations,bindings,registryWrites,readsAfterConfig,seen,message}));
  if(stage==="happy"){
