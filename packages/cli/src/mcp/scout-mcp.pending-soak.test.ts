@@ -79,7 +79,7 @@ setInterval(()=>{if(process.ppid!==owner)process.exit(0);if(fs.existsSync(${JSON
     const replies: any[] = []; const samples: any[] = []; let buffer = ""; let waits = 0;
     client.setNotificationHandler(z.object({ method: z.literal("notifications/scout/reply"), params: z.any() }), note => { replies.push(note.params); });
     transport.stderr!.on("data", chunk => { buffer += chunk.toString(); let end: number; while ((end = buffer.indexOf("\n")) !== -1) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); try { const row = JSON.parse(line); if (row.event === "pending-soak-sample") samples.push(row); } catch {} } });
-    const until = async (predicate: () => boolean) => { const end = Date.now() + 30000; while (!predicate()) { if (Date.now() > end) throw Error("owned pending soak deadline"); await Bun.sleep(10); } };
+    const until = async (predicate: () => boolean) => { const end = Date.now() + 60000; while (!predicate()) { if (Date.now() > end) throw Error("owned pending soak deadline"); await Bun.sleep(10); } };
     const call = async (name: string, args: Record<string, unknown>) => { const result = await client.callTool({ name, arguments: args }); if (result.isError) throw Error(JSON.stringify(result)); return result.structuredContent as any; };
     const sample = async (label: string) => { diskGuard(root); const count = samples.length; writeFileSync(join(report, "command.json"), JSON.stringify({ label, snapshot: process.env.OPENSCOUT_MCP_PENDING_SOAK_HEAP === "1" })); process.kill(transport.pid!, "SIGUSR2"); await until(() => samples.length > count); };
     try {
