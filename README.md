@@ -18,7 +18,7 @@ adopting any of those clients or services.
 
 ## Install and first run
 
-Local coordination requires [Bun](https://bun.sh) 1.4 or newer, Apple-silicon
+Local coordination requires [Bun 1.4.3 or newer](https://bun.sh), Apple-silicon
 macOS or Linux, and an installed, authenticated coding-agent harness for routed
 work. Install the package with npm; Bun runs the local runtime.
 
