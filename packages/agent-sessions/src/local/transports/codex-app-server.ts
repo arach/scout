@@ -1,3 +1,4 @@
+import { admitEffect, EffectAdmissionRefusal, rethrowEffectRefusal } from "../../runtime/effect-admission.js";
 import { appendBoundedLog } from "../bounded-log.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
@@ -848,9 +849,10 @@ async function readCodexSessionCatalog(runtimeDirectory: string): Promise<CodexS
   };
 }
 
-async function writeCodexSessionCatalog(runtimeDirectory: string, catalog: CodexSessionCatalog): Promise<void> {
+async function writeCodexSessionCatalog(runtimeDirectory: string, catalog: CodexSessionCatalog, beforeEffect?: () => void): Promise<void> {
+  admitEffect(beforeEffect);
   await mkdir(runtimeDirectory, { recursive: true });
-  await writeCodexMetadata(join(runtimeDirectory, SESSION_CATALOG_FILENAME), JSON.stringify(catalog, null, 2) + "\n");
+  await writeCodexMetadata(join(runtimeDirectory, SESSION_CATALOG_FILENAME), JSON.stringify(catalog, null, 2) + "\n", undefined, beforeEffect);
 }
 
 async function recordCodexSessionCatalog(
@@ -864,6 +866,7 @@ async function recordCodexSessionCatalog(
     approvalPolicy: CodexAppServerApprovalPolicy;
     sandbox: CodexAppServerSandboxMode;
   },
+  beforeEffect?: () => void,
 ): Promise<void> {
   const catalog = await readCodexSessionCatalog(runtimeDirectory);
   const now = Date.now();
@@ -893,10 +896,10 @@ async function recordCodexSessionCatalog(
   await writeCodexSessionCatalog(runtimeDirectory, {
     activeSessionId: threadId,
     sessions,
-  });
+  }, beforeEffect);
 }
 
-async function closeCodexSessionCatalog(runtimeDirectory: string, threadId: string | null): Promise<void> {
+async function closeCodexSessionCatalog(runtimeDirectory: string, threadId: string | null, beforeEffect?: () => void): Promise<void> {
   if (!threadId) {
     return;
   }
@@ -914,7 +917,7 @@ async function closeCodexSessionCatalog(runtimeDirectory: string, threadId: stri
   await writeCodexSessionCatalog(runtimeDirectory, {
     activeSessionId: null,
     sessions,
-  });
+  }, beforeEffect);
 }
 
 function isMissingCodexRolloutError(error: unknown): boolean {
@@ -1051,8 +1054,8 @@ export class CodexAppServerTransport {
     return Boolean(this.connection?.isOpen());
   }
 
-  async ensureOnline(): Promise<CodexAppServerThreadResult> {
-    await this.ensureStarted();
+  async ensureOnline(beforeEffect?: () => void): Promise<CodexAppServerThreadResult> {
+    await this.ensureStarted(beforeEffect);
     if (!this.threadId) {
       throw new Error(`Codex app-server session for ${this.options.agentName} has no active thread.`);
     }
@@ -1064,8 +1067,8 @@ export class CodexAppServerTransport {
     };
   }
 
-  async startTurn(prompt: string): Promise<TurnStartResult> {
-    await this.ensureStarted();
+  async startTurn(prompt: string, beforeEffect?: () => void): Promise<TurnStartResult> {
+    await this.ensureStarted(beforeEffect);
     if (!this.threadId) {
       throw new Error(`Codex app-server session for ${this.options.agentName} has no active thread.`);
     }
@@ -1075,8 +1078,8 @@ export class CodexAppServerTransport {
       cwd: this.options.cwd,
       input: this.textInput(prompt),
       ...this.attachedRuntimeParams({ includeEffort: true }),
-    });
-    await this.persistThreadId();
+    }, undefined, beforeEffect);
+    await this.persistThreadId({}, beforeEffect);
     return response;
   }
 
@@ -1116,8 +1119,9 @@ export class CodexAppServerTransport {
     });
   }
 
-  async shutdown(options: CodexAppServerShutdownOptions = {}): Promise<void> {
-    await this.leaveAttachedThread();
+  async shutdown(options: CodexAppServerShutdownOptions = {}, beforeEffect?: () => void): Promise<void> {
+    admitEffect(beforeEffect);
+    await this.leaveAttachedThread(beforeEffect);
     this.proactiveShutdown = {
       reason: options.reason
         ?? (options.resetThread ? "OpenScout reset the app-server session" : "OpenScout stopped the app-server session"),
@@ -1142,6 +1146,7 @@ export class CodexAppServerTransport {
     // Spawned: Scout owns the child and terminates it. Attached: close only
     // disconnects; the shared server keeps running.
     this.setPersistenceActive(false);
+    admitEffect(beforeEffect);
     await connection?.close();
     connection?.detach();
     await this.wireLog.flush();
@@ -1149,15 +1154,16 @@ export class CodexAppServerTransport {
 
 
     if (options.resetThread) {
-      await closeCodexSessionCatalog(this.options.runtimeDirectory, this.durableThreadId);
+      await closeCodexSessionCatalog(this.options.runtimeDirectory, this.durableThreadId, beforeEffect);
       this.threadId = null;
       this.confirmedThreadId = null; this.catalogedThreadId = null;
       this.threadPath = null;
       this.durableThreadId = null;
+      admitEffect(beforeEffect);
       await rm(this.threadIdPath, { force: true });
     }
 
-    await this.persistState();
+    await this.persistState(beforeEffect);
   }
 
   /**
@@ -1178,13 +1184,14 @@ export class CodexAppServerTransport {
   }
 
   /** Attached servers outlive Scout: unsubscribe so the server can unload the thread. */
-  private async leaveAttachedThread(): Promise<void> {
+  private async leaveAttachedThread(beforeEffect?: () => void): Promise<void> {
     const connection = this.connection;
     if (!connection || connection.mode !== "attached" || !connection.isOpen() || !this.threadId) return;
     const threadId = this.threadId;
     try {
-      await this.request("thread/unsubscribe", { threadId }, 2_000);
+      await this.request("thread/unsubscribe", { threadId }, 2_000, beforeEffect);
     } catch (error) {
+      if (error instanceof EffectAdmissionRefusal) throw error;
       this.writeLog(
         this.stderrLogPath,
         `[openscout] failed to unsubscribe attached Codex thread ${threadId}: ${errorMessage(error)}\n`,
@@ -1218,14 +1225,21 @@ export class CodexAppServerTransport {
     });
   }
 
-  private async ensureStarted(): Promise<void> {
+  private async ensureStarted(beforeEffect?: () => void): Promise<void> {
+    admitEffect(beforeEffect);
     this.options.signal?.throwIfAborted();
     if (this.isAlive() && this.threadId) {
       return;
     }
 
     if (this.starting) {
-      return this.starting;
+      try { await this.starting; }
+      catch (error) {
+        if (!(error instanceof EffectAdmissionRefusal)) throw error;
+        return this.ensureStarted(beforeEffect); // retry foreign refusal under this caller
+      }
+      admitEffect(beforeEffect);
+      return;
     }
 
     const controller = new AbortController();
@@ -1238,7 +1252,7 @@ export class CodexAppServerTransport {
     let startup!: Promise<void>;
     startup = (async () => {
       try {
-        await waitForStartup(this.startSession(controller.signal), controller.signal);
+        await waitForStartup(this.startSession(controller.signal, beforeEffect), controller.signal);
       } catch (error) {
         // Share cleanup with every startup waiter. Never let an old failure
         // detach the connection created by a later startup attempt.
@@ -1259,14 +1273,14 @@ export class CodexAppServerTransport {
     await startup;
   }
 
-  private async startSession(signal: AbortSignal): Promise<void> {
+  private async startSession(signal: AbortSignal, beforeEffect?: () => void): Promise<void> {
     this.setPersistenceActive(true);
     signal.throwIfAborted();
     await this.wireLog.flush();
     signal.throwIfAborted();
     // This prompt file is observational; baseInstructions goes over JSON-RPC.
     this.promptDirty = true;
-    await this.persistPrompt();
+    await this.persistPrompt(beforeEffect);
     this.proactiveShutdown = null;
     try {
       await assertCodexWorkingDirectory(this.options.cwd, this.options.agentName);
@@ -1298,6 +1312,7 @@ export class CodexAppServerTransport {
         daemonVersion = executable ? readCodexAppServerDaemonVersion({ executable, env }) : null;
       }
       connection = await connectCodexAppServerSocket({
+        beforeEffect,
         socketPath: connectionConfig.socketPath,
         handlers,
         signal,
@@ -1314,6 +1329,7 @@ export class CodexAppServerTransport {
     } else {
       const launchArgs = normalizeCodexAppServerLaunchArgs(this.options.launchArgs);
       connection = spawnCodexAppServerStdioConnection({
+        beforeEffect,
         executable: resolveCodexExecutable(env),
         args: [
           "app-server",
@@ -1345,8 +1361,8 @@ export class CodexAppServerTransport {
       capabilities: {
         experimentalApi: true,
       },
-    });
-    this.notify("initialized");
+    }, undefined, beforeEffect);
+    this.notify("initialized", undefined, beforeEffect);
     this.serverIdentity = buildCodexAppServerIdentity({
       connection,
       initialized,
@@ -1354,13 +1370,13 @@ export class CodexAppServerTransport {
     });
 
     signal.throwIfAborted();
-    await this.resumeOrStartThread(signal);
+    await this.resumeOrStartThread(signal, beforeEffect);
     signal.throwIfAborted();
-    await this.persistState();
+    await this.persistState(beforeEffect);
     signal.throwIfAborted();
   }
 
-  private async resumeOrStartThread(signal: AbortSignal): Promise<void> {
+  private async resumeOrStartThread(signal: AbortSignal, beforeEffect?: () => void): Promise<void> {
     const requestedThreadId = this.options.threadId?.trim() || null;
     const storedThreadId = requestedThreadId ?? await readOptionalFile(this.threadIdPath);
     signal.throwIfAborted();
@@ -1375,12 +1391,13 @@ export class CodexAppServerTransport {
           baseInstructions: this.options.systemPrompt,
           persistExtendedHistory: true,
           ...this.attachedRuntimeParams(),
-        });
+        }, undefined, beforeEffect);
         this.threadId = resumed.thread.id;
         this.threadPath = resumed.thread.path ?? null;
-        await this.persistThreadId({ confirmed: true });
+        await this.persistThreadId({ confirmed: true }, beforeEffect);
         return;
       } catch (error) {
+        if (error instanceof EffectAdmissionRefusal) throw error;
         // A missing control response is not evidence that the old thread is
         // absent. Never turn a resume timeout/abort into a fresh thread/start.
         if (isCodexAppServerControlError(error)) throw error;
@@ -1389,9 +1406,10 @@ export class CodexAppServerTransport {
           `[openscout] failed to resume ${threadOrigin} Codex thread ${storedThreadId}: ${errorMessage(error)}\n`,
         );
         if (!requestedThreadId && isMissingCodexRolloutError(error)) {
+          admitEffect(beforeEffect);
           await rm(this.threadIdPath, { force: true }).catch(() => undefined);
-          await closeCodexSessionCatalog(this.options.runtimeDirectory, storedThreadId);
-          await this.persistState();
+          await closeCodexSessionCatalog(this.options.runtimeDirectory, storedThreadId, beforeEffect);
+          await this.persistState(beforeEffect);
         }
         if (requestedThreadId || this.options.requireExistingThread) {
           if (isCodexThreadWriterConflictError(error)) {
@@ -1426,23 +1444,24 @@ export class CodexAppServerTransport {
       persistExtendedHistory: true,
       ...this.attachedRuntimeParams(),
       ...(this.connectionConfig.mode === "attach" ? { threadSource: "user" } : {}),
-    });
+    }, undefined, beforeEffect);
     this.threadId = started.thread.id;
     this.threadPath = started.thread.path ?? null;
     if (this.durableThreadId !== this.threadId) {
       this.durableThreadId = null;
     }
-    await this.persistThreadId();
+    await this.persistThreadId({}, beforeEffect);
     signal.throwIfAborted();
-    await this.nameStartedThread(started.thread.id);
+    await this.nameStartedThread(started.thread.id, beforeEffect);
   }
 
-  private async nameStartedThread(threadId: string): Promise<void> {
+  private async nameStartedThread(threadId: string, beforeEffect?: () => void): Promise<void> {
     const name = this.options.threadName?.trim();
     if (!name) return;
     try {
-      await this.request("thread/name/set", { threadId, name });
+      await this.request("thread/name/set", { threadId, name }, undefined, beforeEffect);
     } catch (error) {
+      if (error instanceof EffectAdmissionRefusal) throw error;
       this.writeLog(
         this.stderrLogPath,
         `[openscout] failed to name Codex thread ${threadId}: ${errorMessage(error)}\n`,
@@ -1692,15 +1711,16 @@ export class CodexAppServerTransport {
     this.metadataRetry.unref?.();
   }
 
-  private async persistPrompt(): Promise<void> {
+  private async persistPrompt(beforeEffect?: () => void): Promise<void> {
     if (!this.promptDirty) return;
-    try { await this.writeMetadata(join(this.options.runtimeDirectory, "prompt.txt"), this.options.systemPrompt); this.promptDirty = false; }
-    catch (error) { this.metadataFailed(error); }
+    try { await this.writeMetadata(join(this.options.runtimeDirectory, "prompt.txt"), this.options.systemPrompt, undefined, beforeEffect); this.promptDirty = false; }
+    catch (error) { if (error instanceof EffectAdmissionRefusal) throw error; this.metadataFailed(error); }
   }
 
-  private persistThreadId(options: { confirmed?: boolean } = {}): Promise<void> {
+  private persistThreadId(options: { confirmed?: boolean } = {}, beforeEffect?: () => void): Promise<void> {
     if (this.durableThreadId !== this.threadId) this.durableThreadId = null;
     if (options.confirmed) this.confirmedThreadId = this.threadId;
+    if (beforeEffect) return this.threadPersistence.then(() => this.persistThreadIdNow(beforeEffect));
     this.threadPersistenceDirty = true;
     if (this.threadPersistenceRunning) return this.threadPersistence;
     this.threadPersistenceRunning = true;
@@ -1714,12 +1734,13 @@ export class CodexAppServerTransport {
     return this.threadPersistence;
   }
 
-  private async persistThreadIdNow(): Promise<void> {
+  private async persistThreadIdNow(beforeEffect?: () => void): Promise<void> {
     const threadId = this.threadId;
     if (!threadId) {
       this.durableThreadId = null;
+      admitEffect(beforeEffect);
       await rm(this.threadIdPath, { force: true });
-      await this.persistState();
+      await this.persistState(beforeEffect);
       return;
     }
 
@@ -1734,27 +1755,29 @@ export class CodexAppServerTransport {
 
     if (this.confirmedThreadId !== threadId && !rolloutExists && this.durableThreadId !== threadId) {
       this.durableThreadId = null;
+      admitEffect(beforeEffect);
       await rm(this.threadIdPath, { force: true });
-      await this.persistState();
+      await this.persistState(beforeEffect);
       return;
     }
 
-    await this.writeMetadata(this.threadIdPath, `${threadId}\n`);
+    await this.writeMetadata(this.threadIdPath, `${threadId}\n`, undefined, beforeEffect);
     // A later notification may have selected another thread during the write.
     if (this.threadId !== threadId) { this.threadPersistenceDirty = true; return; }
     this.durableThreadId = threadId;
-    await this.persistState();
+    await this.persistState(beforeEffect);
     if (this.catalogedThreadId !== threadId) {
-      await this.recordCatalog(this.options.runtimeDirectory, threadId, this.catalogRuntimeMeta());
+      admitEffect(beforeEffect);
+      await this.recordCatalog(this.options.runtimeDirectory, threadId, this.catalogRuntimeMeta(), beforeEffect);
       this.catalogedThreadId = threadId;
     }
   }
 
-  private async persistState(): Promise<void> {
-    try { await this.persistStateNow(); } catch (error) { this.metadataFailed(error); }
+  private async persistState(beforeEffect?: () => void): Promise<void> {
+    try { await this.persistStateNow(beforeEffect); } catch (error) { if (error instanceof EffectAdmissionRefusal) throw error; this.metadataFailed(error); }
   }
 
-  private async persistStateNow(): Promise<void> {
+  private async persistStateNow(beforeEffect?: () => void): Promise<void> {
     const durableThreadPath = this.durableThreadId === this.threadId
       ? this.threadPath
       : null;
@@ -1775,11 +1798,11 @@ export class CodexAppServerTransport {
         stdoutLogFile: this.stdoutLogPath,
         stderrLogFile: this.stderrLogPath,
         updatedAt: new Date().toISOString(),
-      }, null, 2) + "\n",
+      }, null, 2) + "\n", undefined, beforeEffect,
     );
   }
 
-  private async request<T>(method: string, params: unknown, timeoutOverrideMs?: number): Promise<T> {
+  private async request<T>(method: string, params: unknown, timeoutOverrideMs?: number, beforeEffect?: () => void): Promise<T> {
     const sequence = this.nextRequestId++;
     const id = method === "model/list" || method === "config/read"
       ? `scout-capability-${sequence}` : String(sequence);
@@ -1825,24 +1848,26 @@ export class CodexAppServerTransport {
           id,
           method,
           params,
-        });
+        }, beforeEffect);
       } catch (error) {
-        fail(error instanceof Error ? error : new Error(errorMessage(error)));
+        fail(error as Error);
       }
     });
   }
 
-  private notify(method: string, params?: unknown): void {
-    this.writeMessage(params === undefined ? { method } : { method, params });
+  private notify(method: string, params?: unknown, beforeEffect?: () => void): void {
+    this.writeMessage(params === undefined ? { method } : { method, params }, beforeEffect);
   }
 
-  private writeMessage(message: Record<string, unknown>): void {
+  private writeMessage(message: Record<string, unknown>, beforeEffect?: () => void): void {
     const connection = this.connection;
     if (!connection || !connection.isOpen()) {
       throw new Error(`Codex app-server session for ${this.options.agentName} is not running.`);
     }
 
-    connection.send(JSON.stringify(message));
+    const text = JSON.stringify(message);
+    admitEffect(beforeEffect);
+    connection.send(text);
   }
 }
 
@@ -1945,8 +1970,8 @@ export class CodexAppServerClient {
     }
   }
 
-  ensureOnline(): Promise<CodexAppServerThreadResult> {
-    return this.transport.ensureOnline();
+  ensureOnline(beforeEffect?: () => void): Promise<CodexAppServerThreadResult> {
+    return this.transport.ensureOnline(beforeEffect);
   }
 
   async invoke(prompt: string, timeoutMs?: number): Promise<CodexAppServerTurnResult> {
@@ -1984,12 +2009,12 @@ export class CodexAppServerClient {
    * tracker remains attached to app-server notifications so later steer,
    * interrupt, and snapshot calls observe the same turn.
    */
-  async start(prompt: string): Promise<CodexAppServerTurnStartResult> {
+  async start(prompt: string, beforeEffect?: () => void): Promise<CodexAppServerTurnStartResult> {
     const onDelta = this.options.onDelta;
     const signal = this.options.signal;
     return this.enqueue(async () => {
       signal?.throwIfAborted();
-      await this.transport.ensureOnline();
+      await this.transport.ensureOnline(beforeEffect);
       signal?.throwIfAborted();
       if (!this.transport.currentThreadId) {
         throw new Error(`Codex app-server session for ${this.options.agentName} has no active thread.`);
@@ -2007,7 +2032,7 @@ export class CodexAppServerClient {
       void completion.catch(() => undefined);
 
       try {
-        const response = await this.transport.startTurn(prompt);
+        const response = await this.transport.startTurn(prompt, beforeEffect);
         turn.turnId = response.turn.id;
         return {
           threadId: this.transport.currentThreadId,
@@ -2072,7 +2097,8 @@ export class CodexAppServerClient {
     await this.transport.interruptTurn(this.activeTurn.turnId);
   }
 
-  async shutdown(options: CodexAppServerShutdownOptions = {}): Promise<void> {
+  async shutdown(options: CodexAppServerShutdownOptions = {}, beforeEffect?: () => void): Promise<void> {
+    admitEffect(beforeEffect);
     const stoppedError = new CodexAppServerExitError({
       agentName: this.options.agentName,
       exitKind: "proactive_shutdown",
@@ -2095,7 +2121,7 @@ export class CodexAppServerClient {
     this.removeNotificationListener = null;
     this.removeErrorListener?.();
     this.removeErrorListener = null;
-    await this.transport.shutdown(options);
+    await this.transport.shutdown(options, beforeEffect);
   }
 
   private bindTransport(): void {
@@ -2370,10 +2396,14 @@ export function existingCodexNativeSession(agentName: string, sessionId: string)
 
 export async function ensureCodexAppServerLocalAgentOnline(
   options: CodexAppServerSessionOptions,
+  beforeEffect?: () => void,
 ): Promise<CodexAppServerThreadResult> {
-  const session = getOrCreateCodexAppServerClient(options);
-  session.update(options);
-  return session.ensureOnline();
+  try {
+    admitEffect(beforeEffect);
+    const session = getOrCreateCodexAppServerClient(options);
+    session.update(options);
+    return await session.ensureOnline(beforeEffect);
+  } catch (error) { rethrowEffectRefusal(error); }
 }
 
 export async function invokeCodexAppServerLocalAgent(
@@ -2386,10 +2416,14 @@ export async function invokeCodexAppServerLocalAgent(
 
 export async function startCodexAppServerLocalAgent(
   options: CodexAppServerInvocationOptions,
+  beforeEffect?: () => void,
 ): Promise<CodexAppServerTurnStartResult> {
-  const session = getOrCreateCodexAppServerClient(options);
-  session.update(options);
-  return session.start(options.prompt);
+  try {
+    admitEffect(beforeEffect);
+    const session = getOrCreateCodexAppServerClient(options);
+    session.update(options);
+    return await session.start(options.prompt, beforeEffect);
+  } catch (error) { rethrowEffectRefusal(error); }
 }
 
 export async function sendCodexAppServerLocalAgent(
@@ -2425,18 +2459,21 @@ export function isCodexAppServerLocalAgentAlive(options: CodexAppServerSessionOp
 export async function shutdownCodexAppServerLocalAgent(
   options: CodexAppServerSessionOptions,
   shutdownOptions: CodexAppServerShutdownOptions = {},
+  beforeEffect?: () => void,
 ): Promise<void> {
+  admitEffect(beforeEffect);
   const key = codexAppServerSessionKey(options);
   const session = codexAppServerClients.get(key);
   if (!session) {
     if (shutdownOptions.resetThread) {
       const threadId = await readOptionalFile(join(options.runtimeDirectory, "codex-thread-id.txt"));
-      await closeCodexSessionCatalog(options.runtimeDirectory, threadId);
+      await closeCodexSessionCatalog(options.runtimeDirectory, threadId, beforeEffect);
+      admitEffect(beforeEffect);
       await rm(join(options.runtimeDirectory, "codex-thread-id.txt"), { force: true });
     }
     return;
   }
 
   codexAppServerClients.delete(key);
-  await session.shutdown(shutdownOptions);
+  try { await session.shutdown(shutdownOptions, beforeEffect); } catch (error) { rethrowEffectRefusal(error); }
 }

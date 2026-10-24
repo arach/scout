@@ -1,3 +1,4 @@
+import { admitEffect } from "../../runtime/effect-admission.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { connect, type Socket } from "node:net";
@@ -76,12 +77,14 @@ export function resolveCodexAppServerConnectionConfig(
 // ---------------------------------------------------------------------------
 
 export function spawnCodexAppServerStdioConnection(input: {
+  beforeEffect?: () => void;
   executable: string;
   args: string[];
   cwd: string;
   env: Record<string, string | undefined>;
   handlers: CodexAppServerConnectionHandlers;
 }): CodexAppServerConnection {
+  admitEffect(input.beforeEffect);
   const child: ChildProcessWithoutNullStreams = spawn(input.executable, input.args, {
     cwd: input.cwd,
     env: input.env,
@@ -257,6 +260,7 @@ function webSocketUpgradeRequest(key: string): string {
  * the WebSocket upgrade. Resolves once `101 Switching Protocols` arrives.
  */
 export async function connectCodexAppServerSocket(input: {
+  beforeEffect?: () => void;
   socketPath: string;
   handlers: CodexAppServerConnectionHandlers;
   connectTimeoutMs?: number;
@@ -346,7 +350,11 @@ export async function connectCodexAppServerSocket(input: {
     if (input.signal?.aborted) { onAbort(); return; }
 
     socket.once("connect", () => {
-      socket.write(webSocketUpgradeRequest(randomBytes(16).toString("base64")));
+      try {
+        const upgrade = webSocketUpgradeRequest(randomBytes(16).toString("base64"));
+        admitEffect(input.beforeEffect);
+        socket.write(upgrade);
+      } catch (error) { fail(error as Error); }
     });
     socket.on("data", (chunk: Buffer) => {
       if (upgraded) {

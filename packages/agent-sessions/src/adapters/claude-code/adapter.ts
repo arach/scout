@@ -109,7 +109,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
     );
   }
 
-  async start(): Promise<void> {
+  async start(beforeEffect?: () => void): Promise<void> {
     const args = [
       "--print",
       "--input-format", "stream-json",
@@ -132,6 +132,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
     const claudeExecutable = resolveExecutableFromPath("claude", env);
 
     const child = await spawnHarnessProcess(claudeExecutable, args, {
+      beforeEffect,
       cwd: this.config.cwd,
       env,
     });

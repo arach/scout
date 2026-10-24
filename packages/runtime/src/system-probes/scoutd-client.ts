@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "../effect-admission.js";
 import type { RuntimeEnv } from "../portable-types.js";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -245,7 +246,7 @@ export class ScoutdProbeClient {
   async requestExecVerb<T>(input: {
     verb: string;
     args: Record<string, unknown>;
-  }): Promise<ScoutdExecOutcome<T>> {
+  }, beforeEffect?: () => void): Promise<ScoutdExecOutcome<T>> {
     const socketPath = resolveScoutdProbesSocketPath(this.env);
     const socketTimeoutMs = execSocketTimeoutMs(input.args);
     const socketExists = existsSync(socketPath);
@@ -283,7 +284,7 @@ export class ScoutdProbeClient {
         schemaVersion: expectedSchemaVersion,
         verb: input.verb,
         args: input.args,
-      }, { timeoutMs: socketTimeoutMs });
+      }, { timeoutMs: socketTimeoutMs, beforeEffect });
       if (!isRecord(response) || response.schema !== EXEC_RESPONSE_SCHEMA) {
         throw new Error("scoutd returned an invalid exec response envelope");
       }
@@ -302,6 +303,7 @@ export class ScoutdProbeClient {
         daemonVersion: readString(response.daemonVersion) ?? capabilities.daemonVersion,
       };
     } catch (error) {
+      if (error instanceof ExecAdmissionRefusal) throw error.cause;
       if (error instanceof ScoutdExecResponseError) {
         throw error;
       }
@@ -484,10 +486,17 @@ function execSocketTimeoutMs(args: Record<string, unknown>): number {
   return Math.max(SOCKET_TIMEOUT_MS, Math.min(timeoutMs + 1_000, 31_000));
 }
 
+class ExecAdmissionRefusal { constructor(readonly cause: unknown) {} }
+function admittedExecWire(payload: unknown, beforeEffect?: () => void): string {
+  const wire = `${JSON.stringify(payload)}\n`;
+  try { admitSynchronousEffect(beforeEffect); } catch (cause) { throw new ExecAdmissionRefusal(cause); }
+  return wire;
+}
+
 async function requestJson<T>(
   socketPath: string,
   payload: unknown,
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; beforeEffect?: () => void } = {},
 ): Promise<T> {
   const bun = (globalThis as typeof globalThis & {
     Bun?: {
@@ -548,7 +557,8 @@ async function requestJson<T>(
 
     socket.setEncoding("utf8");
     socket.on("connect", () => {
-      socket.write(`${JSON.stringify(payload)}\n`);
+      try { socket.write(admittedExecWire(payload, options.beforeEffect)); }
+      catch (error) { finish(error as Error); }
     });
     socket.on("data", (chunk) => {
       response += chunk;
@@ -577,7 +587,7 @@ async function requestJsonWithBun<T>(
   })["Bun"]>["connect"]> extends (...args: infer A) => infer R ? (...args: A) => R : never,
   socketPath: string,
   payload: unknown,
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; beforeEffect?: () => void } = {},
 ): Promise<T> {
   return await new Promise<T>((resolve, reject) => {
     let response = "";
@@ -628,7 +638,8 @@ async function requestJsonWithBun<T>(
       socket: {
         open(socket) {
           socketRef = socket;
-          socket.write(`${JSON.stringify(payload)}\n`);
+          try { socket.write(admittedExecWire(payload, options.beforeEffect)); }
+          catch (error) { finish(error as Error); }
         },
         data(_socket, data) {
           response += decoder.decode(data, { stream: true });

@@ -283,7 +283,7 @@ revocation or the private consuming-graph proof.
 
 An operation a phone started before the revoke ACK can still complete its effects in:
 
-- process warmup/launch (Codex app-server, Claude stream-JSON, Pi RPC, tmux)
+- process warmup/launch (Codex app-server, Claude stream-JSON, Pi RPC, tmux) reached through broker delivery routing or local-agent/Codex commands
 - mobile post-startup effects (binding registration, peer-session opening, seed send)
 - broker sends/updates/delivery with routing and fallbacks
 - local-agent and Codex commands and ACP invocation/delivery

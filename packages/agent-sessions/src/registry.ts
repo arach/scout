@@ -1,3 +1,4 @@
+import { rethrowEffectRefusal } from "./runtime/effect-admission.js";
 import { execFile } from "node:child_process";
 import type {
   Adapter,
@@ -120,7 +121,7 @@ export class SessionRegistry {
     this.stateTracker.createSession(sessionId, adapter.session);
 
     try {
-      await adapter.start();
+      await adapter.start(beforeEffect);
     } catch (error) {
       // A failed start may already have spawned a provider process. Roll the
       // partially registered adapter all the way back before surfacing the
@@ -132,7 +133,7 @@ export class SessionRegistry {
       this.submittedInterrupts.delete(sessionId);
       this.stateTracker.removeSession(sessionId);
       this.buffers.delete(sessionId);
-      throw error;
+      rethrowEffectRefusal(error);
     }
 
     this.stateTracker.trackEvent(sessionId, {

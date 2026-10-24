@@ -47,7 +47,7 @@ export interface Adapter {
    * Start the adapter — connect to the agent, spawn the process, etc.
    * The adapter should emit a session:update event when ready.
    */
-  start(): Promise<void>;
+  start(beforeEffect?: () => void): Promise<void>;
 
   /**
    * Send a user prompt to the agent.  The adapter translates this into
@@ -125,7 +125,7 @@ export abstract class BaseAdapter implements Adapter {
     };
   }
 
-  abstract start(): Promise<void>;
+  abstract start(beforeEffect?: () => void): Promise<void>;
   abstract send(prompt: Prompt): void;
   abstract interrupt(): void;
   abstract shutdown(): Promise<void>;

@@ -1084,8 +1084,8 @@ const mobileRouter = t.router({
 
   agentRestart: procedure
     .input(z.object({ agentId: z.string() }))
-    .mutation(async ({ input }) => {
-      const result = await restartLocalAgent(input.agentId);
+    .mutation(async ({ input, ctx }) => {
+      const result = await restartLocalAgent(input.agentId, { beforeEffect: () => { requireTransportContext(ctx); } });
       return { ok: result !== null, agentId: input.agentId };
     }),
 
@@ -1411,7 +1411,7 @@ const promptRouter = t.router({
 
 // -- Codex Deck -------------------------------------------------------------
 
-async function codexDeckSnapshot(agentId: string, connect: boolean) {
+async function codexDeckSnapshot(agentId: string, connect: boolean, beforeEffect?: () => void) {
   const config = await getLocalAgentConfig(agentId);
   if (!config) {
     throw new TRPCError({ code: "NOT_FOUND", message: `Agent ${agentId} is not configured on this host.` });
@@ -1423,7 +1423,7 @@ async function codexDeckSnapshot(agentId: string, connect: boolean) {
     });
   }
 
-  const connected = connect ? await connectCodexDeckThread(agentId) : null;
+  const connected = connect ? await connectCodexDeckThread(agentId, beforeEffect) : null;
   const online = connected ? true : await isCodexDeckThreadConnected(agentId);
   const snapshot = await getCodexDeckThreadSnapshot(agentId);
   const currentTurn = snapshot?.currentTurnId
@@ -1462,10 +1462,10 @@ const codexDeckRouter = t.router({
     .query(({ input }) => codexDeckSnapshot(input.agentId, false)),
   connect: procedure
     .input(z.object({ agentId: z.string().min(1) }))
-    .mutation(({ input }) => codexDeckSnapshot(input.agentId, true)),
+    .mutation(({ input, ctx }) => codexDeckSnapshot(input.agentId, true, () => { requireTransportContext(ctx); })),
   start: procedure
     .input(z.object({ agentId: z.string().min(1), text: z.string().trim().min(1).max(65_536) }))
-    .mutation(({ input }) => startCodexDeckTurn(input.agentId, input.text)),
+    .mutation(({ input, ctx }) => startCodexDeckTurn(input.agentId, input.text, () => { requireTransportContext(ctx); })),
   steer: procedure
     .input(z.object({ agentId: z.string().min(1), text: z.string().trim().min(1).max(65_536) }))
     .mutation(({ input }) => steerCodexDeckTurn(input.agentId, input.text)),

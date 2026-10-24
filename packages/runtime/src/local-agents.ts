@@ -2009,9 +2009,10 @@ export async function getLocalAgentSessionSnapshot(agentId: string): Promise<Ses
 /** Codex-native Deck controls over Scout's broker-managed app-server session. */
 export async function connectCodexDeckThread(
   agentId: string,
+  beforeEffect?: () => void,
 ): Promise<{ threadId: string; title: string; cwd: string }> {
   const record = await requireCodexDeckRecord(agentId);
-  const task = await ensureCodexAppServerAgentOnline(buildCodexAgentSessionOptions(agentId, record));
+  const task = await ensureCodexAppServerAgentOnline(buildCodexAgentSessionOptions(agentId, record), beforeEffect);
   return { threadId: task.threadId, title: record.project, cwd: record.cwd };
 }
 
@@ -2028,6 +2029,7 @@ export async function getCodexDeckThreadSnapshot(agentId: string): Promise<Sessi
 export async function startCodexDeckTurn(
   agentId: string,
   prompt: string,
+  beforeEffect?: () => void,
 ): Promise<{ accepted: true; agentId: string; threadId: string; mode: "start" }> {
   const text = prompt.trim();
   if (!text) throw new Error("A non-empty Codex turn prompt is required.");
@@ -2039,7 +2041,7 @@ export async function startCodexDeckTurn(
     throw new Error(`Codex agent ${agentId} already has an active turn; steer or interrupt it first.`);
   }
 
-  const started = await startCodexAppServerAgent({ ...options, prompt: text });
+  const started = await startCodexAppServerAgent({ ...options, prompt: text }, beforeEffect);
   return { accepted: true, agentId, threadId: started.threadId, mode: "start" };
 }
 
@@ -4534,13 +4536,14 @@ export function buildTmuxLaunchShellCommand(launchScript: string): string {
   return `exec bash ${JSON.stringify(launchScript)}`;
 }
 
-async function killAgentSession(sessionName: string): Promise<void> {
+async function killAgentSession(sessionName: string, beforeEffect?: () => void): Promise<void> {
   try {
-    await execSystemFile("tmux", ["kill-session", "-t", sessionName], { timeoutMs: 3_000 });
+    await execSystemFile("tmux", ["kill-session", "-t", sessionName], { timeoutMs: 3_000, beforeEffect });
     invalidateTmuxSessions({ reason: "local-agent.kill-session" });
   } catch {
     // Ignore missing sessions during restart.
   }
+  admitSynchronousEffect(beforeEffect);
   removeRelayAgentProcessLease(sessionName);
 }
 
@@ -4696,12 +4699,15 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
 
   const agentRuntimeDir = relayAgentRuntimeDirectory(agentName);
   const logsDir = relayAgentLogsDirectory(agentName);
+  admitSynchronousEffect(beforeWarmupEffect);
   await mkdir(agentRuntimeDir, { recursive: true });
+  admitSynchronousEffect(beforeWarmupEffect);
   await mkdir(logsDir, { recursive: true });
 
   if (normalizedRecord.transport === "codex_app_server") {
+    admitSynchronousEffect(beforeWarmupEffect);
     await writeFile(join(agentRuntimeDir, "prompt.txt"), systemPrompt);
-    await ensureCodexAppServerAgentOnline(buildCodexAgentSessionOptions(agentName, normalizedRecord, systemPrompt));
+    await ensureCodexAppServerAgentOnline(buildCodexAgentSessionOptions(agentName, normalizedRecord, systemPrompt), beforeWarmupEffect);
 
     const registry = await readLocalAgentRegistry();
     registry[agentName] = {
@@ -4709,14 +4715,15 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
       startedAt: nowSeconds(),
       systemPrompt: normalizedRecord.systemPrompt,
     };
-    await writeLocalAgentRegistry(registry);
+    await writeLocalAgentRegistry(registry, beforeWarmupEffect);
 
     return registry[agentName];
   }
 
   if (normalizedRecord.transport === "claude_stream_json") {
+    admitSynchronousEffect(beforeWarmupEffect);
     await writeFile(join(agentRuntimeDir, "prompt.txt"), systemPrompt);
-    await ensureClaudeStreamJsonAgentOnline(buildClaudeAgentSessionOptions(agentName, normalizedRecord, systemPrompt));
+    await ensureClaudeStreamJsonAgentOnline(buildClaudeAgentSessionOptions(agentName, normalizedRecord, systemPrompt), beforeWarmupEffect);
 
     const registry = await readLocalAgentRegistry();
     registry[agentName] = {
@@ -4724,14 +4731,15 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
       startedAt: nowSeconds(),
       systemPrompt: normalizedRecord.systemPrompt,
     };
-    await writeLocalAgentRegistry(registry);
+    await writeLocalAgentRegistry(registry, beforeWarmupEffect);
 
     return registry[agentName];
   }
 
   if (normalizedRecord.transport === "pi_rpc") {
+    admitSynchronousEffect(beforeWarmupEffect);
     await writeFile(join(agentRuntimeDir, "prompt.txt"), systemPrompt);
-    await ensurePiRpcAgentOnline(buildPiAgentSessionOptions(agentName, normalizedRecord, systemPrompt));
+    await ensurePiRpcAgentOnline(buildPiAgentSessionOptions(agentName, normalizedRecord, systemPrompt), beforeWarmupEffect);
 
     const registry = await readLocalAgentRegistry();
     registry[agentName] = {
@@ -4739,7 +4747,7 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
       startedAt: nowSeconds(),
       systemPrompt: normalizedRecord.systemPrompt,
     };
-    await writeLocalAgentRegistry(registry);
+    await writeLocalAgentRegistry(registry, beforeWarmupEffect);
 
     return registry[agentName];
   }
@@ -4769,14 +4777,24 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
   const stdoutLogFile = join(logsDir, "stdout.log");
   const stderrLogFile = join(logsDir, "stderr.log");
 
+  admitSynchronousEffect(beforeWarmupEffect);
+
   await writeFile(promptFile, systemPrompt);
+  admitSynchronousEffect(beforeWarmupEffect);
   await writeFile(initialFile, bootstrapPrompt);
+  admitSynchronousEffect(beforeWarmupEffect);
   await writeFile(stderrLogFile, "");
+  admitSynchronousEffect(beforeWarmupEffect);
   await rm(queueDirectory, { recursive: true, force: true });
+  admitSynchronousEffect(beforeWarmupEffect);
   await mkdir(processingDirectory, { recursive: true });
+  admitSynchronousEffect(beforeWarmupEffect);
   await mkdir(processedDirectory, { recursive: true });
+  admitSynchronousEffect(beforeWarmupEffect);
   await writeFile(codexSessionIdFile, "");
   const bootstrapLine = null;
+
+  admitSynchronousEffect(beforeWarmupEffect);
 
   await writeFile(
     launchScript,
@@ -4798,7 +4816,7 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
       buildLocalAgentLaunchCommand(agentName, normalizedRecord, projectPath, promptFile, workerScript),
     ].filter(Boolean).join("\n") + "\n",
   );
-  await execSystemFile("chmod", ["755", launchScript], { timeoutMs: 2_000 });
+  await execSystemFile("chmod", ["755", launchScript], { timeoutMs: 2_000, beforeEffect: beforeWarmupEffect });
   let paneResult: { stdout: string };
   try {
     paneResult = await execSystemFile(
@@ -4822,6 +4840,7 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
         // If this starts the tmux server, its env becomes every later pane's
         // global env: no instance keys there (the launch script sets the
         // client pointer inside this pane).
+        beforeEffect: beforeWarmupEffect,
         env: buildMultiplexerServerEnvironment(buildInteractiveTerminalEnvironment()) as NodeJS.ProcessEnv,
         timeoutMs: 5_000,
         maxStdoutBytes: 64 * 1024,
@@ -4839,16 +4858,19 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
   }
   invalidateTmuxSessions({ reason: "local-agent.new-session" });
   const paneId = paneResult.stdout.trim();
+  admitSynchronousEffect(beforeWarmupEffect);
   try {
     await execSystemFile(
       "tmux",
       ["set-option", "-t", normalizedRecord.tmuxSession, SCOUT_LAUNCHED_TMUX_OPTION, "1"],
-      { timeoutMs: 2_000 },
+      { timeoutMs: 2_000, beforeEffect: beforeWarmupEffect },
     );
   } catch (error) {
+    admitSynchronousEffect(beforeWarmupEffect);
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[openscout-runtime] unable to tag ${normalizedRecord.tmuxSession} as Scout-launched: ${reason}`);
   }
+  admitSynchronousEffect(beforeWarmupEffect);
   try {
     writeRelayAgentProcessLease({
       agentId: agentName,
@@ -4860,21 +4882,25 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
       ...(paneId ? { paneId } : {}),
     });
   } catch (error) {
+    admitSynchronousEffect(beforeWarmupEffect);
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(`[openscout-runtime] unable to write process lease for ${agentName}: ${reason}`);
   }
   if (paneId) {
+    admitSynchronousEffect(beforeWarmupEffect);
     try {
       await execSystemFile(
         "tmux",
         ["pipe-pane", "-o", "-t", paneId, boundedLogPipeCommand(stdoutLogFile)],
-        { timeoutMs: 2_000 },
+        { timeoutMs: 2_000, beforeEffect: beforeWarmupEffect },
       );
     } catch (error) {
+      admitSynchronousEffect(beforeWarmupEffect);
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[openscout-runtime] unable to attach tmux pipe for ${agentName}: ${reason}`);
     }
   }
+  admitSynchronousEffect(beforeWarmupEffect);
   await writeFile(
     stateFile,
     JSON.stringify({
@@ -4928,7 +4954,7 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
     startedAt: nowSeconds(),
     systemPrompt: normalizedRecord.systemPrompt,
   };
-  await writeLocalAgentRegistry(registry);
+  await writeLocalAgentRegistry(registry, beforeWarmupEffect);
 
   return registry[agentName];
 }
@@ -4943,7 +4969,7 @@ function localAgentAcpPoolKey(agentId: string, record: LocalAgentRecord): string
 
 export async function restartLocalAgent(
   agentId: string,
-  options: { previousSessionId?: string | null } = {},
+  options: { previousSessionId?: string | null; beforeEffect?: () => void } = {},
 ): Promise<LocalAgentRecord | null> {
   const registry = await readLocalAgentRegistry();
   const record = registry[agentId];
@@ -4951,6 +4977,7 @@ export async function restartLocalAgent(
     return null;
   }
 
+  admitSynchronousEffect(options.beforeEffect);
   const normalizedRecord = normalizeLocalAgentRecord(agentId, record);
   const sessionsToStop = new Set<string>([
     normalizedRecord.tmuxSession,
@@ -4959,25 +4986,28 @@ export async function restartLocalAgent(
 
   if (normalizedRecord.transport === "codex_app_server") {
     for (const sessionName of sessionsToStop) {
+      admitSynchronousEffect(options.beforeEffect);
       await shutdownCodexAppServerAgent({
         ...buildCodexAgentSessionOptions(agentId, normalizedRecord),
         sessionId: sessionName,
       }, {
         // Resume stored thread on bring-up; resetThread mints a new Codex rollout per agent.
         resetThread: false,
-      });
+      }, options.beforeEffect);
     }
   } else if (normalizedRecord.transport === "claude_stream_json") {
     for (const sessionName of sessionsToStop) {
+      admitSynchronousEffect(options.beforeEffect);
       await shutdownClaudeStreamJsonAgent({
         ...buildClaudeAgentSessionOptions(agentId, normalizedRecord),
         sessionId: sessionName,
       }, {
         resetSession: true,
-      });
+      }, options.beforeEffect);
     }
   } else if (normalizedRecord.transport === "pi_rpc") {
     for (const sessionName of sessionsToStop) {
+      admitSynchronousEffect(options.beforeEffect);
       await shutdownPiRpcAgent({
         ...buildPiAgentSessionOptions(agentId, normalizedRecord),
         sessionId: sessionName,
@@ -4985,6 +5015,7 @@ export async function restartLocalAgent(
     }
   } else if (normalizedRecord.transport === "grok_acp" || normalizedRecord.transport === "kimi_acp" || normalizedRecord.transport === "devin_acp") {
     for (const sessionName of sessionsToStop) {
+      admitSynchronousEffect(options.beforeEffect);
       await shutdownAcpAgentSession({
         adapterType: normalizedRecord.transport === "grok_acp"
           ? "grok-acp"
@@ -4997,11 +5028,11 @@ export async function restartLocalAgent(
     }
   } else {
     for (const sessionName of sessionsToStop) {
-      await killAgentSession(sessionName);
+      await killAgentSession(sessionName, options.beforeEffect);
     }
   }
 
-  return ensureLocalAgentOnline(agentId, normalizedRecord);
+  return ensureLocalAgentOnline(agentId, normalizedRecord, options.beforeEffect);
 }
 
 export type ResolvedAgentName = {
@@ -5996,8 +6027,7 @@ export async function ensureLocalAgentBindingOnline(
     currentDirectory?: string;
     ensureCurrentProjectConfig?: boolean;
     harness?: AgentHarness;
-    /** Per-call callback, not retained in agent/session configuration. Covers
-     * lazy ACP registry publication, not other engines' launch internals. */
+    /** Trusted per-call callback, never retained in agent/session configuration. */
     beforeWarmupEffect?: () => void;
   } = {},
 ): Promise<LocalAgentBinding | null> {
