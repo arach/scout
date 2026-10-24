@@ -30,7 +30,6 @@ export default {
     rules: [
       { pattern: "packages/protocol/**", instruction: "Run bun run --cwd packages/protocol check." },
       { pattern: "packages/runtime/**", instruction: "Run bun run --cwd packages/runtime check and the narrow affected tests." },
-      { pattern: "apps/desktop/**", instruction: "Run bun run --cwd apps/desktop check." },
       { pattern: "process spawning or shell execution", instruction: "Run bun run sync-exec:fence before committing shell-execution changes." },
     ],
 
@@ -44,7 +43,7 @@ export default {
   },
 
   install: {
-    objective: "Install Scout and verify the local broker control plane.",
+    objective: "Install Scout and verify the local runtime.",
     doneWhen: {
       command: "scout doctor",
       expectedOutput: "A Scout readiness report with no blocking setup error.",
@@ -55,7 +54,7 @@ export default {
       "At least one supported coding-agent harness for routed work",
     ],
     steps: [
-      { description: "Install the Scout CLI and bundled runtime", command: "bun add -g @openscout/scout" },
+      { description: "Install the Scout CLI and bundled runtime", command: "npm install -g @openscout/scout" },
       { description: "Initialize local Scout state and services", command: "scout setup" },
       { description: "Verify local readiness", command: "scout doctor" },
       { description: "Confirm the inferred sender identity", command: "scout whoami" },

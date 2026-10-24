@@ -41,12 +41,12 @@ Routing is explicit and independent of the calling surface:
 
 | Area | Path |
 | --- | --- |
-| Public CLI and bundle | `packages/cli` |
+| CLI, JSON output, MCP, and package bundle | `packages/cli` |
 | Broker and runtime | `packages/runtime` |
 | Shared protocol | `packages/protocol` |
-| Harness observation | `packages/agent-sessions` |
+| Harness adapters and session observation | `packages/agent-sessions` |
 | Host phone pairing | `packages/pairing` |
-| Native services | `crates` |
+| Native services and TUI | `crates` |
 
 ## Product boundary
 

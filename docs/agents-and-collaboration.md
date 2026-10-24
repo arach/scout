@@ -185,12 +185,12 @@ The command surface is `scout role`:
 
 `assign` also supports `--standing` for an agent-scope duty and `--project
 <root>` for a project scope. Mission assignment enforces a single orchestrator
-by default; `--allow-multiple` is the explicit override. The role command just
-landed in the source CLI. Until the published `@openscout/scout` package includes
-it, run it from a source checkout as
-`bun run --cwd apps/desktop scout -- role <command> ...`.
+by default; `--allow-multiple` is the explicit override. The role command
+is available through `scout role`. From a source checkout, use
+`bun packages/cli/src/main.ts role <command> ...`.
 
-The web control-plane API exposes the same records:
+A separately supplied web client can expose the same records through its own
+API. These app routes are not core runtime endpoints:
 
 - `GET /api/roles/catalog`
 - `GET` and `POST /api/roles/assignments`

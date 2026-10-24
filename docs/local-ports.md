@@ -1,4 +1,7 @@
-# Local Ports
+# Local ports
+
+Web, terminal-relay, Vite, studio, and hosted-chat rows describe separately
+supplied app services. The core does not ship those apps.
 
 OpenScout keeps its stable local development and runtime services in a small
 Scout-owned block instead of using common framework defaults such as `3000`,
