@@ -9,12 +9,8 @@ const packageRoot = join(scriptDir, "..");
 // These files use process-wide module mocks or service roots; keep them out of
 // the shared Bun process so cached mocks and env changes cannot leak.
 const isolatedServerTests = new Set([
-  "./server/core/agents/service.test.ts",
   "./server/core/conversations/service.test.ts",
-  "./server/core/observe/service.sources.test.ts",
-  "./server/core/pairing/service.test.ts",
   "./server/create-openscout-web-server.test.ts",
-  "./server/service-budgets.test.ts",
   // Bun 1.3.13 can collect node-pty deferred finalizers after a file's global
   // is gone under --isolate. Keep this native addon out of the shared process.
   "./server/terminal-relay-session.test.ts",

@@ -1,2 +1,2 @@
-export * from "./service.ts";
-export * from "./pairing-runtime-controller.ts";
+// Host implementation lives in the core pairing package.
+export * from "../../../../pairing/src/core/pairing/index.ts";

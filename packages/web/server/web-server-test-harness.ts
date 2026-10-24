@@ -336,7 +336,7 @@ export function unstubbedBrokerCall(name: string) {
 export const chatReadCursors: Record<string, Array<Record<string, unknown>>> = {};
 export const chatMarkReadCalls: Array<Record<string, unknown>> = [];
 
-mock.module("./core/broker/service.ts", () => ({
+const brokerServiceMock = {
   requestScoutHostWeb: async () => ({ status: 503, body: { error: "No test host transport" } }),
   loadScoutRemoteApprovals: async () => [],
   decideScoutPermission: async (input: Record<string, unknown>) => {
@@ -445,7 +445,11 @@ mock.module("./core/broker/service.ts", () => ({
   },
   upsertScoutCollaborationRecord: unstubbedBrokerCall("upsertScoutCollaborationRecord"),
   upsertScoutFlight: async () => null,
-}));
+};
+
+// The web shim and moved runner must read the same owned broker fixture.
+mock.module("./core/broker/service.ts", () => brokerServiceMock);
+mock.module("../../pairing/src/core/broker/service.ts", () => brokerServiceMock);
 
 mock.module("./core/observe/service.ts", () => ({
   loadAgentObservePayload: async () => {

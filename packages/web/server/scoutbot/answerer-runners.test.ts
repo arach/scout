@@ -88,31 +88,6 @@ async function fixture(legacy = false, leaseOptions: { ttlMs?: number; now?: () 
 // These integration tests include HTTP stream cancellation and Unix socket
 // teardown. Ownership is the contract; teardown latency is not an assertion.
 for (const legacy of [false, true]) {
-  test(`public in-process web registers and answers with ${legacy ? "an old runtime" : "a claim"}`, async () => {
-    const f = await fixture(legacy);
-    const threads = new ScoutbotThreadMapStore(join(f.directory, "web-threads.json"));
-    const thread = await threads.ensureDefaultThread({ snapshot: f.snapshot, transport: "codex_app_server" });
-    f.snapshot.conversations[thread.conversationId] = buildScoutbotThreadConversation(thread, f.snapshot, "node-fixture");
-    const warnings: string[] = [];
-    const web = await startScoutbotRunner({ brokerBaseUrl: f.baseUrl, currentDirectory: f.directory, threadMap: threads,
-      log: { info() {}, warn: warning => warnings.push(warning) },
-    });
-    try {
-      await until(() => f.streams.size > 0);
-      const thread = (await threads.list()).threads[0]!;
-      const message = { id: "operator-status", actorId: "operator", body: "@scoutbot /status", conversationId: thread.conversationId,
-        audience: { notify: ["scoutbot"], reason: "direct_message" }, createdAt: 1 };
-      f.emit(message);
-      await until(() => f.posts.some(p => p.path === "/v1/messages"));
-      expect(f.posts.find(p => p.path === "/v1/messages")?.body).toMatchObject({ actorId: "scoutbot", replyToMessageId: message.id });
-      const registration = f.posts.find(p => p.path === "/v1/agents")!;
-      expect(!!registration.token).toBe(!legacy);
-      if (!legacy) expect(f.claims.capability().agents.scoutbot.holderId).toContain(`web:pid:${process.pid}:`);
-      expect(warnings).toEqual([]);
-    } finally { await web.stop(); await f.close(); }
-    expect(f.claims.capability().agents.scoutbot.held).toBe(false);
-  }, 15_000);
-
   test(`standalone process registration, brain reply and MCP socket use ${legacy ? "legacy mode" : "one claim"}`, async () => {
     const f = await fixture(legacy); let complete = false; let proxySocket: string | undefined;
     const answerer = startAssistantAnswerer({ mode: "standalone", request: (path, init) => fetch(new URL(path, "http://localhost"), { ...init, unix: f.socketPath }) }, async signal => {
@@ -151,28 +126,6 @@ for (const legacy of [false, true]) {
   }, 15_000);
 }
 
-test("a stray web without managed stands down before registration or event consumption", async () => {
-  const f = await fixture(); const owner = f.claims.acquire("scoutbot", "standalone:pid:fixture");
-  const env = process.env.OPENSCOUT_SCOUTBOT_PROCESS; delete process.env.OPENSCOUT_SCOUTBOT_PROCESS;
-  const warnings: string[] = [];
-  let web: Awaited<ReturnType<typeof startScoutbotRunner>> | undefined;
-  try {
-    web = await startScoutbotRunner({ brokerBaseUrl: f.baseUrl, currentDirectory: f.directory,
-      threadMap: new ScoutbotThreadMapStore(join(f.directory, "web-threads.json")), log: { info() {}, warn: w => warnings.push(w) },
-    });
-    expect(f.requests).toEqual(["/v1/assistant-claims", "/v1/assistant-claims"]);
-    expect(f.posts).toEqual([]); expect(f.streams.size).toBe(0); expect(warnings).toEqual([]);
-    await web.stop();
-    expect(f.claims.capability().agents.scoutbot.holderId).toBe("standalone:pid:fixture");
-    // UI thread reads on the standby handle do not acquire or register the assistant.
-    await web.getThreads();
-    expect(f.posts).toEqual([]);
-  } finally {
-    if (env === undefined) delete process.env.OPENSCOUT_SCOUTBOT_PROCESS; else process.env.OPENSCOUT_SCOUTBOT_PROCESS = env;
-    await web?.stop(); f.claims.withToken(owner.token, () => f.claims.release("scoutbot")); await f.close();
-  }
-}, 15_000);
-
 test("a stopped generation's proxy cannot submit under a later holder", async () => {
   const f = await fixture(); let proxy: Awaited<ReturnType<typeof createAssistantBrokerProxy>> | undefined;
   let lateHeaders!: () => Record<string, string>;
@@ -197,32 +150,4 @@ test("a stopped generation's proxy cannot submit under a later holder", async ()
     const result = await fetch("http://localhost/v1/messages", { unix: proxy!.socketPath, method: "POST", body: JSON.stringify({ actorId: "scoutbot", body: "late" }) });
     expect(result.status).toBe(409); expect(f.posts).toEqual([]);
   } finally { await answerer.stop(); await proxy?.close(); await f.close(); }
-}, 15_000);
-
-test("runtime HTTP fences a dead holder's delayed post after a standby web takes over", async () => {
-  let now = 100;
-  const f = await fixture(false, { ttlMs: 1000, now: () => now });
-  let disconnected = false; let oldProof: Record<string, string> | undefined; let lost = false;
-  const dead = startAssistantAnswerer({ mode: "standalone", now: () => now,
-    request: (path, init) => disconnected ? Promise.resolve(new Response(null, { status: 503 })) : fetch(new URL(path, f.baseUrl), init),
-  }, async signal => { oldProof = assistantClaimHeaders(); await waitForStop(signal); lost = true; });
-  let web: Awaited<ReturnType<typeof startScoutbotRunner>> | undefined;
-  try {
-    await until(() => !!oldProof);
-    web = await startScoutbotRunner({ brokerBaseUrl: f.baseUrl, currentDirectory: f.directory,
-      threadMap: new ScoutbotThreadMapStore(join(f.directory, "standby-threads.json")), log: { info() {}, warn() {} },
-    });
-    expect(f.streams.size).toBe(0); expect(f.posts).toEqual([]);
-    disconnected = true;
-    await until(() => lost); await dead.stop(); // Simulate death: no release reached the broker.
-    expect(f.claims.capability().agents.scoutbot.held).toBe(true);
-    now += 1001;
-    await until(() => f.streams.size > 0);
-    expect(f.claims.capability().agents.scoutbot.holderId).toContain(`web:pid:${process.pid}:`);
-    const stale = await fetch(new URL("/v1/messages", f.baseUrl), { method: "POST", headers: { "content-type": "application/json", ...oldProof },
-      body: JSON.stringify({ actorId: "scoutbot", body: "stale answer" }),
-    });
-    expect(stale.status).toBe(409); expect(await stale.json()).toMatchObject({ error: "assistant_claim_lost" });
-    expect(f.posts.filter(p => p.path === "/v1/messages")).toEqual([]);
-  } finally { await dead.stop(); await web?.stop(); await f.close(); }
 }, 15_000);

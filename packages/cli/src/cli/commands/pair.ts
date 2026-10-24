@@ -1,6 +1,6 @@
 import type { ScoutCommandContext } from "../context.ts";
-import { startScoutPairingSession } from "../../../../../apps/desktop/src/core/pairing/service.ts";
-import { renderScoutPairingEvent } from "../../../../../apps/desktop/src/ui/terminal/pairing.ts";
+import { startScoutPairingSession } from "../../../../pairing/src/core/pairing/service.ts";
+import { renderScoutPairingEvent } from "../../../../pairing/src/terminal.ts";
 
 type ScoutPairCommandOptions = {
   relayUrl?: string;
