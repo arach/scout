@@ -525,6 +525,38 @@ describe("broker local invocation helpers", () => {
     }
   });
 
+  test("newer work on the same tmux session under a second agent id supersedes the older flight", () => {
+    const tmux = { sessionId: "native-1", nodeId: "node-1", harness: "claude", transport: "tmux" };
+    const active = testFlight({
+      state: "running",
+      startedAt: 1_000,
+      metadata: { requesterTimedOut: true, dispatchAck: { endpointId: "endpoint-1", ...tmux } },
+    });
+    const run = (dispatchAck: Record<string, unknown>) => {
+      const snapshot = createInMemoryControlRuntime({
+        agents: { "agent-1": testAgent(), "agent-1.branch.node-1": testAgent({ id: "agent-1.branch.node-1" }) },
+        endpoints: {
+          "endpoint-1": testEndpoint({ state: "active", metadata: { lastInvocationId: active.invocationId, lastStartedAt: 1_000 } }),
+          "endpoint-2": testEndpoint({ id: "endpoint-2", agentId: "agent-1.branch.node-1", state: "active" }),
+        },
+        flights: {
+          active,
+          newer: testFlight({
+            id: "newer", invocationId: "newer", targetAgentId: "agent-1.branch.node-1",
+            state: "completed", completedAt: 2_000, metadata: { dispatchAck },
+          }),
+        },
+      }, { localNodeId: "node-1" }).snapshot();
+      return staleWorkingFlightReason(snapshot, active, { isInvocationActive: () => false, now: 2_000 });
+    };
+
+    expect(run({ endpointId: "endpoint-2", ...tmux })).toBe("superseded by newer completed flight newer");
+    // Any part of the session's address that differs, or is missing, keeps them apart.
+    expect(run({ endpointId: "endpoint-2", ...tmux, sessionId: "native-2" })).toBeNull();
+    expect(run({ endpointId: "endpoint-2", ...tmux, nodeId: "node-2" })).toBeNull();
+    expect(run({ endpointId: "endpoint-2", ...tmux, transport: undefined })).toBeNull();
+  });
+
   test("a provider identity refinement still identifies the same execution owner", () => {
     const active = testFlight({ state: "running", metadata: { dispatchAck: { endpointId: "endpoint-1", sessionId: "pending-1" } } });
     const snapshot = createInMemoryControlRuntime({

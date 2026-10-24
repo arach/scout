@@ -156,6 +156,7 @@ import {
   RelayAgentSessionReaper,
 } from "./broker-relay-agent-reaper.js";
 import { reconcileRelayAgentProcessLeases } from "./relay-agent-process-leases.js";
+import { countWorkingLocalAgents, HostKeepAwake, hostKeepAwakeEnabled, hostKeepAwakeGraceMs } from "./host-keep-awake.js";
 import { touchBrokerRuntimeHeartbeat } from "./relay-agent-watchdog.js";
 import { tmuxSessionsProbe } from "./system-probes/index.js";
 import {
@@ -1210,11 +1211,30 @@ const presenceService = new BrokerPresenceService({
 });
 setPresenceSnapshotSource(() => presenceService.snapshotEvents());
 
+const hostKeepAwake = hostKeepAwakeEnabled()
+  ? new HostKeepAwake({
+    graceMs: hostKeepAwakeGraceMs(),
+    log: (message) => console.log(`[openscout-runtime] ${message}`),
+  })
+  : null;
+
 function samplePresenceSafely(): void {
   try {
     presenceService.sample();
   } catch (error) {
     console.warn("[openscout-runtime] presence sample failed:", error);
+  }
+  if (!hostKeepAwake || shuttingDown) return;
+  try {
+    const now = Date.now();
+    hostKeepAwake.update(countWorkingLocalAgents(
+      presenceService.snapshot(now).beats,
+      runtime.snapshot().endpoints,
+      nodeId,
+      now,
+    ));
+  } catch (error) {
+    console.warn("[openscout-runtime] keep-awake update failed:", error);
   }
 }
 
@@ -3891,6 +3911,7 @@ async function shutdownBroker(exitCode = 0): Promise<void> {
     return;
   }
   shuttingDown = true;
+  hostKeepAwake?.stop();
   capabilityMatrixService.stop();
   tailscaleListenerGuard.stop();
   storageMaintenance.stop();

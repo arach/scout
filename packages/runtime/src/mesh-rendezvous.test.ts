@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -93,7 +93,7 @@ describe("mesh rendezvous publisher", () => {
       },
     });
 
-    expect(resolveMeshRendezvousPublishConfig({})).toBeUndefined();
+    expect(resolveMeshRendezvousPublishConfig({})).toMatchObject({ url: "https://mesh.example.test" });
     expect(resolveMeshRendezvousPublishConfig({
       OPENSCOUT_MESH_RENDEZVOUS_ALLOW_ANONYMOUS: "1",
     })).toEqual({
@@ -105,18 +105,79 @@ describe("mesh rendezvous publisher", () => {
     });
   });
 
-  test("does not publish to an authenticated rendezvous while signed out", () => {
-    expect(resolveMeshRendezvousPublishConfig({
+  test("publishes nothing until this host is approved, then publishes with its credential", async () => {
+    const config = resolveMeshRendezvousPublishConfig({
       OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net",
-    })).toBeUndefined();
+    });
+    expect(config?.hostCredential).toBeDefined();
+    const requests: Request[] = [];
+    const logs: string[] = [];
+    const publisher = startMeshRendezvousPublisher(makeNode(), {
+      config: { ...config!, intervalMs: 60_000 },
+      fetch: async (input, init) => {
+        requests.push(new Request(input, init));
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+      logger: { log: (message) => logs.push(message), warn() {} },
+    });
+
+    await publisher.publishNow();
+    await publisher.publishNow();
+    expect(requests).toHaveLength(0);
+    expect(logs).toEqual([expect.stringContaining("waits for this host's approval")]);
+
+    // `scout mesh bridge connect` writes the bridge config once the account approves the host.
+    writeBridgeConfig({ token: "osbr_approved" });
+    await publisher.publishNow();
+    publisher.stop();
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer osbr_approved");
+  });
+
+  test("anonymous publishing is opt-in and never reads the host's credential", () => {
+    writeBridgeConfig({ token: "osbr_approved" });
     expect(resolveMeshRendezvousPublishConfig({
       OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net",
       OPENSCOUT_MESH_RENDEZVOUS_ALLOW_ANONYMOUS: "true",
-    })).toMatchObject({
+    })).toEqual({
       url: "https://mesh.oscout.net",
       token: undefined,
       sessionToken: undefined,
+      ttlMs: 60_000,
+      intervalMs: 30_000,
     });
+    // A caller that passes its own environment reads nothing from this machine.
+    expect(resolveMeshRendezvousPublishConfig({
+      OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net",
+    }, { includeSettings: false })).toBeUndefined();
+  });
+
+  test("a refused host credential stops publishing until the host is approved again", async () => {
+    writeBridgeConfig({ token: "osbr_revoked" });
+    const sent: Array<string | null> = [];
+    const warnings: string[] = [];
+    const publisher = startMeshRendezvousPublisher(makeNode(), {
+      config: { ...resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net" })!, intervalMs: 60_000 },
+      fetch: async (input, init) => {
+        const authorization = new Request(input, init).headers.get("authorization");
+        sent.push(authorization);
+        return authorization === "Bearer osbr_revoked"
+          ? new Response("unauthorized", { status: 401 })
+          : new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+      logger: { log() {}, warn: (message) => warnings.push(message) },
+    });
+
+    await publisher.publishNow();
+    await publisher.publishNow();
+    expect(sent).toEqual(["Bearer osbr_revoked"]);
+    expect(warnings).toEqual([expect.stringContaining("approved again")]);
+
+    writeBridgeConfig({ token: "osbr_reapproved" }, Date.now() + 5_000);
+    await publisher.publishNow();
+    publisher.stop();
+    expect(sent).toEqual(["Bearer osbr_revoked", "Bearer osbr_reapproved"]);
   });
 
   test("builds presence from Iroh entrypoints and skips loopback HTTP", () => {
@@ -271,6 +332,15 @@ describe("mesh rendezvous publisher", () => {
     expect(warnings[0]).toContain("publishing is suspended until restart");
   });
 });
+
+/** The bridge config `scout mesh bridge connect` writes, in the test's support directory. */
+function writeBridgeConfig(fields: Record<string, unknown>, mtimeMs?: number): void {
+  const supportDirectory = process.env.OPENSCOUT_SUPPORT_DIRECTORY!;
+  mkdirSync(supportDirectory, { recursive: true });
+  const path = join(supportDirectory, "mcp-bridge.json");
+  writeFileSync(path, JSON.stringify({ relayUrl: "https://mcp.oscout.net", ...fields }));
+  if (mtimeMs !== undefined) utimesSync(path, new Date(mtimeMs), new Date(mtimeMs));
+}
 
 function makeNode(input: Partial<NodeDefinition> = {}): NodeDefinition {
   return {

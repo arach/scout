@@ -228,6 +228,31 @@ export function claimContinuationActuation(
   return true;
 }
 
+/**
+ * Give back a claim this process took when the keys it was for never reached
+ * the pane, so the next answer isn't refused as already in progress. Only this
+ * process's own bucket files are removed.
+ */
+export function releaseContinuationActuation(
+  key: string,
+  directory = continuationLockDirectory(),
+): void {
+  const id = createHash("sha256").update(key).digest("hex").slice(0, 32);
+  try {
+    for (const name of readdirSync(directory)) {
+      if (!name.startsWith(`${id}.`) || !name.endsWith(".lock")) continue;
+      const path = join(directory, name);
+      try {
+        if (readFileSync(path, "utf8").startsWith(`${process.pid} `)) unlinkSync(path);
+      } catch {
+        // Pruned or released already; fine.
+      }
+    }
+  } catch {
+    // No lock directory: nothing to give back.
+  }
+}
+
 /** Drop bucket files far older than any live claim window. */
 function pruneContinuationLocks(directory: string, now: number, width: number): void {
   const horizon = Math.max(width * 4, 5 * 60_000);
