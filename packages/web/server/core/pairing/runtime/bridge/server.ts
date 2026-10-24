@@ -408,7 +408,7 @@ async function handleRPCInner(
       case "prompt/send": {
         const prompt = req.params as Prompt;
         log.info("prompt", `sending to session ${prompt.sessionId}`, { text: prompt.text?.slice(0, 80) });
-        bridge.send(prompt);
+        bridge.send(prompt, () => { requireTransportContext(rpcContext); });
         log.info("prompt", "send() returned — adapter should be streaming");
         return { id: req.id, result: { ok: true } };
       }

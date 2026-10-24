@@ -1208,12 +1208,12 @@ export async function startCodexAppServerAgent(
   return startCodexAppServerLocalAgent(await withPreparedManagedCodexEnvironment(options, beforeEffect), beforeEffect);
 }
 
-export async function steerCodexAppServerAgent(options: SteerOptions): Promise<void> {
-  await steerCodexAppServerLocalAgent(await withPreparedManagedCodexEnvironment(options));
+export async function steerCodexAppServerAgent(options: SteerOptions, beforeEffect?: () => void): Promise<void> {
+  await steerCodexAppServerLocalAgent(await withPreparedManagedCodexEnvironment(options, beforeEffect), beforeEffect);
 }
 
-export async function interruptCodexAppServerAgent(options: InterruptOptions): Promise<void> {
-  await interruptCodexAppServerLocalAgent(await withPreparedManagedCodexEnvironment(options));
+export async function interruptCodexAppServerAgent(options: InterruptOptions, beforeEffect?: () => void): Promise<void> {
+  await interruptCodexAppServerLocalAgent(await withPreparedManagedCodexEnvironment(options, beforeEffect), beforeEffect);
 }
 
 export function isCodexAppServerAgentAlive(options: SessionRequestOptions): boolean {

@@ -61,8 +61,8 @@ export class Bridge {
   }
 
   /** Send a prompt to a session. */
-  send(prompt: Prompt): void {
-    this.registry.send(prompt);
+  send(prompt: Prompt, beforeEffect?: () => void): void {
+    this.registry.send(prompt, beforeEffect);
   }
 
   /** Interrupt the active turn in a session. */

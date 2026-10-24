@@ -1096,8 +1096,8 @@ export class CodexAppServerTransport {
 
   get ownedLive(): boolean { return this.isAlive() && this.connection?.mode !== "attached"; }
 
-  async steerTurn(prompt: string, expectedTurnId: string): Promise<void> {
-    await this.ensureStarted();
+  async steerTurn(prompt: string, expectedTurnId: string, beforeEffect?: () => void): Promise<void> {
+    await this.ensureStarted(beforeEffect);
     if (!this.threadId) {
       throw new Error(`Codex app-server session for ${this.options.agentName} has no active thread.`);
     }
@@ -1106,11 +1106,11 @@ export class CodexAppServerTransport {
       threadId: this.threadId,
       expectedTurnId,
       input: this.textInput(prompt),
-    });
+    }, undefined, beforeEffect);
   }
 
-  async interruptTurn(turnId: string): Promise<void> {
-    await this.ensureStarted();
+  async interruptTurn(turnId: string, beforeEffect?: () => void): Promise<void> {
+    await this.ensureStarted(beforeEffect);
     if (!this.threadId) {
       return;
     }
@@ -1118,7 +1118,7 @@ export class CodexAppServerTransport {
     await this.request("turn/interrupt", {
       threadId: this.threadId,
       turnId,
-    });
+    }, undefined, beforeEffect);
   }
 
   async shutdown(options: CodexAppServerShutdownOptions = {}, beforeEffect?: () => void): Promise<void> {
@@ -2081,22 +2081,22 @@ export class CodexAppServerClient {
     };
   }
 
-  async steer(prompt: string): Promise<void> {
-    await this.transport.ensureOnline();
+  async steer(prompt: string, beforeEffect?: () => void): Promise<void> {
+    await this.transport.ensureOnline(beforeEffect);
     if (!this.transport.currentThreadId || !this.activeTurn?.turnId) {
       throw new Error(`Codex app-server session for ${this.options.agentName} has no active turn to steer.`);
     }
 
-    await this.transport.steerTurn(prompt, this.activeTurn.turnId);
+    await this.transport.steerTurn(prompt, this.activeTurn.turnId, beforeEffect);
   }
 
-  async interrupt(): Promise<void> {
-    await this.transport.ensureOnline();
+  async interrupt(beforeEffect?: () => void): Promise<void> {
+    await this.transport.ensureOnline(beforeEffect);
     if (!this.transport.currentThreadId || !this.activeTurn?.turnId) {
       return;
     }
 
-    await this.transport.interruptTurn(this.activeTurn.turnId);
+    await this.transport.interruptTurn(this.activeTurn.turnId, beforeEffect);
   }
 
   async shutdown(options: CodexAppServerShutdownOptions = {}, beforeEffect?: () => void): Promise<void> {
@@ -2436,21 +2436,27 @@ export async function sendCodexAppServerLocalAgent(
   return session.send(options.prompt, options.timeoutMs);
 }
 
-export async function steerCodexAppServerLocalAgent(options: CodexAppServerSteerOptions): Promise<void> {
-  const session = getOrCreateCodexAppServerClient(options);
-  session.update(options);
-  await session.steer(options.prompt);
+export async function steerCodexAppServerLocalAgent(options: CodexAppServerSteerOptions, beforeEffect?: () => void): Promise<void> {
+  try {
+    admitEffect(beforeEffect);
+    const session = getOrCreateCodexAppServerClient(options);
+    session.update(options);
+    await session.steer(options.prompt, beforeEffect);
+  } catch (error) { rethrowEffectRefusal(error); }
 }
 
-export async function interruptCodexAppServerLocalAgent(options: CodexAppServerInterruptOptions): Promise<void> {
-  const key = codexAppServerSessionKey(options);
-  const session = codexAppServerClients.get(key);
-  if (!session) {
-    return;
-  }
+export async function interruptCodexAppServerLocalAgent(options: CodexAppServerInterruptOptions, beforeEffect?: () => void): Promise<void> {
+  try {
+    admitEffect(beforeEffect);
+    const key = codexAppServerSessionKey(options);
+    const session = codexAppServerClients.get(key);
+    if (!session) {
+      return;
+    }
 
-  session.update(options);
-  await session.interrupt();
+    session.update(options);
+    await session.interrupt(beforeEffect);
+  } catch (error) { rethrowEffectRefusal(error); }
 }
 
 export function isCodexAppServerLocalAgentAlive(options: CodexAppServerSessionOptions): boolean {

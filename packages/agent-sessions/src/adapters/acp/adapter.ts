@@ -1,3 +1,4 @@
+import { admitEffect, EffectAdmissionRefusal, rethrowEffectRefusal } from "../../runtime/effect-admission.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -546,16 +547,25 @@ export class AcpAdapter extends BaseAdapter {
     (this.session as { adapterType: string }).adapterType = this.type;
   }
 
-  async start(): Promise<void> {
-    await this.startProcess();
+  async start(beforeEffect?: () => void): Promise<void> {
+    try { await this.startProcess(beforeEffect); } catch (error) { rethrowEffectRefusal(error); }
   }
 
-  send(prompt: Prompt): void {
+  send(prompt: Prompt, beforeEffect?: () => void): void {
     this.queuedPrompts++;
     this.promptQueue = this.promptQueue.then(
-      () => this.runPrompt(prompt),
-      () => this.runPrompt(prompt),
+      () => this.runPrompt(prompt, beforeEffect),
+      () => this.runPrompt(prompt, beforeEffect),
     ).finally(() => { this.queuedPrompts--; });
+    // The RPC may already have returned. Keep queue refusal observable without
+    // converting it into a successful native turn or an unhandled rejection.
+    void this.promptQueue.catch(error => {
+      // A refused caller does not put the shared provider into an error state.
+      // That caller's transport has lost authority; an independently admitted
+      // caller can still run after reconnecting with a current handle.
+      if (error instanceof EffectAdmissionRefusal) return;
+      this.emit("error", error instanceof Error ? error : new Error(String(error)));
+    });
   }
 
   observeExisting() {
@@ -693,7 +703,8 @@ export class AcpAdapter extends BaseAdapter {
     this.setStatus("closed");
   }
 
-  private async startProcess(): Promise<void> {
+  private async startProcess(beforeEffect?: () => void): Promise<void> {
+    admitEffect(beforeEffect);
     if (this.process && !this.process.killed && this.process.exitCode === null) {
       return;
     }
@@ -721,6 +732,7 @@ export class AcpAdapter extends BaseAdapter {
       throw failure;
     }
 
+    admitEffect(beforeEffect); // process submission after startup preparation
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
       env: { ...scoutUserSpawnEnvironment(process.env), ...(this.config.env ?? {}) },
@@ -769,7 +781,7 @@ export class AcpAdapter extends BaseAdapter {
         terminal: false,
       },
       clientInfo: options.clientInfo,
-    }, options.startupTimeoutMs);
+    }, options.startupTimeoutMs, beforeEffect);
 
     if (initialized.protocolVersion !== ACP_PROTOCOL_VERSION) {
       throw new Error(`ACP protocol version ${String(initialized.protocolVersion)} is not supported.`);
@@ -785,15 +797,15 @@ export class AcpAdapter extends BaseAdapter {
 
     const selectedAuthMethodId = resolveAuthMethodId(options, initialized.authMethods);
     if (selectedAuthMethodId) {
-      await this.request("authenticate", { methodId: selectedAuthMethodId }, options.startupTimeoutMs);
+      await this.request("authenticate", { methodId: selectedAuthMethodId }, options.startupTimeoutMs, beforeEffect);
       this.updateProviderMeta({ authMethodId: selectedAuthMethodId });
     }
 
-    await this.openSession();
+    await this.openSession(beforeEffect);
     this.setStatus("idle");
   }
 
-  private async openSession(): Promise<void> {
+  private async openSession(beforeEffect?: () => void): Promise<void> {
     const options = this.acpOptions;
     const baseParams = {
       cwd: options.cwd,
@@ -815,9 +827,9 @@ export class AcpAdapter extends BaseAdapter {
         this.captureModelState(await this.request<AcpSessionResult>("session/resume", {
           ...baseParams,
           sessionId: requestedSessionId,
-        }, options.startupTimeoutMs));
+        }, options.startupTimeoutMs, beforeEffect));
         this.setAcpSessionId(requestedSessionId);
-        await this.selectRequestedModel(requestedSessionId);
+        await this.selectRequestedModel(requestedSessionId, beforeEffect);
         return;
       }
 
@@ -828,9 +840,9 @@ export class AcpAdapter extends BaseAdapter {
         this.captureModelState(await this.request<AcpSessionResult>("session/load", {
           ...baseParams,
           sessionId: requestedSessionId,
-        }, options.startupTimeoutMs));
+        }, options.startupTimeoutMs, beforeEffect));
         this.setAcpSessionId(requestedSessionId);
-        await this.selectRequestedModel(requestedSessionId);
+        await this.selectRequestedModel(requestedSessionId, beforeEffect);
         return;
       }
 
@@ -841,10 +853,11 @@ export class AcpAdapter extends BaseAdapter {
           this.captureModelState(await this.request<AcpSessionResult>("session/resume", {
             ...baseParams,
             sessionId: requestedSessionId,
-          }, options.startupTimeoutMs));
+          }, options.startupTimeoutMs, beforeEffect));
           this.setAcpSessionId(requestedSessionId);
           recovered = true;
         } catch (error) {
+          if (error instanceof EffectAdmissionRefusal) throw error;
           recoveryFailures.push({ method: "session/resume", message: errorMessage(error) });
         }
       }
@@ -853,10 +866,11 @@ export class AcpAdapter extends BaseAdapter {
           this.captureModelState(await this.request<AcpSessionResult>("session/load", {
             ...baseParams,
             sessionId: requestedSessionId,
-          }, options.startupTimeoutMs));
+          }, options.startupTimeoutMs, beforeEffect));
           this.setAcpSessionId(requestedSessionId);
           recovered = true;
         } catch (error) {
+          if (error instanceof EffectAdmissionRefusal) throw error;
           recoveryFailures.push({ method: "session/load", message: errorMessage(error) });
         }
       }
@@ -864,7 +878,7 @@ export class AcpAdapter extends BaseAdapter {
         // Model selection is a distinct startup step. A set_model rejection
         // must fail loudly, not masquerade as resume/load failure and trigger
         // a fallback session with the same invalid model.
-        await this.selectRequestedModel(requestedSessionId);
+        await this.selectRequestedModel(requestedSessionId, beforeEffect);
         return;
       }
       this.updateProviderMeta({
@@ -876,16 +890,16 @@ export class AcpAdapter extends BaseAdapter {
       });
     }
 
-    const created = await this.request<AcpSessionResult>("session/new", baseParams, options.startupTimeoutMs);
+    const created = await this.request<AcpSessionResult>("session/new", baseParams, options.startupTimeoutMs, beforeEffect);
     if (!created.sessionId) {
       throw new Error("ACP agent did not return a sessionId from session/new.");
     }
     this.captureModelState(created);
     this.setAcpSessionId(created.sessionId);
-    await this.selectRequestedModel(created.sessionId);
+    await this.selectRequestedModel(created.sessionId, beforeEffect);
   }
 
-  private async selectRequestedModel(sessionId: string): Promise<void> {
+  private async selectRequestedModel(sessionId: string, beforeEffect?: () => void): Promise<void> {
     const { model, reasoningEffort } = this.acpOptions;
     // `model` is also used by adapters such as OpenCode to configure the
     // child process. Do not assume that means the ACP agent implements the
@@ -903,14 +917,15 @@ export class AcpAdapter extends BaseAdapter {
       sessionId,
       modelId,
       ...(reasoningEffort ? { _meta: { reasoningEffort } } : {}),
-    }, this.acpOptions.startupTimeoutMs);
+    }, this.acpOptions.startupTimeoutMs, beforeEffect);
     this.updateProviderMeta({
       requestedModel: modelId,
       ...(reasoningEffort ? { requestedReasoningEffort: reasoningEffort } : {}),
     });
   }
 
-  private async runPrompt(prompt: Prompt): Promise<void> {
+  private async runPrompt(prompt: Prompt, beforeEffect?: () => void): Promise<void> {
+    admitEffect(beforeEffect); // queue decisions never survive to a later turn
     if (!this.currentSessionId) {
       this.emit("error", new Error("ACP session is not ready."));
       return;
@@ -943,7 +958,7 @@ export class AcpAdapter extends BaseAdapter {
       const response = await this.request<{ stopReason?: string; usage?: unknown }>("session/prompt", {
         sessionId: this.currentSessionId,
         prompt: promptToContent(prompt, this.agentCapabilities?.promptCapabilities?.image === true),
-      }, this.acpOptions.promptTimeoutMs);
+      }, this.acpOptions.promptTimeoutMs, beforeEffect);
       // Agents may report token usage on the prompt result rather than as a
       // usage_update notification — OpenCode does. Without this the turn looks
       // like it consumed nothing at all.
@@ -1511,7 +1526,7 @@ export class AcpAdapter extends BaseAdapter {
     this.writeResult(message.id, {});
   }
 
-  private request<T>(method: string, params?: unknown, timeoutMs: number | null = this.acpOptions.requestTimeoutMs): Promise<T> {
+  private request<T>(method: string, params?: unknown, timeoutMs: number | null = this.acpOptions.requestTimeoutMs, beforeEffect?: () => void): Promise<T> {
     const id = ++this.requestId;
     return new Promise<T>((resolve, reject) => {
       const timeout = timeoutMs
@@ -1528,12 +1543,16 @@ export class AcpAdapter extends BaseAdapter {
         timeout,
       });
 
-      this.writeMessage({
+      try { this.writeMessage({
         jsonrpc: "2.0",
         id,
         method,
         ...(params === undefined ? {} : { params }),
-      });
+      }, beforeEffect); } catch (error) {
+        if (timeout) clearTimeout(timeout);
+        this.pendingRequests.delete(id);
+        reject(error);
+      }
     });
   }
 
@@ -1565,11 +1584,12 @@ export class AcpAdapter extends BaseAdapter {
     });
   }
 
-  private writeMessage(message: Record<string, unknown>): void {
+  private writeMessage(message: Record<string, unknown>, beforeEffect?: () => void): void {
     const line = JSON.stringify(message);
     if (!this.process?.stdin.writable) {
       return;
     }
+    admitEffect(beforeEffect); // final client write, after serialization
     this.process.stdin.write(`${line}\n`);
   }
 

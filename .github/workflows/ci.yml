@@ -130,6 +130,7 @@ jobs:
           - test:process-launch-fences
           - test:mobile-post-startup-fences
           - test:broker-submission-fences
+          - test:local-command-fences
 
     steps:
       - name: Checkout

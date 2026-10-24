@@ -1,3 +1,4 @@
+import { admitSynchronousEffect } from "./effect-admission.js";
 import {
   createLocalAgentClient,
   type LocalAgentClient,
@@ -215,12 +216,15 @@ export async function shutdownAcpAgentSession(input: {
   adapterType: AcpAgentInvocationOptions["adapterType"];
   sessionId: string;
   poolKey?: string;
-}): Promise<void> {
+}, beforeEffect?: () => void): Promise<void> {
   const key = input.poolKey?.trim() || `${input.adapterType}\u0000${input.sessionId}`;
   const entry = activeAcpSessions.get(key);
   if (!entry) return;
+  const resolved = await entry.catch(() => null);
+  admitSynchronousEffect(beforeEffect); // pending pool creation is not an admission
+  if (activeAcpSessions.get(key) !== entry) return;
   activeAcpSessions.delete(key);
-  await closeEntry(entry);
+  if (resolved) await resolved.client.close();
 }
 
 export async function shutdownAllAcpAgentSessions(): Promise<void> {

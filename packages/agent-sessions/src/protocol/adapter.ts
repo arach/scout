@@ -54,7 +54,7 @@ export interface Adapter {
    * whatever the native backend expects and begins emitting turn/block
    * deltas as the response streams in.
    */
-  send(prompt: Prompt): void;
+  send(prompt: Prompt, beforeEffect?: () => void): void;
 
   /**
    * Route an answer for a QuestionBlock back to the underlying agent.
@@ -126,7 +126,7 @@ export abstract class BaseAdapter implements Adapter {
   }
 
   abstract start(beforeEffect?: () => void): Promise<void>;
-  abstract send(prompt: Prompt): void;
+  abstract send(prompt: Prompt, beforeEffect?: () => void): void;
   abstract interrupt(): void;
   abstract shutdown(): Promise<void>;
 

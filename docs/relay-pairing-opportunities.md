@@ -283,10 +283,10 @@ revocation or the private consuming-graph proof.
 
 An operation a phone started before the revoke ACK can still complete its effects in:
 
-- process warmup/launch (Codex app-server, Claude stream-JSON, Pi RPC, tmux) reached through broker delivery routing from local-agent and Codex commands and ACP invocation/delivery or harness replies and live terminal/permission input, or through local-agent/Codex commands
-- mobile post-startup effects (binding registration, peer-session opening, seed send) reached through broker sends/updates/delivery with routing and fallbacks from local-agent and Codex commands and ACP invocation/delivery or harness replies and live terminal/permission input, or through local-agent and Codex commands and ACP invocation/delivery
-- broker sends/updates/delivery with routing and fallbacks reached through local-agent and Codex commands and ACP invocation/delivery or harness replies and live terminal/permission input
-- local-agent and Codex commands and ACP invocation/delivery
+- process warmup/launch (Codex app-server, Claude stream-JSON, Pi RPC, tmux) reached through broker delivery routing from harness replies and live terminal/permission input
+- mobile post-startup effects (binding registration, peer-session opening, seed send) reached through broker sends/updates/delivery with routing and fallbacks from harness replies and live terminal/permission input
+- broker sends/updates/delivery with routing and fallbacks reached through harness replies and live terminal/permission input
+- local-agent and Codex commands reached through harness replies and live terminal/permission input
 - harness replies and live terminal/permission input
 - artifact/attachment/web handoff parsers
 
@@ -462,3 +462,42 @@ per-effect fresh-view behavior is a reference model, not a performance result.
 These owner paths are outside the declared gate's substituted application
 router and stubbed broker watcher; no new work is added to its timed workload.
 The final census still qualifies the complete surface.
+
+### Local commands and ACP submissions
+
+Both tRPC bridges carry a per-call admission through mobile stop and interrupt,
+and through Codex Deck steer and interrupt. Registry and snapshot reads do not
+retain a positive decision. Resumed shutdown, daemon requests, native control
+writes and their local fallbacks use a fresh admission at submission. A caller
+refusal stays distinct from an ordinary missing session or I/O failure.
+
+Both legacy and tRPC prompt dispatchers forward the same local hook through
+the bridge and session registry. ACP startup re-admits spawn, initialize,
+authentication, session recovery, session creation and model selection. Queued
+ACP prompts re-admit when the queue runs and at the serialized native write.
+Recovery does not turn a caller refusal into a load or new-session fallback.
+The hook is a method argument, not a session record, provider option or wire
+principal. A refused queued caller does not mark the shared provider failed. A different
+paired phone can reconnect and submit its own command.
+
+A prompt RPC can return its existing queued receipt before the native write.
+That receipt does not establish native acceptance. Refused queued work submits
+no native command. A command submitted before ACK remains earlier work when
+the fixture owner first reads its bytes after ACK. The queue witnesses use
+owned stream/connection sinks, not real provider processes.
+
+Trusted local callers that omit the hook keep their behavior. Runtime work
+already submitted to the broker before ACK belongs to that owner. The remaining
+harness-reply path can still submit to the broker after ACK and reach local
+Codex invocation and warmup. Its witness uses a real phone RPC, broker client,
+runtime invocation and managed Codex client against an owned provider sink.
+Other adapters' prompt and live-input continuations remain in that family;
+forwarding a hook alone does not qualify those continuations.
+
+Harness replies target only Claude or Codex sessions at the phone and broker
+boundaries. The scope witnesses use a live bound phone and require all five ACP
+harness names to refuse before any broker request. ACP invocation/delivery is
+absent from the retained harness-reply limit by reach, not by a new invocation
+hook. Pending ACP permission answers remain live permission input; they do not
+start a new ACP turn or delivery. Previously guarded broker and seed submissions
+remain earlier work when their ACP owner first reads them after ACK.
