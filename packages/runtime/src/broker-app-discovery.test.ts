@@ -51,7 +51,7 @@ test.each(["absent", "present", "missing"])("web never chooses sibling packages/
     expect(spawned).toEqual([["run", f.entry]]); expect(result.ok).toBe(true);
   } else {
     expect(spawned).toEqual([]); expect(result.ok).toBe(false);
-    expect(result.error).toContain(mode === "missing" ? "Configured web entry is unavailable" : "Could not find");
+    expect(result.error).toContain(mode === "missing" ? "Configured web entry is unavailable" : "supplied by OpenScout apps");
   }
   await service.stop();
 });
