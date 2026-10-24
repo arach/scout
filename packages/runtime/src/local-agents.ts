@@ -4626,14 +4626,14 @@ async function ensureLocalAgentOnline(agentName: string, record: LocalAgentRecor
       result = await existingFlight;
     } catch (error) {
       const refusal = localAgentOnlineRefusals.get(existingFlight);
-      if (beforeWarmupEffect || !refusal?.refused || !Object.is(refusal.error, error)) {
+      if (!refusal?.refused || !Object.is(refusal.error, error)) {
         throw error;
       }
-      // Do not discard a newer flight another trusted joiner already started.
+      // Do not discard a newer flight another joiner already started.
       if (localAgentOnlineFlights.get(flightKey) === existingFlight) {
         localAgentOnlineFlights.delete(flightKey);
       }
-      return await ensureLocalAgentOnline(agentName, normalizedRecord); // trusted caller retries a foreign refusal
+      return await ensureLocalAgentOnline(agentName, normalizedRecord, beforeWarmupEffect); // retry a foreign refusal under this caller's own hook
     }
     admitSynchronousEffect(beforeWarmupEffect); // a joined flight does not preserve caller authority
     return result;

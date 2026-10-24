@@ -1,4 +1,4 @@
-/** Trusted-joiner retry and refusal-provenance controls.
+/** Joined-flight retry and refusal-provenance controls.
  * Each subject changes only the named shared-flight branch. */
 import {mkdtempSync,mkdirSync,readFileSync,writeFileSync,rmSync,statfsSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -28,8 +28,9 @@ const results=[];
 for(const flavor of ["web","desktop"]){
  const local="packages/runtime/src/local-agents.ts";
  const defs:Def[]=[
-  {id:"no-trusted-retry",key:"local",path:local,stage:"revoke-two",anchor:"return await ensureLocalAgentOnline(agentName, normalizedRecord); // trusted caller retries a foreign refusal",replacement:"throw error; // planted trusted retry omission"},
-  {id:"retry-ordinary-error",key:"local",path:local,stage:"ordinary-error",anchor:"if (beforeWarmupEffect || !refusal?.refused || !Object.is(refusal.error, error)) {",replacement:"if (beforeWarmupEffect) {"},
+  {id:"no-trusted-retry",key:"local",path:local,stage:"revoke-two",anchor:"return await ensureLocalAgentOnline(agentName, normalizedRecord, beforeWarmupEffect); // retry a foreign refusal under this caller's own hook",replacement:"throw error; // planted trusted retry omission"},
+  {id:"no-protected-retry",key:"local",path:local,stage:"protected-live",anchor:"if (!refusal?.refused || !Object.is(refusal.error, error)) {",replacement:"if (beforeWarmupEffect || !refusal?.refused || !Object.is(refusal.error, error)) {"},
+  {id:"retry-ordinary-error",key:"local",path:local,stage:"ordinary-error",anchor:"if (!refusal?.refused || !Object.is(refusal.error, error)) {",replacement:"if (false) {"},
  ];
  for(const def of defs){
   const source=readFileSync(def.path,"utf8"),pair:any={flavor,protocol,id:def.id,stage:def.stage,source:def.path,hashes:{},exits:{},observations:{}};
@@ -46,10 +47,10 @@ for(const flavor of ["web","desktop"]){
     const [code,stdout,stderr]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);const text=stdout+stderr;pair.exits[kind]=code;writeFileSync(join(out,`${flavor}-${def.id}-${kind}.log`),text);
     const row=text.split("\n").find(l=>l.startsWith("JOINED_WARMUP_EFFECT "));if(!row)throw Error(`no boundary evidence ${flavor}/${def.id}/${kind}`);
     const seen=JSON.parse(row.slice("JOINED_WARMUP_EFFECT ".length));pair.observations[kind]=seen;
-    const ordinary=def.id==="retry-ordinary-error";
-    const oracle=ordinary?'assert.equal(trustedPublications,0,"ordinary warmup failures must not be retried as admission refusals");':`assert.equal(trustedPublications,1,"trusted joiners must coalesce their own warmup after another caller's admission refusal");`;
-    const message=ordinary?"ordinary warmup failures must not be retried as admission refusals":"trusted joiners must coalesce their own warmup after another caller's admission refusal";
-    if(kind==="healthy"?code!==0:!(code!==0&&(ordinary?seen.trustedPublications===1:seen.trustedPublications===0)&&seen.protectedLateMutations===0&&assertionControlFailed(text,oracle,message)&&!/Cannot find module|SyntaxError|pause not reached/.test(text)))throw Error(`invalid evidence ${flavor}/${def.id}/${kind}`);
+    const ordinary=def.id==="retry-ordinary-error",protectedJoiner=def.id==="no-protected-retry";
+    const oracle=protectedJoiner?'assert.equal(livePublications,1,"live protected joiner must publish its own warmup after another phone\'s refusal");':ordinary?'assert.equal(trustedPublications,0,"ordinary warmup failures must not be retried as admission refusals");':`assert.equal(trustedPublications,1,"trusted joiners must coalesce their own warmup after another caller's admission refusal");`;
+    const message=protectedJoiner?"live protected joiner must publish its own warmup after another phone's refusal":ordinary?"ordinary warmup failures must not be retried as admission refusals":"trusted joiners must coalesce their own warmup after another caller's admission refusal";
+    if(kind==="healthy"?code!==0:!(code!==0&&(protectedJoiner?seen.livePublications===0:ordinary?seen.trustedPublications===1:seen.trustedPublications===0)&&seen.protectedLateMutations===0&&assertionControlFailed(text,oracle,message)&&!/Cannot find module|SyntaxError|pause not reached/.test(text)))throw Error(`invalid evidence ${flavor}/${def.id}/${kind}`);
    }finally{if(timer)clearTimeout(timer);child?.kill();if(child)await child.exited;rmSync(scratch,{recursive:true,force:true});}
   }
   pair.caught=true;results.push(pair);

@@ -291,7 +291,7 @@ An operation a phone started before the revoke ACK can still complete its effect
 - artifact/attachment/web handoff parsers
 
 PTY output rides its own terminal WebSocket path outside SecureTransport; mobile
-terminal provisioning installs SSH access that a pairing revoke does not remove;
+terminal provisioning installs SSH access that pairing revoke does not remove;
 credentials are PR B.
 
 Later stages remove fenced entries from this list. They do not soften the
@@ -322,10 +322,12 @@ binding. Callers without the hook retain the existing best-effort fallback.
 The callback belongs to the current call; it is not stored in a session or
 agent record. Joining an existing warmup flight does not transfer authority
 from its initiating caller or cancel that caller's work. If that flight rejects
-with its initiating caller's original admission refusal, a trusted local joiner
-without a hook retries its own warmup through the same flight map. Concurrent
-trusted retry callers still coalesce. Ordinary warmup failures do not trigger
-this retry, and a protected joiner never drops its own hook.
+with its initiating caller's original admission refusal, each joiner retries
+its own warmup through the same flight map. A protected joiner re-admits under
+its own hook; a trusted local joiner without a hook retains local behavior.
+Concurrent retry callers still coalesce. Ordinary warmup failures do not trigger
+this retry. A revoked joiner receives its own refusal at retry entry, while a
+live protected joiner can publish its own warmup.
 
 Process-launch warmup, broker binding, peer-session creation and seed delivery
 have separate owners and still require their own resumed-effect qualification.
