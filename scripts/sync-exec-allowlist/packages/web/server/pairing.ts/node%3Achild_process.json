@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/pairing.ts",
-  "symbol": "node:child_process",
-  "category": "process-lifecycle",
-  "reason": "starts/stops the detached pairing runtime controller process",
-  "owner": "web"
-}

@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/core/pairing/pairing-runtime-controller.ts",
-  "symbol": "node:child_process",
-  "category": "process-lifecycle",
-  "reason": "owns dns-sd advertisement child lifecycle for pair mode",
-  "owner": "web"
-}

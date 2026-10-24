@@ -18,14 +18,6 @@
     ],
     "jsx": "react-jsx",
     "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "../../apps/desktop/src/web/app/*"
-      ],
-      "@web/*": [
-        "../../apps/desktop/src/web/*"
-      ]
-    },
     "noEmit": true,
     "strict": true,
     "skipLibCheck": true
