@@ -292,7 +292,7 @@ An operation a phone started before the revoke ACK can still complete its effect
 
 PTY output rides its own terminal WebSocket path outside SecureTransport; mobile
 terminal provisioning installs SSH access that pairing revoke does not remove;
-credentials are PR B.
+SSH credential ownership is full-key-bound in PR B.
 
 Later stages remove fenced entries from this list. They do not soften the
 remaining entries or add entries without a new review ruling. The final census
@@ -371,3 +371,29 @@ of at least 10 awaited frames/s across live subscriptions, concurrently with
 qualifies that declared workload, not the reference streaming rate. Payload
 aggregation or a cheaper read requires separate review; a positive authority
 view must never be retained across a wait to meet a CPU ceiling.
+
+
+### Full-key SSH credential ownership
+
+A1 alone does not complete T-CREDENTIALS or decision 5; this scope also requires
+PR B to land after A1.
+
+New provision, replacement, explicit credential removal and terminal status use
+the full authenticated Noise key, never its display ID or prefix. Managed v1 SSH
+records carry an exact SHA256-derived owner ID. Status also requires a persisted
+owned session and a fresh live pairing admission after each diagnostic wait.
+
+Legacy v0 records migrate on an explicit provisioning request only when their
+full-key owner is established by an exact full-key device field or a matching
+full-key fingerprint. Conflicting proofs, duplicate ownership fields and unknown
+or ambiguous matching prefix-only records require local review or explicit
+re-provisioning after that review. Prefix uniqueness among currently paired keys
+is not proof of historical ownership. Read-only status does not rewrite records.
+Foreign or unrelated unknown records are retained, not guessed or removed. No
+remote force-migration flag bypasses this refusal.
+
+Pairing revoke neither edits already-issued SSH grants nor terminates issued
+SSH/PTY sessions, and does not revoke HTTP bearers. This is credential-record
+ownership, not per-device OS account or tmux isolation: shared SSH key material
+or an already-issued SSH session retains its existing authority. The standing
+revocation limits above and the later owner-family work remain unchanged.

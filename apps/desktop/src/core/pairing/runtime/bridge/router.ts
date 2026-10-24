@@ -1212,7 +1212,7 @@ const mobileRouter = t.router({
         });
       }
       try {
-        return await readMobileTerminalStatus(input?.sessionName, requireTransportContext(ctx, true).publicKey!);
+        return await readMobileTerminalStatus(input?.sessionName, requireTransportContext(ctx, true).publicKey!, {publicKey: requireTransportContext(ctx, true).publicKey!, admit: () => {requireTransportContext(ctx, true);}});
       } catch (error) {
         if (error instanceof InvalidMobileTerminalSessionError) {
           throw new TRPCError({ code: "BAD_REQUEST", message: error.message, cause: error });

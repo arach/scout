@@ -73,12 +73,16 @@ export interface MobileTerminalStatusResult {
 export async function readMobileTerminalStatus(
   requestedSessionName: string | undefined,
   deviceId: string,
+  binding: {publicKey: string; admit(): void},
 ): Promise<MobileTerminalStatusResult> {
+  binding.admit();
+  if (deviceId !== binding.publicKey) throw new Error("Credential status binding mismatch");
   const authorizedKeysPath = join(homedir(), ".ssh", "authorized_keys");
   const authorizedKeys = existsSync(authorizedKeysPath)
     ? readFileSync(authorizedKeysPath, "utf8")
     : "";
   const provisionedSessionName = findSshTerminalSessionForDevice(authorizedKeys, deviceId);
+  if (!provisionedSessionName) throw new Error("No SSH terminal session is established for this full-key owner");
   const sessionName = authorizedMobileTerminalSessionName(
     requestedSessionName,
     provisionedSessionName,
@@ -102,12 +106,15 @@ export async function readMobileTerminalStatus(
       maxStdoutBytes: 4 * 1024,
       maxStderrBytes: 4 * 1024,
     });
+    binding.admit();
     tmuxPath = resolved.stdout.trim();
     if (!tmuxPath) return base;
   } catch {
+    binding.admit();
     return base;
   }
 
+  binding.admit();
   const installed = { ...base, wrapperInstalled: true };
   try {
     await execSystemFile(tmuxPath, ["has-session", "-t", sessionName], {
@@ -116,9 +123,11 @@ export async function readMobileTerminalStatus(
       maxStderrBytes: 4 * 1024,
     });
   } catch {
+    binding.admit();
     return installed;
   }
 
+  binding.admit();
   const [clients, panes] = await Promise.all([
     execSystemFile(tmuxPath, ["list-clients", "-t", sessionName, "-F", "#{client_name}"], {
       timeoutMs: 2_000,
@@ -135,6 +144,7 @@ export async function readMobileTerminalStatus(
     }).catch(() => ({ stdout: "", stderr: "", exitCode: 0 })),
   ]);
 
+  binding.admit();
   const attachedClients = clients.stdout.split("\n").filter((line) => line.trim()).length;
   const [columnsRaw, rowsRaw, commandRaw] = panes.stdout.trim().split("\t");
   const paneColumns = Number.parseInt(columnsRaw ?? "", 10);
