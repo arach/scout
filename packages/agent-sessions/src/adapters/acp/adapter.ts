@@ -1176,6 +1176,15 @@ export class AcpAdapter extends BaseAdapter {
     const toolCallId = input.toolCallId ?? crypto.randomUUID();
     const existingBlockId = active.toolBlocksByCallId.get(toolCallId);
     if (!existingBlockId) {
+      // A new tool separates the content before it from the next message or
+      // thought. Updates to an existing tool may arrive while later content
+      // is streaming, so only close content when creating the action block.
+      if (active.textBlockId) {
+        this.endBlock(active.textBlockId, "completed");
+      }
+      if (active.reasoningBlockId) {
+        this.endBlock(active.reasoningBlockId, "completed");
+      }
       const block: Block = {
         id: crypto.randomUUID(),
         turnId: active.turnId,
