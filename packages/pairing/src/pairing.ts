@@ -1,3 +1,4 @@
+import type { PendingPairRequestStore, PairRequest } from "./pairing-pair-requests.ts";
 import { requestLocalApprovalPairingOpportunity, requestLocalPairingOpportunity } from "@openscout/runtime/pairing-local-socket";
 import { pairingTrustOwner } from "@openscout/runtime/pairing-security/trust-owner";
 import { spawn } from "node:child_process";
@@ -1152,4 +1153,28 @@ export async function interruptScoutWebPairingTurn(input: { sessionId: string; t
   await withScoutPairingBridgeClient(resolvedConfig.port, async client => {
     await client.mutation<{ ok: true }>("turnInterrupt", input);
   });
+}
+
+/** One host-local decision path for terminal and authenticated HTTP callers. */
+export async function decideHostPairingRequest(
+  store: PendingPairRequestStore, token: string, decision: "approve" | "deny", currentDirectory: string,
+): Promise<{ ok: true; request: PairRequest } | { ok: false; status: 404 | 409 | 503; error: string }> {
+  const before = store.get(token);
+  if (!before) return { ok: false, status: 404, error: "Unknown or expired pairing request" };
+  const request = store.decide(token, decision, "pending");
+  if (!request) return { ok: false, status: 409, error: "Pairing request was already answered or expired" };
+  // An account peer is already connected and waiting. This row's conditional
+  // fulfillment, not a LAN/QR invitation, is its delivery boundary.
+  if (request.route === "account") return { ok: true, request };
+  try {
+    const window = await controlScoutWebApprovalPairing(decision === "approve" ? "open" : "cancel", request, currentDirectory);
+    if (decision === "approve" && (!window || "status" in window)) {
+      return { ok: false, status: 409, error: "Pairing request window closed; make a new request" };
+    }
+    if (decision === "approve" && store.get(token)?.status === "denied") {
+      await controlScoutWebApprovalPairing("cancel", request, currentDirectory);
+      return { ok: false, status: 409, error: "Pairing request was denied" };
+    }
+  } catch { return { ok: false, status: 503, error: "Pairing authority unavailable" }; }
+  return { ok: true, request };
 }

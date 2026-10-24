@@ -1,3 +1,5 @@
+import { createPendingPairRequestStore, pairRequestStatePath } from "../pairing-pair-requests.ts";
+import { localConfigHome } from "@openscout/runtime/local-config";
 // Run with HOME pointed at a scratch directory: pairing identity paths are
 // fixed from homedir() at module load.
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -18,7 +20,11 @@ const bridge = {
 const reservation = Bun.serve({ port: 0, fetch: () => new Response() });
 const port = reservation.port!;
 reservation.stop(true);
-const server = startBridgeServerTRPC({ bridge, port, secure: true, identity, pairingControl: () => null });
+let invitationOpens=0;
+const server = startBridgeServerTRPC({ bridge, port, secure: true, identity, pairingControl: (action) => {
+  if(action === "open" || action === "request-open") invitationOpens++;
+  return null;
+} });
 
 const client = await createScoutPairingBridgeClient(port);
 const status = await client.query<{ sessions: unknown[] }>("bridgeStatus");
@@ -48,6 +54,14 @@ const authenticated = await fetch(`${ingressOrigin}/api/pairing/requests`, {head
 const forwarded = await fetch(`${ingressOrigin}/api/pairing/requests`, {headers: {...operatorHeaders, "x-forwarded-for": "192.0.2.10"}}).then(r => r.status);
 const noClient = await fetch(`${ingressOrigin}/`).then(r => r.status);
 const pairKnock = await fetch(`${ingressOrigin}/pair`, {headers: {accept: "application/json"}, redirect: "manual"}).then(r => r.status);
+const accountSpoof=await fetch(`${ingressOrigin}/pair?route=account`,{headers:{accept:"application/json"}}).then(r=>r.status);
+const requests=createPendingPairRequestStore({statePath:pairRequestStatePath(localConfigHome())});
+const row=requests.create({requesterIp:"key aaaaaaaaaaaa",requesterPublicKey:"a".repeat(64),route:"account"});
+const decide=(decision:string)=>fetch(`${ingressOrigin}/api/pairing/requests/${row.token}/decide`,{method:"POST",headers:{...operatorHeaders,"content-type":"application/json"},body:JSON.stringify({decision})});
+const approval=await decide("approve").then(r=>r.status);
+const repeated=await decide("deny").then(r=>r.status);
+const accountPoll=await fetch(`${ingressOrigin}/pair?token=${row.token}`,{headers:{accept:"application/json"}}).then(r=>r.status);
+requests.dispose();
 server.stop();
 const trustedPeersWritten = existsSync(join(resolveOpenScoutPairingHome(), "trusted-peers.json"));
 
@@ -86,6 +100,7 @@ squatter.stop(true);
 
 console.log(JSON.stringify({
   ingress: { unauthenticated, authenticated, forwarded, noClient, pairKnock },
+  accountHost: {accountSpoof,approval,repeated,accountPoll,invitationOpens},
   sessions: status.sessions,
   strangerCloseCode,
   trustedPeersWritten,

@@ -1,3 +1,4 @@
+import type { AdmitAccountDevice } from "./account-admission.ts";
 import type { PairingRequestBinding, LocalApprovalPairingOpportunity } from "@openscout/runtime/pairing-local-socket";
 import { pairingTrustOwner, type PairingOpportunity } from "@openscout/runtime/pairing-security/trust-owner";
 import { homedir } from "node:os";
@@ -39,6 +40,7 @@ export type StartedPairingRuntime = {
   relayConnection: RelayConnection | null;
   relayConnections: RelayConnection[];
   qrPayload: QRPayload | null;
+  accountRoom: string | null;
   openPairing: () => {windowId: string; payload: QRPayload};
   cancelPairing: (windowId?: string) => void;
   approvalPairing: (action: "open" | "read" | "cancel", binding: PairingRequestBinding) => LocalApprovalPairingOpportunity | null;
@@ -88,6 +90,8 @@ export async function startPairingRuntime(options?: {
   relayEndpoints?: PairingRuntimeRelayEndpoint[];
   relayEvents?: PairingRuntimeEvents;
   onPairingOpportunity?: (payload: QRPayload | null) => void;
+  /** Trusted host owner-decision path. No callback means no account room. */
+  admitAccountDevice?: AdmitAccountDevice;
 }) : Promise<StartedPairingRuntime> {
   const config = resolveConfig();
   const identity = loadOrCreateIdentity();
@@ -100,6 +104,8 @@ export async function startPairingRuntime(options?: {
   let qrPayload: QRPayload;
   let relayConnections: RelayConnection[] = [];
   let pairingConnections: RelayConnection[] = [];
+  let accountConnections: RelayConnection[] = [];
+  const accountRoom = typeof options?.admitAccountDevice === "function" ? crypto.randomUUID() : null;
   const retiredConnections = new Set<RelayConnection>();
   const reconnectRoom = crypto.randomUUID();
   type ApprovalWindow = { requestId: string; payload: QRPayload; opportunity: PairingOpportunity; connections: RelayConnection[];
@@ -199,7 +205,7 @@ export async function startPairingRuntime(options?: {
   }
 
   qrPayload = createQRPayload(identity.publicKey, primaryRelayUrl, advertisedRelayUrls.slice(1));
-  function connectRelays(kind: "pairing" | "reconnect", payload: QRPayload, approval?: ApprovalWindow): RelayConnection[] {
+  function connectRelays(kind: "pairing" | "reconnect" | "account", payload: QRPayload, approval?: ApprovalWindow): RelayConnection[] {
     const connections: RelayConnection[] = [];
     try {
       for (const endpoint of relayEndpoints) connections.push(connectToRelay(endpoint.relayUrl.trim(), identity, bridge, {
@@ -210,7 +216,8 @@ export async function startPairingRuntime(options?: {
         qrPayload: payload,
         // Approval rooms never enter QR state, status detail, or status events.
         events: approval ? undefined : options?.relayEvents,
-        privateRoom: Boolean(approval),
+        privateRoom: Boolean(approval) || kind === "account",
+        ...(kind === "account" ? { admitNewDevice: options?.admitAccountDevice } : {}),
         ...(approval ? {
           onPeerAdmitted: () => closeApproval(approval),
           authorizePeer: (key: string, room: string, live: () => boolean) => {
@@ -245,8 +252,9 @@ export async function startPairingRuntime(options?: {
   }
   try {
     relayConnections = connectRelays("reconnect", {...qrPayload, room: reconnectRoom});
+    if (accountRoom) accountConnections = connectRelays("account", {...qrPayload, room: accountRoom});
   } catch (error) {
-    for (const relayConnection of relayConnections) {
+    for (const relayConnection of [...relayConnections, ...accountConnections]) {
       relayConnection.disconnect();
     }
     fileServer.stop();
@@ -262,8 +270,9 @@ export async function startPairingRuntime(options?: {
     identity,
     config,
     get relayConnection() { return relayConnections[0] ?? null; },
-    get relayConnections() { return [...relayConnections, ...pairingConnections, ...[...approvalWindows.values()].flatMap(window => window.connections), ...retiredConnections]; },
+    get relayConnections() { return [...relayConnections, ...accountConnections, ...pairingConnections, ...[...approvalWindows.values()].flatMap(window => window.connections), ...retiredConnections]; },
     get qrPayload() { return qrPayload; },
+    accountRoom,
     openPairing,
     cancelPairing,
     approvalPairing,
@@ -271,7 +280,7 @@ export async function startPairingRuntime(options?: {
       cancelPairing();
       for (const window of approvalWindows.values()) { clearTimeout(window.timer); closeApproval(window); }
       approvalWindows.clear();
-      for (const relayConnection of [...relayConnections, ...pairingConnections, ...retiredConnections]) {
+      for (const relayConnection of [...relayConnections, ...accountConnections, ...pairingConnections, ...retiredConnections]) {
         relayConnection.disconnect();
       }
       fileServer.stop();

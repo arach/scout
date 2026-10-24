@@ -22,6 +22,15 @@ export type PairingSnapshot = {
   qrValue: string;
 };
 
+/** Account discovery lease, never a QR invitation. */
+export type AccountPairingSnapshot = {
+  relay: string;
+  fallbackRelays?: string[];
+  accountRoom: string;
+  publicKey: string;
+  expiresAt: number;
+};
+
 export type PairingRuntimeSnapshot = {
   version: 1;
   pid: number;
@@ -38,6 +47,7 @@ export type PairingRuntimeSnapshot = {
   identityFingerprint: string | null;
   trustedPeerCount: number;
   pairing: PairingSnapshot | null;
+  accountPairing?: AccountPairingSnapshot | null;
   startedAt: number;
   updatedAt: number;
 };
