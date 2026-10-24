@@ -72,3 +72,12 @@ the audience in one diagnostic when both are present. Remove `dir` from the
 stored config, preserving other fields. The default pair itself is valid;
 a default-pair config with legacy `dir` is still refused until that field is
 removed. Doctor reports problems but does not migrate the config.
+
+Doctor uses the publisher's selection rules. It checks the host credential's
+relay/rendezvous audience only when that credential would be selected. An
+environment token/session or explicit anonymous mode does not require that
+pair to match. A disabled publisher (including `false` or `0` environment URL sentinels)
+is reported as publishing disabled, not an invalid URL. The stored bridge
+launch config is still validated in these modes; this does not hide an
+unsupported `dir` or relax the bridge's own launch policy. Doctor never
+resolves the credential source returned by the publisher's config resolver.

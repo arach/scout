@@ -44,8 +44,8 @@ export function isMeshBridgeCredentialAudience(relay: URL, destination: URL): bo
   );
 }
 
-/** Read-only diagnostics. Never reads a token file or resolves a keychain reference. */
-export function inspectMeshBridgeCredentialConfig(supportDirectory: string, rendezvousUrl: string): { ok: boolean; detail: string } {
+/** Read-only diagnostics. Omit the audience when host auth is not selected; launch validation stays. */
+export function inspectMeshBridgeCredentialConfig(supportDirectory: string, rendezvousUrl?: string): { ok: boolean; detail: string } {
   const path = join(supportDirectory, "mcp-bridge.json");
   if (!existsSync(path)) return { ok: true, detail: "No stored bridge configuration." };
   let raw: Record<string, unknown>;
@@ -53,17 +53,19 @@ export function inspectMeshBridgeCredentialConfig(supportDirectory: string, rend
   catch { return { ok: false, detail: "Stored bridge configuration is unreadable or invalid." }; }
   const issues: string[] = [];
   if (raw.dir) issues.push("unsupported dir field");
-  try {
-    const relay = new URL(String(raw.relayUrl));
-    const destination = new URL(rendezvousUrl);
-    if (!isMeshBridgeCredentialAudience(relay, destination)) {
-      // Only origins, never userinfo, paths, queries, credentials or the dir value.
-      issues.push(`relay/rendezvous pair outside issuer audience (relay=${relay.origin}; rendezvous=${destination.origin})`);
-    }
-  } catch { issues.push("invalid relay/rendezvous URL pair"); }
+  if (rendezvousUrl !== undefined) {
+    try {
+      const relay = new URL(String(raw.relayUrl));
+      const destination = new URL(rendezvousUrl);
+      if (!isMeshBridgeCredentialAudience(relay, destination)) {
+        // Only origins, never userinfo, paths, queries, credentials or the dir value.
+        issues.push(`relay/rendezvous pair outside issuer audience (relay=${relay.origin}; rendezvous=${destination.origin})`);
+      }
+    } catch { issues.push("invalid relay/rendezvous URL pair"); }
+  }
   try { validateMeshBridgeConfig(raw, supportDirectory); }
   catch { if (!raw.dir) issues.push("invalid bridge launch configuration"); }
-  return { ok: issues.length === 0, detail: issues.length ? `Stored bridge config: ${issues.join("; ")}.` : "Stored bridge config and relay/rendezvous audience are valid." };
+  return { ok: issues.length === 0, detail: issues.length ? `Stored bridge config: ${issues.join("; ")}.` : rendezvousUrl === undefined ? "Stored bridge config is valid." : "Stored bridge config and relay/rendezvous audience are valid." };
 }
 
 /** Bounded, owner-controlled snapshot; content identity detects same-mtime edits. */

@@ -160,3 +160,27 @@ test("owned mesh-bridge doctor worker reports both stored problems without secre
     detail: "Stored bridge config: unsupported dir field; relay/rendezvous pair outside issuer audience (relay=https://issuer.example.test; rendezvous=https://rendezvous.example.test)." });
   expect(existsSync(f.marker)).toBe(false);
 });
+
+test("owned bridge doctor worker reports disabled publication and skips an env-routed audience", () => {
+  const f = fixture();
+  mkdirSync(f.env.OPENSCOUT_SUPPORT_DIRECTORY);
+  writeFileSync(join(f.env.OPENSCOUT_SUPPORT_DIRECTORY, "mcp-bridge.json"), JSON.stringify({
+    relayUrl: "https://issuer.example.test", tokenKeychainService: "NeverResolveThisService",
+  }));
+  const main = resolve(import.meta.dir, "../main.ts");
+  for (const env of [
+    { OPENSCOUT_MESH_RENDEZVOUS_URL: " false ", OPENSCOUT_MESH_RENDEZVOUS_TOKEN: "" },
+    { OPENSCOUT_MESH_RENDEZVOUS_URL: "0", OPENSCOUT_MESH_RENDEZVOUS_TOKEN: "" },
+    { OPENSCOUT_MESH_RENDEZVOUS_URL: "https://other.example.test", OPENSCOUT_MESH_RENDEZVOUS_TOKEN: "SYNTHETIC-ENV-TOKEN" },
+  ]) {
+    const result = Bun.spawnSync([process.execPath, main, "__doctor-check", "mesh-bridge"], {
+      cwd: f.root, env: { ...f.env, ...env }, timeout: 20000, killSignal: "SIGKILL",
+    });
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+    const check = JSON.parse(result.stdout.toString());
+    expect(check).toMatchObject({ name: "mesh-bridge", state: "working" });
+    expect(check.detail).toContain(env.OPENSCOUT_MESH_RENDEZVOUS_TOKEN ? "host credential audience not checked" : "Rendezvous publishing disabled.");
+    expect(result.stdout.toString()).not.toContain("SYNTHETIC-ENV-TOKEN");
+    expect(existsSync(f.marker)).toBe(false);
+  }
+});
