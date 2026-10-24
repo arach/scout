@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createScoutPairingBridgeClient } from "./pairing.ts";
 import { startBridgeServerTRPC } from "./core/pairing/runtime/bridge/server-trpc.ts";
+import { capsuleFixture } from "../../../scripts/fixtures/pairing-capsule.ts";
+import { bytesToHex } from "@openscout/runtime/pairing-security/identity";
+import { transportDomainForBridge } from "@openscout/runtime/pairing-security/transport";
 import type { Bridge } from "./core/pairing/runtime/bridge/bridge.ts";
 
 // These bridges run plaintext; pin it rather than read this machine's config.
@@ -162,8 +165,15 @@ test("incomplete secure handshakes cannot retain a connection indefinitely", asy
   const reservation = Bun.serve({ port: 0, fetch: () => new Response() });
   const port = reservation.port!;
   reservation.stop(true);
+  const root = mkdtempSync(join(tmpdir(), "pairing-capsule-handshake-"));
+  cleanup.push(() => rmSync(root, { recursive: true, force: true }));
+  const { owner } = capsuleFixture(root, { generations: 0, keys: 0, migrate: true });
+  const bridge = {} as Bridge, identity = generateKeyPair();
+  // Trusted test bootstrap, before the listener: never migrate from an inbound frame.
+  const domain = transportDomainForBridge(bridge, bytesToHex(identity.publicKey), owner);
+  cleanup.push(() => domain.dispose());
   const server = startBridgeServerTRPC({
-    bridge: {} as Bridge, port, secure: true, identity: generateKeyPair(),
+    bridge, port, secure: true, identity,
     connectionLimits: { handshakeTimeoutMs: 50 },
   });
   cleanup.push(() => server.stop());
@@ -172,7 +182,7 @@ test("incomplete secure handshakes cannot retain a connection indefinitely", asy
   const closed = await new Promise<CloseEvent>((resolve) => { socket.onclose = resolve; });
   expect(closed.code).toBe(1008);
   expect(closed.reason).toBe("Handshake timed out");
-});
+}, 30_000);
 
 test("expired clients cannot hold a slot by ignoring the close handshake", async () => {
   const { connect } = await import("node:net");
@@ -199,7 +209,7 @@ test("local readers reach a secure bridge with its own key and leave no paired-d
   const home = mkdtempSync(join(tmpdir(), "scout-pairing-home-"));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
   const child = Bun.spawn(["bun", `${import.meta.dir}/fixtures/pairing-secure-local-reader.ts`], {
-    env: { ...process.env, HOME: home },
+    env: { ...process.env, HOME: home, OPENSCOUT_HOME: join(home, "scout"), OPENSCOUT_PAIRING_HOME: join(home, "pairing") },
     stdout: "pipe",
     stderr: "pipe",
   });

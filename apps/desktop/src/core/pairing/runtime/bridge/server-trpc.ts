@@ -1,3 +1,5 @@
+import {watchSharedScoutMessages} from "./broker-message-fanout.ts";
+import { subscribeTransportEvents, transportDomainForBridge, requireTransportContext, hasPairedTransport, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
 import type { PairingOpportunityControlAction, PairingRequestBinding } from "@openscout/runtime/pairing-local-socket";
 // Bridge server — Hono + tRPC edition.
 //
@@ -44,8 +46,8 @@ import { resolveConfig } from "./config.ts";
 import { handleRPC, type BridgeServerOptions } from "./server.ts";
 import { bridgeRouter, lookupMobileInboxItemForEvent, type MobileInboxItem } from "./router.ts";
 import { getTailFanout } from "./tail-fanout.ts";
+import type { TailEvent } from "@openscout/runtime/tail";
 import {
-  watchScoutMessages,
   type ScoutBrokerConversationLifecycleRecord,
   type ScoutBrokerMessageRecord,
 } from "../../../../../../../packages/cli/src/lib/core/broker/service.ts";
@@ -62,7 +64,7 @@ import {
 // Imported from router.ts when it exists; defined inline for now.
 // ---------------------------------------------------------------------------
 
-export interface BridgeContext {
+export interface BridgeContext extends TransportContext {
   bridge: Bridge;
   deviceId: string | undefined;
   cwd: string;
@@ -233,6 +235,9 @@ export function startBridgeServerTRPC(options: {
 }): { stop: () => void } {
   const { bridge, port, secure = false, identity } = options;
   const ownPublicKeyHex = identity ? bytesToHex(identity.publicKey) : null;
+  const domain = secure && identity ? transportDomainForBridge(bridge, bytesToHex(identity.publicKey)) : undefined;
+  const releaseDomain = domain?.retain();
+  const activeTransports = new Set<SecureTransport>();
 
   if (secure && !identity) {
     throw new Error("[bridge-trpc] secure mode requires an identity (key pair)");
@@ -302,7 +307,7 @@ export function startBridgeServerTRPC(options: {
           && /^[a-zA-Z0-9._:-]{1,128}$/.test(binding.requestId)
           && (binding.authorityStamp === undefined || (typeof binding.authorityStamp === "string" && /^[a-f0-9]{64}$/.test(binding.authorityStamp)))
           && (binding.publicKey === undefined || (typeof binding.publicKey === "string" && /^[a-f0-9]{64}$/.test(binding.publicKey)));
-        if (!state.localService || !options.pairingControl || !["open", "cancel", "request-open", "request-read", "request-cancel"].includes(action)
+        if (!state.transport?.isLive() || !state.localService || !options.pairingControl || !["open", "cancel", "request-open", "request-read", "request-cancel"].includes(action)
           || (requestAction && !validBinding)
           || (windowId !== undefined && typeof windowId !== "string")) {
           sendControl({id: request.id, error: {code: -32001, message: "Local pairing control requires the host identity"}});
@@ -575,7 +580,7 @@ export function startBridgeServerTRPC(options: {
       return;
     }
 
-    const res = await handleRPC(bridge, req, state.deviceId);
+    const res = await handleRPC(bridge, req, state.ctx);
     sendRaw(JSON.stringify(res));
   }
 
@@ -596,14 +601,18 @@ export function startBridgeServerTRPC(options: {
     };
 
     // Push current sessions on connect.
+    const replaySessions = () => {
     for (const session of bridge.listSessions()) {
       sendEvent(
         JSON.stringify({ seq: 0, event: { event: "session:update", session } }),
       );
     }
+    };
+    if (domain) domain.batch(replaySessions); else replaySessions();
 
     // Subscribe to future events.
-    state.unsub = bridge.onEvent((sequenced) => {
+    state.unsub = subscribeTransportEvents(domain, bridge, (sequenced) => {
+      if (state.transport && !state.transport.isLive()) return;
       logBridgeEvent(sequenced.event, sequenced.seq);
       sendEvent(
         JSON.stringify({ seq: sequenced.seq, event: sequenced.event }),
@@ -632,14 +641,15 @@ export function startBridgeServerTRPC(options: {
     // Subscribe to the broker's machine-wide harness firehose. Each TailEvent
     // is forwarded as its own raw JSON message, in parity with the SequencedEvent
     // path above. iOS decodes via TailEvent shape (no `seq` field).
-    state.tailUnsub = getTailFanout().subscribe((tailEvent) => {
-      sendEvent(JSON.stringify(tailEvent));
-    });
+    const tail = getTailFanout();
+    const onTail = (tailEvent: TailEvent) => { sendEvent(JSON.stringify(tailEvent)); };
+    state.tailUnsub = domain ? domain.subscribe(tail, tail.subscribe.bind(tail), onTail) : tail.subscribe(onTail);
 
     state.brokerWatchAbort?.abort();
     const brokerWatchAbort = new AbortController();
     state.brokerWatchAbort = brokerWatchAbort;
-    void watchScoutMessages({
+    void watchSharedScoutMessages({
+      transportDomain: domain,
       allConversations: true,
       signal: brokerWatchAbort.signal,
       onMessage(message) {
@@ -662,7 +672,7 @@ export function startBridgeServerTRPC(options: {
   // Bun.serve — combined HTTP + WebSocket
   // -------------------------------------------------------------------------
 
-  const server = Bun.serve({
+  const server = (() => { try { return Bun.serve({
     port,
 
     fetch(req, server) {
@@ -704,7 +714,7 @@ export function startBridgeServerTRPC(options: {
             {
               onReady: (remotePublicKey, readyInfo) => {
                 const pubHex = bytesToHex(remotePublicKey);
-                const trusted = pubHex === ownPublicKeyHex || (readyInfo.wasTrustedPeer && isTrustedPeer(pubHex));
+                const trusted = pubHex === ownPublicKeyHex ? transport.activateLocalService() : transport.activatePaired();
                 state.localService = pubHex === ownPublicKeyHex;
                 state.deviceId = pubHex.slice(0, 16);
                 state.secureTransport = true;
@@ -723,13 +733,13 @@ export function startBridgeServerTRPC(options: {
                 }
 
                 // Build tRPC context now that we know the peer.
-                state.ctx = {
+                state.ctx = transport.bindContext({
                   bridge,
                   deviceId: state.deviceId,
                   cwd: resolveCurrentDirectory(),
                   secureTransport: true,
                   trustedPeer: trusted,
-                };
+                });
                 state.ready = true;
 
                 // Push bridge events through the encrypted channel.
@@ -765,19 +775,27 @@ export function startBridgeServerTRPC(options: {
                 state.abortController.abort();
               },
             },
-            { trustOnComplete: false, skipTrustWrite: hex => hex === ownPublicKeyHex },
+            { trustOnComplete: false, skipTrustWrite: hex => hex === ownPublicKeyHex, domain,
+              close: (code, reason) => {
+                state.ready = false; state.pendingMessages.length = 0;
+                state.unsub?.(); state.tailUnsub?.(); state.brokerWatchAbort?.abort(); state.abortController.abort();
+                for (const ctrl of state.abortControllers.values()) ctrl.abort();
+                state.abortControllers.clear(); state.activeSubscriptions.clear();
+                activeTransports.delete(transport); ws.close(code, reason);
+                const grace = setTimeout(() => ws.terminate(), 1000); grace.unref?.();
+              } },
           );
 
-          state.transport = transport;
+          state.transport = transport; activeTransports.add(transport);
         } else {
           // --- Plaintext mode -----------------------------------------------
-          state.ctx = {
+          state.ctx = plaintextPilotContext({
             bridge,
             deviceId: undefined,
             cwd: resolveCurrentDirectory(),
             secureTransport: false,
             trustedPeer: false,
-          };
+          });
           state.ready = true;
 
           subscribeBridgeEvents(ws, state);
@@ -815,7 +833,7 @@ export function startBridgeServerTRPC(options: {
         }
       },
     },
-  });
+  }); } catch (error) { releaseDomain?.(); throw error; } })();
 
   const mode = secure ? "secure (Noise)" : "plaintext";
   const routerStatus = bridgeRouter ? "tRPC router loaded" : "legacy RPC fallback";
@@ -824,7 +842,10 @@ export function startBridgeServerTRPC(options: {
 
   return {
     stop() {
-      server.stop();
+      for (const transport of activeTransports) transport.dispose();
+      activeTransports.clear();
+      server.stop(true);
+      releaseDomain?.();
     },
   };
 }

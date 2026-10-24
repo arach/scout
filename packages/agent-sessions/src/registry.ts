@@ -60,6 +60,7 @@ export class SessionRegistry {
   async createSession(
     adapterType: string,
     options?: Partial<AdapterConfig>,
+    beforeEffect?: () => void,
   ): Promise<Session> {
     const factory = this.config.adapters[adapterType];
     if (!factory) {
@@ -88,6 +89,9 @@ export class SessionRegistry {
     } finally {
       this.pendingBranchReads.delete(pending);
     }
+    // Transport callers supply a fresh admission at this resumed effect.
+    // No transport identity or authority cache lives in the session owner.
+    beforeEffect?.();
     const adapter = factory(config);
 
     adapter.on("event", (event) => {

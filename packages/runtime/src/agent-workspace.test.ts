@@ -33,6 +33,35 @@ afterEach(() => {
 });
 
 describe("createAgentWorkspace", () => {
+  test("caller re-admission runs before directory creation and each actual git attempt", async () => {
+    const root = makeGitRepo();
+    let admissions = 0;
+    const admit = () => { admissions++; };
+    const first = await createAgentWorkspace(root, "first", undefined, admit);
+    expect(first).not.toBeNull();
+    expect(admissions).toBe(2);
+    execFileSync("git", ["branch", "already-exists"], {cwd: root});
+    admissions = 0;
+    const retry = await createAgentWorkspace(root, "second", "already-exists", admit);
+    expect(retry).not.toBeNull();
+    expect(admissions).toBe(3);
+  });
+
+  test("admission refusal is never swallowed as git failure or fallback", async () => {
+    for (const refusedAt of [1, 2, 3]) {
+      const root = makeGitRepo();
+      execFileSync("git", ["branch", "already-exists"], {cwd: root});
+      let admissions = 0;
+      const refusal = new Error("caller no longer admitted");
+      await expect(createAgentWorkspace(root, "refused", "already-exists", () => {
+        if (++admissions === refusedAt) throw refusal;
+      })).rejects.toBe(refusal);
+      expect(admissions).toBe(refusedAt);
+      expect(existsSync(join(root, SCOUT_WORKSPACES_DIRNAME, "refused"))).toBe(false);
+      expect(existsSync(join(root, SCOUT_WORKSPACES_DIRNAME))).toBe(refusedAt !== 1);
+    }
+  });
+
   test("creates a git worktree under .scout-worktrees on branch scout/<agent>", async () => {
     const root = makeGitRepo();
     const result = await createAgentWorkspace(root, "explorer");

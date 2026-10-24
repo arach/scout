@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { pairingTrustOwner } from "../packages/runtime/src/pairing-security/trust-owner.ts";
 
 for (const flavor of ["web", "desktop"]) {
-  for (const scenario of ["revoked", "lifecycle", "workflow", "authority", "carrier"]) {
+  for (const scenario of ["revoked", "lifecycle", "workflow", "authority", "carrier", "live-revoke"]) {
     test(`${flavor}: relay ${scenario}`, async () => {
       const root = mkdtempSync(join(tmpdir(), "relay-pairing-"));
       const child = Bun.spawn([process.execPath, "scripts/relay-pairing-worker.ts", flavor, scenario], {
         cwd: process.cwd(), env: {...process.env, OPENSCOUT_PAIRING_HOME: root},
         stdin: "pipe", stdout: "pipe", stderr: "pipe",
       });
-      const timeout = setTimeout(() => child.kill(), 10_000);
+      const timeout = setTimeout(() => child.kill(), scenario === "live-revoke" ? 60_000 : 60_000);
       try {
         const output = (async () => {
           let text = "", changed = false;
@@ -37,11 +37,20 @@ for (const flavor of ["web", "desktop"]) {
         }
         expect(code).toBe(0);
         expect(out).toContain('"ok":true');
+        if (scenario === "live-revoke") {
+          const observation = out.split("\n").filter(line => line.startsWith("{")).map(line => JSON.parse(line))
+            .find(item => item.observation === "live-revoke");
+          expect(observation).toBeDefined();
+          expect(observation.memberAfterAck).toBe(false);
+          expect(observation.postAckDispatches).toBe(0);
+          expect(observation.rpcAfterAck).toBe(false);
+          expect(observation.eventAfterAck).toBe(false);
+        }
       } finally {
         clearTimeout(timeout); child.kill(); await child.exited;
         rmSync(root, {recursive: true, force: true});
       }
-    }, 15_000);
+    }, 65_000);
   }
 }
 

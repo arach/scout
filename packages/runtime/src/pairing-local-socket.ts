@@ -105,6 +105,7 @@ export async function openPairingLocalChannel(
   const finish = () => {
     if (closed) return;
     closed = true;
+    transport?.dispose();
     socket.removeEventListener("message", handleMessage);
     if (socket.readyState === 0 || socket.readyState === 1) {
       socket.close();
@@ -167,6 +168,7 @@ export async function openPairingLocalChannel(
           identity,
           {
             onReady: (_remoteKey, info) => {
+              if (closed) {transport?.dispose(); return;}
               if (info.remotePublicKeyHex !== ownKeyHex) {
                 fail(new Error("The process on the pairing bridge port did not answer with this machine's bridge key."));
                 return;
@@ -193,6 +195,7 @@ export async function openPairingLocalChannel(
     secure: Boolean(transport),
     isOpen: () => !closed && socket.readyState === 1,
     send(text: string) {
+      if (closed || socket.readyState !== 1) throw new Error("Local pairing channel is closed");
       if (transport) {
         transport.send(text);
       } else {

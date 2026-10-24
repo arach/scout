@@ -1,3 +1,4 @@
+import {namedControlFailed} from "./fixtures/source-control-evidence.ts";
 /** Actual source mutation controls, each paired with its healthy fixture. */
 import {mkdtempSync,mkdirSync,readFileSync,writeFileSync,rmSync,statfsSync} from "node:fs";
 import {join} from "node:path";
@@ -47,7 +48,7 @@ try{
     const child=Bun.spawn([process.execPath,"test",test,"--test-name-pattern",c.test],{stdout:"pipe",stderr:"pipe"});
     const [exit,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
     const log=out+err;writeFileSync(join(output,`${c.id}-${kind}.log`),log);
-    if(kind==="healthy"?exit!==0:!(exit!==0&&log.includes("(fail)")&&log.includes(c.test)&&!(/Cannot find module|ParseError|SyntaxError|timed out|fixture coordination/.test(log))))throw Error(`${c.id}/${kind}: invalid evidence in ${output}`);
+    if(kind==="healthy"?exit!==0:!(exit!==0&&namedControlFailed(log,c.test)&&!(/Cannot find module|ParseError|SyntaxError|timed out|fixture coordination/.test(log))))throw Error(`${c.id}/${kind}: invalid evidence in ${output}`);
    }
    results.push({id:c.id,caught:true,hashes});
   }finally{rmSync(scratch,{recursive:true,force:true});}

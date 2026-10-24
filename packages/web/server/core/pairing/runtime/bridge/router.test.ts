@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { pairedRouterFixture } from "../../../../../../../scripts/fixtures/paired-router-context.ts";
 import { SessionRegistryError } from "@openscout/agent-sessions";
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -8,6 +9,12 @@ import { join } from "node:path";
 import type { Bridge } from "./bridge.ts";
 import { bridgeRouter } from "./router.ts";
 import { revokeArtifactPresentation } from "./artifact-presentation.ts";
+
+// Durable fixture setup is separate from the bounded resolver/Noise tests.
+setDefaultTimeout(30_000);
+let transports: ReturnType<typeof pairedRouterFixture>;
+beforeAll(() => { transports = pairedRouterFixture(); }, 120_000);
+afterAll(() => transports?.dispose());
 
 function createBridgeStub() {
   const replayCalls: string[] = [];
@@ -64,6 +71,11 @@ function createBridgeStub() {
   };
 }
 
+const disposeCallers: (() => void)[] = [];
+afterEach(() => {
+  for (const dispose of disposeCallers.splice(0)) dispose();
+});
+
 function createCaller(
   bridge: Bridge,
   context: {
@@ -74,15 +86,9 @@ function createCaller(
     relayUrls?: string[];
   } = {},
 ) {
-  return bridgeRouter.createCaller({
-    bridge,
-    cwd: "/tmp/openscout",
-    deviceId: context.deviceId,
-    secureTransport: context.secureTransport,
-    trustedPeer: context.trustedPeer,
-    reconnectRoom: context.reconnectRoom,
-    relayUrls: context.relayUrls,
-  });
+  const fixture = transports.bind({ bridge, cwd: "/tmp/openscout", ...context });
+  disposeCallers.push(fixture.dispose);
+  return bridgeRouter.createCaller(fixture.ctx);
 }
 
 function restoreEnvironment(name: string, value: string | undefined) {
@@ -132,10 +138,10 @@ describe("bridgeRouter sync compatibility", () => {
     } as unknown as Bridge;
 
     try {
-      await expect(createCaller(bridge).mobile.artifactPresent({
+      await expect(bridgeRouter.createCaller({ bridge, cwd: root }).mobile.artifactPresent({
         sessionId: "session-1",
         sourcePath: ".",
-      })).rejects.toThrow("trusted paired device");
+      })).rejects.toThrow("Live authenticated transport required");
 
       const grant = await createCaller(bridge, {
         deviceId: "device-1",
@@ -155,13 +161,36 @@ describe("bridgeRouter sync compatibility", () => {
     }
   });
 
+  test("requires a live transport even when display trust flags are supplied", async () => {
+    const stub = createBridgeStub();
+    await expect(bridgeRouter.createCaller({ bridge: stub.bridge, cwd: "/tmp/scout" }).sync.status())
+      .rejects.toMatchObject({ code: "UNAUTHORIZED", message: "Live authenticated transport required" });
+    await expect(bridgeRouter.createCaller({ bridge: stub.bridge, cwd: "/tmp/scout", deviceId: "phone",
+      secureTransport: true, trustedPeer: true }).sync.status())
+      .rejects.toMatchObject({ code: "UNAUTHORIZED", message: "Live authenticated transport required" });
+  });
+
   test("mobile.endpoints requires the protected encrypted trusted mobile transport", async () => {
     const stub = createBridgeStub();
-
-    await expect(createCaller(stub.bridge).mobile.endpoints()).rejects.toThrow(
-      "Endpoint discovery requires an encrypted trusted mobile transport",
-    );
+    await expect(bridgeRouter.createCaller({ bridge: stub.bridge, cwd: "/tmp/scout" }).mobile.endpoints())
+      .rejects.toThrow("Endpoint discovery requires an encrypted trusted mobile transport");
   });
+
+  test.each(["paired-without-device-id", "local-service"] as const)(
+    "mobile.endpoints refuses a live %s context at its paired-device gate", async (kind) => {
+      const { bridge } = createBridgeStub();
+      const fixture = transports.bind({ bridge, cwd: "/tmp/scout",
+        deviceId: kind === "local-service" ? "local-reader" : undefined,
+      }, { local: kind === "local-service" });
+      disposeCallers.push(fixture.dispose);
+      const caller = bridgeRouter.createCaller(fixture.ctx);
+      // Prove the opaque transport passed the real outer live guard first.
+      expect(await caller.sync.status()).toMatchObject({ sessionCount: 2 });
+      await expect(caller.mobile.endpoints()).rejects.toMatchObject({
+        code: "UNAUTHORIZED", message: "Endpoint discovery requires an encrypted trusted mobile transport",
+      });
+    },
+  );
 
   test("mobile.endpoints returns current service coordinates on the protected transport", async () => {
     const previousHome = process.env.OPENSCOUT_HOME;

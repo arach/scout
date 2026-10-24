@@ -1,3 +1,4 @@
+import {namedControlFailed} from "./fixtures/source-control-evidence.ts";
 /** Planted source bypasses in isolated copies, never the checkout. */
 import {mkdtempSync,mkdirSync,readFileSync,writeFileSync,rmSync,statfsSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -72,7 +73,7 @@ expect(syncs).toBe(16);
       const child=Bun.spawn([process.execPath,"test",testFile,"--test-name-pattern",control.test],{stdout:"pipe",stderr:"pipe"});
       const [code,stdout,stderr]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
       const log=stdout+stderr;writeFileSync(join(out,`${control.id}-${kind}.log`),log);
-      if(kind==="healthy" && code!==0 || kind==="bypass" && !(code!==0 && log.includes("(fail)") && log.includes(control.test) && !log.includes("Cannot find module"))){console.error(log);throw Error(`${control.id}:${kind} did not reach expected assertion; evidence: ${out}`);}
+      if(kind==="healthy" && code!==0 || kind==="bypass" && !(code!==0 && namedControlFailed(log,control.test) && !log.includes("Cannot find module"))){console.error(log);throw Error(`${control.id}:${kind} did not reach expected assertion; evidence: ${out}`);}
     }
     results.push({id:control.id,test:control.test,caught:true,hashes});
   }finally{rmSync(scratch,{recursive:true,force:true});}

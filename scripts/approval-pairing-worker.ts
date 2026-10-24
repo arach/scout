@@ -49,6 +49,7 @@ const relay = startRelay(port, {hostname: "127.0.0.1"});
 const relayURL = `ws://127.0.0.1:${port}`, httpURL = `http://127.0.0.1:${port}`;
 process.env.OPENSCOUT_PAIRING_PORT = String(bridgePort);
 writeFileSync(join(process.env.OPENSCOUT_PAIRING_HOME!, "config.json"), JSON.stringify({port: bridgePort, secure: true, sessions: []}));
+pairingTrustOwner().migrateToCapsule("registry-fixture-cutover");
 const { startPairingRuntime } = await import(pathToFileURL(resolve(base, "runtime.ts")).href);
 const carriers: WebSocket[] = [];
 const OriginalWebSocket = globalThis.WebSocket;

@@ -46,6 +46,9 @@ const bridge = {
   onEvent: (fn: (e: unknown) => void) => {subscriptions++; bridgeEvents = fn; return () => {bridgeEvents = undefined;};},
 };
 let runtime: any, bridgePort = 0, workflowRoom: string | undefined;
+// The live-session baseline uses the production cutover before listeners.
+if (scenario === "live-revoke") seed();
+owner.migrateToCapsule("live-baseline-cutover");
 let connection: ReturnType<typeof connectToRelay>;
 if (scenario === "workflow") {
   bridgePort = await freePort();
@@ -110,15 +113,33 @@ async function denied(pattern: "XX" | "IK", keys = phone) {
 }
 try {
   await Bun.sleep(40);
-  if (scenario === "revoked") {
+  if (scenario === "live-revoke") {
+    const current = await accepted("IK");
+    const beforeDispatch = dispatches;
+    current.data.length = 0;
+    revoke(); // mutate returns only after its verified publication acknowledgement.
+    const revokedRevision = owner.read().revision;
+    const memberAfterAck = owner.read().peers.some(p => p.publicKey === key);
+    if (current.state.closed === 0) {
+      current.transport.send(JSON.stringify({id: "after-ack", method: "session/list"}));
+      current.transport.send(JSON.stringify({id: 91, jsonrpc: "2.0", method: "query", params: {path: "probe"}}));
+    }
+    bridgeEvents?.({seq: 91, event: {event: "secret-event"}});
+    await Bun.sleep(100);
+    console.log(JSON.stringify({observation: "live-revoke", flavor, revokedRevision, memberAfterAck,
+      postAckDispatches: dispatches - beforeDispatch,
+      rpcAfterAck: current.data.some(x => x.includes("rpc-secret")),
+      eventAfterAck: current.data.some(x => x.includes("secret-event")),
+      phoneClose: current.state.closed, data: current.data}));
+  } else if (scenario === "revoked") {
     seed(); const first = await accepted(); revoke();
-    // Already-connected revocation is the separate registry change. This fix
-    // must not let an unadmitted reconnect evict this still-connected peer.
+    // The registry now invalidates the admitted old handle after revoke. An
+    // unadmitted retry must remain denied and cannot resurrect either handle.
     const retry = await connect("IK"); await Bun.sleep(60);
     const retrusted = owner.read().peers.some(p => p.publicKey === key);
     console.log(JSON.stringify({flavor, scenario, retrusted, phoneClose: retry.state.closed, data: retry.data}));
     assert.equal(retrusted, false, "revoked phone was re-trusted by remembered-room reconnect");
-    assert.equal(retry.state.closed, 4003); assert.equal(retry.data.length, 0); assert.equal(first.state.closed, 0);
+    assert.equal(retry.state.closed, 4003); assert.equal(retry.data.length, 0); assert.equal(first.state.closed, 4003);
     await denied("XX");
   } else if (scenario === "lifecycle") {
     await denied("XX");

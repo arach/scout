@@ -1,8 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { pairedRouterFixture } from "../../../../../../../scripts/fixtures/paired-router-context.ts";
 
 import type { Bridge } from "./bridge.ts";
 import { bridgeRouter, lookupMobileInboxItemForEvent } from "./router.ts";
 import type { SessionState } from "@openscout/agent-sessions";
+
+// Durable fixture setup is separate from the bounded resolver/Noise tests.
+setDefaultTimeout(30_000);
+let transports: ReturnType<typeof pairedRouterFixture>;
+beforeAll(() => { transports = pairedRouterFixture(); }, 120_000);
+afterAll(() => transports?.dispose());
 
 function createBridgeStub() {
   const replayCalls: string[] = [];
@@ -59,19 +66,51 @@ function createBridgeStub() {
   };
 }
 
-function createCaller(bridge: Bridge) {
-  return bridgeRouter.createCaller({
-    bridge,
-    cwd: "/tmp/openscout",
-    deviceId: undefined,
-  });
+const disposeCallers: (() => void)[] = [];
+afterEach(() => {
+  for (const dispose of disposeCallers.splice(0)) dispose();
+});
+
+function createCaller(
+  bridge: Bridge,
+  context: {
+    deviceId?: string;
+    secureTransport?: boolean;
+    trustedPeer?: boolean;
+    reconnectRoom?: string;
+    relayUrls?: string[];
+  } = {},
+) {
+  const fixture = transports.bind({ bridge, cwd: "/tmp/openscout", ...context });
+  disposeCallers.push(fixture.dispose);
+  return bridgeRouter.createCaller(fixture.ctx);
 }
 
 describe("mobile reconnect coordinates", () => {
+  test.each(["paired-without-device-id", "local-service"] as const)(
+    "mobile.endpoints refuses a live %s context at its paired-device gate", async (kind) => {
+      const { bridge } = createBridgeStub();
+      const fixture = transports.bind({ bridge, cwd: "/tmp/scout",
+        deviceId: kind === "local-service" ? "local-reader" : undefined,
+      }, { local: kind === "local-service" });
+      disposeCallers.push(fixture.dispose);
+      const caller = bridgeRouter.createCaller(fixture.ctx);
+      // Prove the opaque transport passed the real outer live guard first.
+      expect(await caller.sync.status()).toMatchObject({ sessionCount: 2 });
+      await expect(caller.mobile.endpoints()).rejects.toMatchObject({
+        code: "UNAUTHORIZED", message: "Trusted encrypted mobile transport required",
+      });
+    },
+  );
+
   test("requires a trusted encrypted transport and reports its reconnect room", async () => {
     const { bridge } = createBridgeStub();
-    await expect(createCaller(bridge).mobile.endpoints()).rejects.toThrow("Trusted encrypted mobile transport required");
-    const caller = bridgeRouter.createCaller({ bridge, cwd: "/tmp/scout", deviceId: "phone",
+    await expect(bridgeRouter.createCaller({ bridge, cwd: "/tmp/scout" }).mobile.endpoints())
+      .rejects.toMatchObject({ code: "UNAUTHORIZED", message: "Live authenticated transport required" });
+    await expect(bridgeRouter.createCaller({ bridge, cwd: "/tmp/scout", deviceId: "phone",
+      secureTransport: true, trustedPeer: true }).mobile.endpoints())
+      .rejects.toMatchObject({ code: "UNAUTHORIZED", message: "Live authenticated transport required" });
+    const caller = createCaller(bridge, { deviceId: "phone",
       secureTransport: true, trustedPeer: true, reconnectRoom: "stable-reconnect-room",
       relayUrls: ["wss://relay.example.test"] });
     const result = await caller.mobile.endpoints();

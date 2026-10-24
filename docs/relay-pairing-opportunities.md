@@ -243,3 +243,131 @@ phone UI or complete credential-revocation tests.
 through the actual own-key control and both relay clients, with instrumented
 application sinks. It verifies keyed and legacy admission, private delivery,
 coexisting windows, denial/replay/expiry, and authority cancellation.
+
+## Live-session authority and close codes
+
+Secure endpoints require the v2 trust capsule before they start listening. A
+host with a v1 store refuses startup with `pairing_trust_capsule_migration_required`.
+It does not migrate on an incoming request. The host's trusted local cutover
+procedure must drain old desktop, CLI and web users, exclude unsupported writers,
+call the canonical owner's `migrateToCapsule(migrationId)` and complete recovery
+before starting these endpoints. Registry startup is not that deployment
+procedure and does not certify that old processes have been excluded.
+
+A paired transport takes its authority stamp once after successful admission.
+Every later admission and protected send verifies current authority. A changed
+stamp invalidates the old handle, including after revoke and regrant of the same
+key. Any real pairing authority change therefore requires older, still-trusted
+phones to reconnect. Advisory updates and opening, cancelling or retiring an
+unused pairing window do not change authority. The host's own authenticated
+local-service channels are a separate class, not paired-phone principals.
+
+The runtime exports `PAIRING_AUTHORITY_CHANGED_CLOSE_CODE` with value **4006**.
+Its reason is `authority changed, reconnect`. This code is used only when the
+same fresh view that invalidates the stamp still contains the authenticated full
+key. A missing key, unavailable membership or changed root uses **4003**. Codes
+4000 through 4005 are occupied; in particular the hosted relay uses 4005 for
+`Host asleep`. A revoke acknowledgement confirms authority publication, not
+physical closure or phone acknowledgement across every process. Close delivery
+is advisory; a lost close frame does not preserve permission.
+
+Pairing revocation is not removal of all device access. Existing SSH grants,
+open terminal sessions, issued HTTP bearers and already-received data have
+separate owners. Credential matching and prefix-only legacy migration remain
+required follow-on work after the registry. Only an established full-key owner
+can migrate automatically; ambiguous or unknown legacy ownership requires local
+review or explicit re-provisioning. The registry does not complete credential
+revocation or the private consuming-graph proof.
+
+### Staged revocation limits
+
+An operation a phone started before the revoke ACK can still complete its effects in:
+
+- process warmup/launch (Codex app-server, Claude stream-JSON, Pi RPC, tmux)
+- mobile post-startup effects (binding registration, peer-session opening, seed send)
+- broker sends/updates/delivery with routing and fallbacks
+- local-agent and Codex commands and ACP invocation/delivery
+- harness replies and live terminal/permission input
+- artifact/attachment/web handoff parsers
+
+PTY output rides its own terminal WebSocket path outside SecureTransport; mobile
+terminal provisioning installs SSH access that pairing revoke does not remove;
+credentials are PR B.
+
+Later stages remove fenced entries from this list. They do not soften the
+remaining entries or add entries without a new review ruling. The final census
+stage removes this limit text after qualification of the complete surface.
+
+### Resumed mobile agent configuration
+
+Both bridge families forward a trusted local admission callback from legacy
+`mobile/session/create` and tRPC `mobile.createSession` through `upScoutAgent`
+and `startLocalAgent` into the configuration writers. The callback resolves the
+live transport again; no stamp, positive permission or callback is serialized.
+
+Configuration JSON is serialized before admission. Directory submission is
+checked next, and file submission is checked again after asynchronous directory
+creation. The project ignore-file write re-admits after its asynchronous read;
+legacy relay-link removal re-admits after project setup. Cold creation, imported
+project updates, existing project ignore updates, agent forks and warm override
+updates carry the same callback. Refusals propagate without a configuration
+fallback. Trusted local callers that omit the hook retain their behavior.
+
+The hook also reaches lazy ACP warmup for `grok_acp`, `kimi_acp` and
+`devin_acp`. These branches publish a durable agent registry without starting
+an ACP process. Registry publication re-admits after its asynchronous reads,
+then re-admits the file after directory creation through the same configuration
+writer. A protected warmup refusal propagates instead of becoming a fallback
+binding. Callers without the hook retain the existing best-effort fallback.
+The callback belongs to the current call; it is not stored in a session or
+agent record. Joining an existing warmup flight does not transfer authority
+from its initiating caller or cancel that caller's work. If that flight rejects
+with its initiating caller's original admission refusal, each joiner retries
+its own warmup through the same flight map. A protected joiner re-admits under
+its own hook; a trusted local joiner without a hook retains local behavior.
+Concurrent retry callers still coalesce. Ordinary warmup failures do not trigger
+this retry. A revoked joiner receives its own refusal at retry entry, while a
+live protected joiner can publish its own warmup.
+
+Process-launch warmup, broker binding, peer-session creation and seed delivery
+have separate owners and still require their own resumed-effect qualification.
+In particular, the warmup entry check does not qualify an engine's later
+filesystem, daemon, fallback or process submission after another await.
+A denied configuration or lazy ACP registry write does not
+roll back filesystem operations already submitted. These submission checks do
+not certify a private host's combined pairing-authority/journal ordering or
+remove separately issued credentials.
+
+### Synchronous delivery batches
+
+The runtime registry shares one verified authority view across a synchronous
+Bridge event fanout, broker message/lifecycle fanout, initial-session replay or
+desktop Tail fanout. Every target still checks its own exact handle and lifetime.
+Nested delivery batches reuse only the current synchronous stack. A publication
+or a newer admission discards an older batch permission; it never rebases an old
+handle. Network frames leave after the batch's narrow managed read callback
+returns, rather than from inside that callback. This does not certify ordering
+against an outer private native invocation.
+
+No view survives an await, microtask, timer or later source callback. An explicit
+managed context is always validated by the owner, even inside a public delivery
+batch. Writer notifications run after verified durable publication or retry ACK,
+not on ordinary reads. They remain an invalidation hint, never an authorization
+cache or a substitute for the disk indicator and full-read backstop.
+
+Independent inbound frames and subscription results resumed after a wait still
+require fresh decisions. Synchronous fanout batching does not establish a bound
+on arbitrary streaming CPU, and does not introduce a delayed output buffer,
+frame aggregation policy or new authorization lifetime. Broker watcher domain
+bindings are trusted local composition values and are not forwarded on the wire.
+
+Each awaited subscription frame requires one full authority read. Prior gate (g)
+owner-only large-tier CPU samples averaged 10.618–10.962 ms per read. At 75% of
+one core, that gives a **reference model** of 68.4–70.6 read-only frames/s before
+registry, encoding or network work. This is not a measured capacity of the
+registry implementation. The registry cost gate must include a declared rate
+of at least 10 awaited frames/s across live subscriptions, concurrently with
+10 RPC admissions/s and 10 event batches/s at both store tiers. A passing gate
+qualifies that declared workload, not the reference streaming rate. Payload
+aggregation or a cheaper read requires separate review; a positive authority
+view must never be retained across a wait to meet a CPU ceiling.

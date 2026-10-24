@@ -1204,6 +1204,7 @@ export async function createScoutSession(
   input: CreateScoutSessionInput,
   currentDirectory?: string,
   deviceId?: string,
+  beforeEffect?: () => void,
 ): Promise<ScoutMobileSessionHandle> {
   // The mobile client passes a projectRoot path as workspaceId. Valid current
   // directories stay on the hot path; missing/legacy paths take the guarded
@@ -1240,7 +1241,7 @@ export async function createScoutSession(
   let agentCwd = workspace.root;
   let worktreeCreated = false;
   if (input.worktree) {
-    const worktreeResult = await createGitWorktree(workspace.root, agentName, input.branch);
+    const worktreeResult = await createGitWorktree(workspace.root, agentName, input.branch, beforeEffect);
     if (worktreeResult) {
       agentCwd = worktreeResult.path;
       worktreeCreated = true;
@@ -1259,7 +1260,7 @@ export async function createScoutSession(
     reasoningEffort: input.reasoningEffort,
     permissionProfile: input.profile?.trim() || undefined,
     branch: input.branch,
-  });
+  }, beforeEffect); // mobile agent configuration admission forwarding
 
   const broker = await loadScoutBrokerContext();
   const bindingSync = await registerScoutLocalAgentBinding({
@@ -1407,8 +1408,9 @@ async function createGitWorktree(
   projectRoot: string,
   agentName: string,
   requestedBranch?: string,
+  beforeEffect?: () => void,
 ): Promise<{ path: string; branch: string } | null> {
-  const result = await createAgentWorkspace(projectRoot, agentName, requestedBranch);
+  const result = await createAgentWorkspace(projectRoot, agentName, requestedBranch, beforeEffect);
   if (!result) return null;
   return { path: result.path, branch: result.branch };
 }
@@ -1975,7 +1977,7 @@ export async function sendScoutMobileComms(
 export async function markScoutMobileConversationRead(input: {
   conversationId: string;
   lastReadMessageId?: string | null;
-}): Promise<{ conversationId: string; unreadCount: number }> {
+}, beforeEffect?: () => void): Promise<{ conversationId: string; unreadCount: number }> {
   const broker = await loadScoutBrokerContext();
   if (!broker) throw new Error("Relay is not reachable.");
   if (!broker.snapshot.conversations?.[input.conversationId]) {
@@ -2008,6 +2010,7 @@ export async function markScoutMobileConversationRead(input: {
       lastReadMessageId,
     },
     broker.baseUrl,
+    beforeEffect,
   );
   // Read through the latest message ⇒ caught up. The next list pull reconciles
   // if a new inbound message landed in the same instant.

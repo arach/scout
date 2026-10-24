@@ -58,6 +58,10 @@ export interface PairingOpportunity {
   isOpen(): boolean;
   admit(publicKey: string, room: string, isLive: () => boolean): boolean;
 }
+/** A single verified, advisory-free authority decision. Never a cached grant. */
+export type TransportAuthorityView = Readonly<{
+  rootId: string; stamp: string; revision: number; has(publicKey: string): boolean;
+}>;
 export type TrustSnapshot = Readonly<{ revision: number; peers: readonly TrustedPeer[] }>;
 /** One coherent authority read. Advisory lastSeen is deliberately excluded. */
 export type PairingAuthorityView = TrustSnapshot & Readonly<{stamp: string}>;
@@ -125,6 +129,61 @@ function fullKey(key: string) { if (!/^[0-9a-f]{64}$/.test(key)) refuse("full_ke
 export class PairingTrustOwner {
   readonly path: string;
   private rootId: string | null = null;
+  private transportObservers = new Set<(view: TransportAuthorityView) => void>();
+  private transportView(root: PairingRootIdentity, state: State): TransportAuthorityView {
+    const keys = new Set(state.peers.map(p => p.publicKey));
+    return Object.freeze({rootId: root.id, stamp: this.pairingOpportunityStamp(root, state),
+      revision: state.revision, has: (key: string) => keys.has(key)});
+  }
+  /** Notification only: observers must invalidate locally and defer cleanup.
+   * Observer failure cannot change the outcome of a durable publication. */
+  observeTransportAuthority(observer: (view: TransportAuthorityView) => void): () => void {
+    this.transportObservers.add(observer);
+    return () => { this.transportObservers.delete(observer); };
+  }
+  /** A writer's verified durable acknowledgement, never an ordinary read.
+   * Helpers/readers use the disk indicator or fresh decision, not this hint. */
+  private notifyTransportPublication(root: PairingRootIdentity, state: State): void {
+    if (!this.transportObservers.size) return;
+    try {
+      const view = this.transportView(root, state);
+      for (const observer of this.transportObservers) { try { observer(view); } catch { /* A hint cannot undo publication. */ } }
+    } catch { /* Notification is not authority and cannot turn a durable ACK into failure. */ }
+  }
+  /** v1 is intentionally unavailable to registry listeners. The host must drain
+   * old binaries and explicitly run migrateToCapsule before starting them. */
+  withTransportAuthority<T>(body: (view: TransportAuthorityView) => T, context?: PairingTrustContext): T {
+    const root = this.root();
+    if (!root || !this.readFile(root, CUTOVER, false)) return refuse("capsule_migration_required");
+    // Reuse the actual managed invocation across the one coherent view and the
+    // synchronous decision. Never acquire a second gate or pair stamp + read.
+    if (context === undefined && adapters.has(root.id))
+      return this.withInvocation(ctx => this.withTransportAuthority(body, ctx));
+    return this.operation(context, bound => {
+      const authority = this.readAuthority(context);
+      const keys = new Set(authority.peers.map(peer => peer.publicKey));
+      const result = body(Object.freeze({rootId: bound!.id, stamp: authority.stamp,
+        revision: authority.revision, has: (key: string) => keys.has(key)}));
+      if (result && typeof (result as {then?: unknown}).then === "function") refuse("synchronous_view_required");
+      return result;
+    });
+  }
+  /** Local-service lifetime check; does not inspect phone membership. */
+  transportRootIdentity(): string {
+    const root = this.root();
+    if (!root) return refuse("root_missing");
+    return root.id;
+  }
+  /** Untrusted scheduling hint only. No result from this method authorizes.
+   * Includes in-place edits, namespace replacement and error transitions. */
+  transportChangeIndicator(): string {
+    const root = this.root();
+    if (!root) return "missing";
+    return JSON.stringify([root.id, ...readdirSync(root.path).filter(n =>
+      n === PEERS || n === MARKER || n === CUTOVER || n.startsWith(PREFIX) || n.startsWith(CAPSULE_PREFIX))
+      .sort().map(n => {const s = lstatSync(join(root.path, n), {bigint: true});
+        return [n, String(s.dev), String(s.ino), String(s.size), String(s.mtimeNs), String(s.ctimeNs)];})]);
+  }
   constructor(path: string) { this.path = canonical(path); }
   private root(create = false): PairingRootIdentity | null {
     if (create) {
@@ -397,15 +456,20 @@ export class PairingTrustOwner {
   private readyState(root: PairingRootIdentity, materialize = true): State {
     this.finishPendingCutover(root);
     const state = this.state(root, true, materialize);
+    let ready = state;
     if (state.capsule) {
-      // Recovery consumes the full retry rows/buffers. A view never enters it
-      // with a partial build; completion precedes the final exhaustive view.
-      if (state.capsule.needsRecovery) this.completeCapsule(root, materialize ? state : this.state(root, true));
-      return state.capsule.needsRecovery ? this.state(root, false, materialize) : state;
+      // Recovery needs the complete retry build, never the compact view.
+      if (state.capsule.needsRecovery) {
+        this.completeCapsule(root, materialize ? state : this.state(root, true));
+        ready = this.state(root, false, materialize);
+      }
+    } else if (state.pendingStage) {
+      this.completePublication(root, state);
+      ready = this.state(root);
     }
-    if (state.pendingStage) this.completePublication(root, state);
-    return state.pendingStage ? this.state(root) : state;
+    return ready;
   }
+
   private cutDirectory(root: PairingRootIdentity, claim: CutClaim) {
     this.check(root);
     const stat = lstatSync(join(root.path, CUT_DIRECTORY));
@@ -1181,6 +1245,7 @@ export class PairingTrustOwner {
       if(invocation)this.validateInvocation(invocation,root);
       const committed=this.readyState(root);
       if(committed.outcomes[result.mutationId]?.request!==request)refuse("outcome_unavailable");
+      this.notifyTransportPublication(root,committed);
       return structuredClone(result);
     } finally {
       if(!reserved && !uncertain){
@@ -1355,6 +1420,7 @@ export class PairingTrustOwner {
         if (invocation) this.validateInvocation(invocation, root);
         const verified = this.state(root);
         if (verified.outcomes[mutationId]?.request !== request) refuse("outcome_unavailable");
+        this.notifyTransportPublication(root, verified);
         return structuredClone(saved.outcome);
       }
       if (state.revision !== expectedRevision) refuse("revision_conflict");
@@ -1408,6 +1474,7 @@ export class PairingTrustOwner {
         if (invocation) this.validateInvocation(invocation, root);
         const committed = this.state(root, true);
         if (committed.outcomes[mutationId]?.request !== request) refuse("outcome_unavailable");
+        this.notifyTransportPublication(root, committed);
         return structuredClone(outcome);
       } finally {
         for (const path of [reserved ? null : stagedPeers, reserved ? null : stagedGeneration, stagedMarker]) {

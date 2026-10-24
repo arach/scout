@@ -1,0 +1,131 @@
+{
+  "schema": "scout.live-session-air-gate/v1",
+  "status": "policy",
+  "productHead": "fdb262ad0c81aa656f0009be2477aff237be0efa",
+  "baselineHead": "6c19d6c10c2e93192a5b7b4296bbf10531a55fb8",
+  "host": {
+    "expected": {
+      "model": "Mac14,2",
+      "chip": "Apple M2",
+      "ramBytes": 17179869184,
+      "logicalCPUs": 8,
+      "architecture": "arm64",
+      "osVersion": "26.6.2",
+      "osBuild": "25G83"
+    },
+    "oneGateOneHost": true,
+    "noOtherAgentOrBuildWorkload": true,
+    "workloadTerm": "no agent harness, build, browser, dev server, or any workload started for or during the gate; the host's resident idle login session is part of the environment; enforced by the quantitative envelope terms and recorded by full process snapshot before and after every phase."
+  },
+  "buns": {
+    "1.3.14": "e0c90ec15d33363e6b70713d56bc3b2c7585c17f40a0fe0f8fd9305901d4e233",
+    "1.3.13": "fc0b4cae13a911098f0c61d13b7d9fd6b640bdb9f6b6a0b78bdb9d778c12bc3f"
+  },
+  "nativeLibrarySHA256": "7a8642524cd4cca3c67739617422100efd5efed797c2f82f2e982f0a36384a04",
+  "envelope": {
+    "minimumDiskFreeGiB": 3,
+    "maximumLoad1PerLogicalCPU": 0.5,
+    "maximumLoad5PerLogicalCPU": 0.5,
+    "thermal": "pmset -g therm: nominal before and after every phase; unknown refuses",
+    "power": "AC",
+    "lowPowerMode": "off",
+    "memory": {
+      "kind": "absolute-swap-pressure-delta-v1",
+      "maximumSwapUsedGiB": 2,
+      "requiredPressureLevel": 1,
+      "maximumSystemSwapDeltaPages": 0
+    }
+  },
+  "method": {
+    "runsPerTierPerBun": 3,
+    "warmups": 100,
+    "samples": 1000,
+    "revokeTrials": 100,
+    "seconds": 60,
+    "rpcAdmissionsPerSecond": 10,
+    "eventBatchesPerSecond": 10,
+    "awaitedFramesPerSecond": 12,
+    "burstRPCs": 100,
+    "burstEventBatches": 100,
+    "paths": [
+      "legacy",
+      "trpc",
+      "fallback",
+      "relay-reconnect",
+      "relay-qr",
+      "relay-request",
+      "relay-retired-qr",
+      "relay-retired-request"
+    ]
+  },
+  "ceilings": {
+    "realistic": {
+      "admission": [
+        5,
+        15,
+        50
+      ],
+      "gateHold": [
+        3,
+        10,
+        30
+      ],
+      "sweep": [
+        5,
+        15,
+        50
+      ],
+      "revoke": [
+        600,
+        1150,
+        1300
+      ],
+      "steadyCPU": 25,
+      "idleCPU": 1
+    },
+    "large": {
+      "admission": [
+        25,
+        75,
+        200
+      ],
+      "gateHold": [
+        20,
+        60,
+        150
+      ],
+      "sweep": [
+        25,
+        75,
+        200
+      ],
+      "revoke": [
+        700,
+        1250,
+        1500
+      ],
+      "steadyCPU": 75,
+      "idleCPU": 5
+    }
+  },
+  "samplePolicy": "No per-sample exclusions; p99 evidence only; inside-envelope failure final at this head except the verified #34069 stall-only invalidity declared in syncSpawnRecorder; whole-run invalidity retained, identical-manifest/same-hardware retry only; interrupted state requires reviewed recovery",
+  "instrumentOverhead": "Native getrusage, owner phase counters, memory/heap observations, GC markers and synchronous record output perturb this instrument; no forced GC; identical sync-spawn wrappers/counts/logs in every process; controller OS process witnesses polled only while a synchronous call is in flight",
+  "cpuBaseline": "Real pre-registry endpoints at baselineHead on the same host and fixture format. Raw guarded server CPU determines acceptance; paired baseline delta is reported separately, including instrument/crypto differences; no head verification bypass.",
+  "managedTestAdapter": "One shared native flock per fixture; actual public invocation contract; separate wait/hold; not private native journal qualification",
+  "crossProcessClock": "Native CLOCK_MONOTONIC microseconds encoded as nanoseconds, parent/child bracket verified; never Bun process-relative hrtime",
+  "syncSpawnRecorder": {
+    "apis": [
+      "execSync",
+      "execFileSync",
+      "spawnSync",
+      "Bun.spawnSync"
+    ],
+    "bootstrap": "every traffic and worker process, before product imports; arguments, call site, start and duration; returns, exceptions and stdio unchanged",
+    "evidence": "per-process ready/start/end/exit JSONL, counts reconciled; live ps witnesses before cleanup; zero requires all twelve clean runs",
+    "stallClassification": "A phase that fails ONLY by stall (whole-phase timeout or worker kill) WITH the verified #34069 signature — synchronous spawn in flight, attributable exited/zombie child unreaped, no ceiling exceeded before stall — is INVALID, not failure. Unknown or incomplete proof, other stalls and failures remain FINAL at the head.",
+    "maximumSignatureInvalidsPerCampaign": 2,
+    "thirdSignatureInvalid": "Stop campaign permanently at this head; freshly declare once at the reviewed post-bump pin; never auto-bump or retry.",
+    "retry": "whole run, identical manifest and same hardware only; all twelve qualifying runs must be clean",
+    "proofLimits": "OS witness within one second before stall, own process group, direct-child command and birth-time match; missing/inconclusive proof refuses the exception. Incomplete CPU/delivery receipt refuses the exception."
+  }
+}

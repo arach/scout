@@ -283,6 +283,9 @@ export type ScoutBrokerJsonRequestOptions<T> = {
   socketPath?: string | null;
   signal?: AbortSignal;
   acceptErrorJson?: (value: unknown) => value is T;
+  /** Caller-owned synchronous re-admission after serialization, before each
+   * wire submission, including a resumed transport fallback. Never serialized. */
+  beforeEffect?: () => void;
 };
 
 type ScoutBrokerWireResponse = {
@@ -347,17 +350,34 @@ async function requestBrokerOverHttp<T>(
   path: string,
   options: ScoutBrokerJsonRequestOptions<T>,
 ): Promise<ScoutBrokerWireResponse> {
-  const response = await fetch(new URL(path, normalizeBaseUrl(baseUrl)), {
+  const url = new URL(path, normalizeBaseUrl(baseUrl));
+  const init = {
     method: options.method ?? (options.body === undefined ? "GET" : "POST"),
     headers: requestHeaders(options),
     body: requestBody(options),
     signal: options.signal,
-  });
+  };
+  admitBrokerEffect(options); // HTTP submission, after serialization/fallback
+  const response = await fetch(url, init);
   return {
     ok: response.ok,
     status: response.status,
     text: await response.text(),
   };
+}
+
+// Internal marker prevents an admission refusal carrying an I/O-like code from
+// becoming a retry. The public request boundary rethrows the original cause.
+class BrokerEffectAdmissionRefusal {
+  constructor(readonly cause: unknown) {}
+}
+function admitBrokerEffect(options: ScoutBrokerJsonRequestOptions<unknown>): void {
+  try {
+    const result = (options.beforeEffect as (() => unknown) | undefined)?.();
+    if (result && typeof (result as {then?: unknown}).then === "function")
+      throw new Error("synchronous broker admission required");
+  }
+  catch (error) { throw new BrokerEffectAdmissionRefusal(error); }
 }
 
 function shouldFallbackFromUnixSocket(error: unknown): boolean {
@@ -407,6 +427,7 @@ function requestBrokerOverUnixSocket<T>(
       reject(error);
     };
 
+    admitBrokerEffect(options); // Unix-socket submission, after serialization
     const request = httpRequest(
       {
         socketPath,
@@ -527,7 +548,13 @@ export async function requestScoutBrokerJsonWithTrace<T>(
   path: string,
   options: ScoutBrokerJsonRequestOptions<T> = {},
 ): Promise<ScoutBrokerJsonWithTrace<T>> {
-  const { response, trace } = await requestBrokerWire(baseUrl, path, options);
+  let wire: ScoutBrokerWireResult;
+  try { wire = await requestBrokerWire(baseUrl, path, options); }
+  catch (error) {
+    if (error instanceof BrokerEffectAdmissionRefusal) throw error.cause;
+    throw error;
+  }
+  const { response, trace } = wire;
   let parsed: unknown;
   let parsedJson = false;
   if (response.text.length > 0) {
