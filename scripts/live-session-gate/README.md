@@ -15,3 +15,10 @@ Read [the maintained procedure](../../docs/live-session-cost-gate.md).
 Only scripts, this procedure and the manifest belong in the instrument change.
 Never add a production bypass to make a gate pass. No library binary, machine
 identity, result, host path or generated cache is committed here.
+
+`spawn-recorder.ts` records every synchronous-spawn API in every bootstrap.
+`stall.py` verifies the narrow #34069 signature and enforces the campaign cap.
+`test_stall.py` checks signature refusals and persistent third-invalid stop.
+`recorder-check.ts` checks alias coverage, return/exception identity and real
+stdio/status behavior in a fresh process (`<output>` and optional `real`).
+These self-tests are not qualification runs.

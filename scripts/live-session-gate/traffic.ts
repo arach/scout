@@ -1,4 +1,5 @@
 /** Generator and fixture process. Serving processes never build their stores. */
+import {installSyncSpawnRecorder} from "./spawn-recorder.ts";
 import fs from "node:fs";
 import {createServer} from "node:net";
 import {join,dirname} from "node:path";
@@ -6,6 +7,7 @@ import {pathToFileURL,fileURLToPath} from "node:url";
 import {createHash} from "node:crypto";
 import {instrument,nativeClock,assertCommonClock} from "./instrument.ts";
 const config=JSON.parse(fs.readFileSync(process.argv[2]!,"utf8")),here=dirname(fileURLToPath(import.meta.url));
+installSyncSpawnRecorder(config.output);
 if(process.env.BUN_JSC_logGC!=="1")throw Error("native GC log required");
 const clock=nativeClock(config.library);
 const executableSHA256=createHash("sha256").update(fs.readFileSync(process.execPath)).digest("hex");if(config.executableSHA256&&executableSHA256!==config.executableSHA256)throw Error("generator executable mismatch");
@@ -26,6 +28,7 @@ if(config.phase==="prepare"){
  emit({kind:"prepared",tier:config.tier,generations,keys:keyCount,elapsedMs:performance.now()-started,usageBefore:usage,usageAfter:process.resourceUsage(),legacyBytes:f.legacyBytes,largestLegacyGenerationBytes:Math.max(...f.rows.map((row:any)=>row[6])),migration:f.barrier.migration,stamp:f.stamp,authorityFiles:fs.readdirSync(config.root).map(name=>({name,bytes:fs.statSync(join(config.root,name)).size}))});probe.close();clock.close();process.exit(0);
 }
 const keys=JSON.parse(fs.readFileSync(config.keys,"utf8"));
+let stopping=false,failureMessage:string|undefined;
 let serial=0;const children:any[]=[],peers:any[]=[],invalidations:any[]=[];
 const wait=async(fn:()=>boolean,label:string,ms=30000)=>{const until=performance.now()+ms;while(!fn()){if(performance.now()>until)throw Error("gate timeout: "+label);await Bun.sleep(1);}};
 const port=()=>new Promise<number>((r,j)=>{const s=createServer();s.on("error",j);s.listen(0,"127.0.0.1",()=>{const n=(s.address()as any).port;s.close(e=>e?j(e):r(n));});});
@@ -38,6 +41,7 @@ async function spawn(role:string,flavor?:string){
   else if(m.kind==="invalidated")invalidations.push({worker:id,...m});
   else if(m.kind==="reply"){const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(Error(m.error)):p.resolve(m.result);}}
  }});
+ void child.exited.then(code=>{if(!stopping)emit({kind:"worker-exit",pid:child.pid,exitCode:code,signalCode:child.signalCode,atUnixMs:Date.now()});});
  const ask=async(command:string,data:any={})=>{const n=serial++;let timer:any;try{return await Promise.race([new Promise<any>((resolve,reject)=>{pending.set(n,{resolve,reject});child.send({...data,command,id:n});}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error("worker command timeout: "+command)),30000);})]);}finally{clearTimeout(timer);pending.delete(n);}};
  const value={child,ask,ready:()=>ready,sub,id,logs};children.push(value);
  await wait(()=>!!ready||child.exitCode!==null,"worker ready");if(!ready||(ready.version!==Bun.version||ready.executableSHA256!==executableSHA256))throw Error("worker startup failed");assertCommonClock(BigInt(ready.at),launched,readyReceived!);return value;
@@ -146,8 +150,10 @@ try{
   }else throw Error("unknown workload phase");
  }
  emit({kind:"complete",phase:config.phase,elapsedMs:performance.now()-start,generatorUsageBefore:clientUsage,generatorUsageAfter:process.resourceUsage(),qualification:!config.smoke,version:Bun.version});
+}catch(error){failureMessage=String((error as any)?.message??error);emit({kind:"generator-error",message:failureMessage,stack:(error as any)?.stack,atUnixMs:Date.now()});throw error;
 }finally{
+ stopping=true;
  for(const p of peers){p.ws.onclose=null;p.ws.close();}
- for(const w of children){try{const stopped=await w.ask("stop");emit({kind:"workerUsage",role:w.sub.role,flavor:w.sub.flavor,started:w.ready(),stopped});}catch{}w.child.kill();await w.child.exited;for(const fd of w.logs)fs.closeSync(fd);}
+ for(const w of children){let stopAcknowledged=false;try{const stopped=await w.ask("stop");stopAcknowledged=true;emit({kind:"workerUsage",role:w.sub.role,flavor:w.sub.flavor,started:w.ready(),stopped});}catch{}emit({kind:"worker-kill",pid:w.child.pid,stopAcknowledged,alreadyExited:w.child.exitCode!==null,cause:failureMessage,atUnixMs:Date.now()});w.child.kill();await w.child.exited;emit({kind:"worker-kill-result",pid:w.child.pid,signalCode:w.child.signalCode,atUnixMs:Date.now()});for(const fd of w.logs)fs.closeSync(fd);}
  clock.close();
 }

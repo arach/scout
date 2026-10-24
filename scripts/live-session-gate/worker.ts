@@ -1,11 +1,13 @@
 /** Isolated real endpoint or third-mutator process; never used by the app. */
 import {mock} from "bun:test";
+import {installSyncSpawnRecorder} from "./spawn-recorder.ts";
 import fs from "node:fs";
 import {join,resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {createHash} from "node:crypto";
 import {instrument} from "./instrument.ts";
 const config=JSON.parse(fs.readFileSync(process.argv[2]!,"utf8"));
+const spawnRecorder=installSyncSpawnRecorder(config.output);
 const send=(value:any)=>process.send?.(value),log=(value:any)=>fs.writeSync(1,JSON.stringify(value)+"\n");
 const source=(p:string)=>pathToFileURL(join(config.source,p)).href;
 const {pairingTrustOwner}=await import(source("packages/runtime/src/pairing-security/trust-owner.ts"));
@@ -78,7 +80,7 @@ process.on("message",async(m:any)=>{
    finally{owner.completeCapsule=original;}
    const recovered=probe.measure("recovery",()=>owner.readAuthority());log({kind:"recovery-complete",revision:recovered.revision});
   }else if(m.command==="stop"){
-   connection?.disconnect();server?.stop();relay?.stop();const usage=probe.usage(),at=probe.nowNs().toString();probe.close();send({kind:"reply",id:m.id,result:{stopped:true,usage,at}});setTimeout(()=>process.exit(0),10);return;
+   connection?.disconnect();server?.stop();relay?.stop();const usage=probe.usage(),at=probe.nowNs().toString();probe.close();spawnRecorder.finish();send({kind:"reply",id:m.id,result:{stopped:true,usage,at}});setTimeout(()=>process.exit(0),10);return;
   }else throw Error("unknown command");
   send({kind:"reply",id:m.id,result:{ok:true,streams:streamWaiters.size}});
  }catch(error){send({kind:"reply",id:m.id,error:String(error)});}

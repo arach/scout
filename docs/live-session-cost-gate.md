@@ -168,3 +168,60 @@ host-envelope qualification, and writes no qualification journal. It does not
 weaken the production verifier, alter policy, run the full timing gate, or
 qualify the Air. Its reduced sample counts and durations cannot count as gate
 passes. Use both pinned Buns; a policy/manifest change requires re-sealing.
+
+## Synchronous-spawn recorder and the #34069 exception
+
+Before a product import, every traffic and worker process installs
+`spawn-recorder.ts`. It wraps `node:child_process` `execSync`, `execFileSync`
+and `spawnSync`, and `Bun.spawnSync`. Both bare and `node:` imports, named
+exports, default exports and `require` receive the same wrappers. Bun's pinned
+`syncBuiltinESMExports` does not update named bindings; the gate publishes the
+wrappers through its existing test-module mechanism instead. No product file
+changes. Async spawn functions remain unchanged.
+
+Each process writes a separate `*.sync-spawn.jsonl` file with a ready record,
+API counts, arguments, call site, start time and duration. A wrapper returns the
+original result or throws the original exception. It does not change options
+or stdio. A worker writes its final counts before its existing stop ACK; a
+traffic process writes them on exit. A clean phase requires every process's
+recorder and reconciled final counts, including zero. API counts count wrapper
+invocations, not distinct OS children; one API can delegate to another.
+
+The controller retains OS process witnesses while a recorded synchronous call
+is in flight, including immediately before timeout cleanup. These witnesses
+are outside the measured serving processes. The manifest declares this
+instrument overhead. A process snapshot produced by cleanup itself is not
+proof of the defect. A worker killed by the existing generator cleanup also
+needs a timeout cause, a missing stop ACK and a matching actual signal receipt.
+An unrelated generator failure does not receive the exception.
+
+Fable's ruling 3(ii) applies mechanically:
+
+- A phase that fails **only** by whole-phase timeout or worker kill, with a
+  synchronous spawn still in flight, an attributable exited/zombie child still
+  unreaped, and no ceiling exceeded before the stall, is **invalid**, not a pass
+  or final product failure.
+- The controller requires a live OS witness within one second before the stall,
+  a direct-child relationship, the owned process group, matching kernel command
+  name (`ps ucomm`, which survives zombie argument loss),
+  and child birth time consistent with the call. Missing, stale or ambiguous
+  evidence refuses the exception. Completed samples retain their native GC and
+  counter checks. Prefix quantiles are conservative and never qualify a run.
+  Without a completed CPU/delivery receipt, a load-phase stall cannot receive
+  the exception. A preceding ceiling violation or independent error also
+  refuses the exception.
+- The per-head journal counts these invalids across all tiers, Buns and runs,
+  including attempts that also breach the envelope. At most two are repeatable,
+  only as whole runs on the same hardware with the identical manifest. The
+  third permanently stops this campaign. It requires a freshly declared gate
+  once at a separately reviewed post-bump pin. The controller never changes a
+  pin or starts that campaign automatically.
+- An inside-envelope stall or failure without the verified signature remains
+  final at this head. All twelve qualifying runs must be clean. The controller
+  reports aggregate recorder counts; zero across all measured phases must be
+  observed, not inferred from source inspection or these short local profiles.
+
+The six-hour window may be split between whole runs on the same hardware and
+manifest. Preserve the declared run order, never pause a run, and retain 30 s
+pacing between runs within a session. A later Bun bump needs its own reviewed
+PR and full gate; it does not invalidate A1's qualification at its two pins.

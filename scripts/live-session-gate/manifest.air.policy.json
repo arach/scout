@@ -108,9 +108,24 @@
       "idleCPU": 5
     }
   },
-  "samplePolicy": "No per-sample exclusions; p99 evidence only; inside-envelope failure final at this head; whole-run invalidity retained, identical-manifest/same-hardware retry only; interrupted state requires reviewed recovery",
-  "instrumentOverhead": "Native getrusage, owner phase counters, memory/heap observations, GC markers and synchronous record output perturb this instrument; no forced GC",
+  "samplePolicy": "No per-sample exclusions; p99 evidence only; inside-envelope failure final at this head except the verified #34069 stall-only invalidity declared in syncSpawnRecorder; whole-run invalidity retained, identical-manifest/same-hardware retry only; interrupted state requires reviewed recovery",
+  "instrumentOverhead": "Native getrusage, owner phase counters, memory/heap observations, GC markers and synchronous record output perturb this instrument; no forced GC; identical sync-spawn wrappers/counts/logs in every process; controller OS process witnesses polled only while a synchronous call is in flight",
   "cpuBaseline": "Real pre-registry endpoints at baselineHead on the same host and fixture format. Raw guarded server CPU determines acceptance; paired baseline delta is reported separately, including instrument/crypto differences; no head verification bypass.",
   "managedTestAdapter": "One shared native flock per fixture; actual public invocation contract; separate wait/hold; not private native journal qualification",
-  "crossProcessClock": "Native CLOCK_MONOTONIC microseconds encoded as nanoseconds, parent/child bracket verified; never Bun process-relative hrtime"
+  "crossProcessClock": "Native CLOCK_MONOTONIC microseconds encoded as nanoseconds, parent/child bracket verified; never Bun process-relative hrtime",
+  "syncSpawnRecorder": {
+    "apis": [
+      "execSync",
+      "execFileSync",
+      "spawnSync",
+      "Bun.spawnSync"
+    ],
+    "bootstrap": "every traffic and worker process, before product imports; arguments, call site, start and duration; returns, exceptions and stdio unchanged",
+    "evidence": "per-process ready/start/end/exit JSONL, counts reconciled; live ps witnesses before cleanup; zero requires all twelve clean runs",
+    "stallClassification": "A phase that fails ONLY by stall (whole-phase timeout or worker kill) WITH the verified #34069 signature — synchronous spawn in flight, attributable exited/zombie child unreaped, no ceiling exceeded before stall — is INVALID, not failure. Unknown or incomplete proof, other stalls and failures remain FINAL at the head.",
+    "maximumSignatureInvalidsPerCampaign": 2,
+    "thirdSignatureInvalid": "Stop campaign permanently at this head; freshly declare once at the reviewed post-bump pin; never auto-bump or retry.",
+    "retry": "whole run, identical manifest and same hardware only; all twelve qualifying runs must be clean",
+    "proofLimits": "OS witness within one second before stall, own process group, direct-child command and birth-time match; missing/inconclusive proof refuses the exception. Incomplete CPU/delivery receipt refuses the exception."
+  }
 }
