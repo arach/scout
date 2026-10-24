@@ -247,6 +247,22 @@
           "reason": "PR #134 performs an argv-only local security keychain lookup with a five-second SIGKILL timeout and child-exit settlement; no shell. Credential validation and issuer binding do not change this policy."
         }
       ]
+    },
+    {
+      "id": "pr-139-watch-retention-heap-probe",
+      "sourceHead": "8d0240e061d23437fca6dcef5cabfa5bf46b982a",
+      "reason": "PR #139 adds exactly one test-only Bun.spawn pair for the bounded watcher retained-heap probe. No other policy entry is added, retired or edited.",
+      "fromCount": 176,
+      "toCount": 177,
+      "retired": [],
+      "added": [
+        {
+          "path": "packages/cli/src/lib/core/broker/watch-retention.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "7770b94f9d1ae62172a7aae8bd1e6d51964f5b24fd042bec61eb925a97da04bf",
+          "reason": "PR #139 isolates the synthetic watcher heap probe in a scratch HOME, with a 15-second SIGKILL timeout and child-exit settlement; no production spawning allowance."
+        }
+      ]
     }
   ]
 }

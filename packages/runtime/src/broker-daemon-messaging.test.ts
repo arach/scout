@@ -648,3 +648,14 @@ describe("broker daemon messaging routes", () => {
     }));
   }, 15_000);
 });
+
+test("exact message reads include fresh canonical messages, not only rotated history", async () => {
+  const h = await broker.startBroker();
+  await broker.seedBasicConversation(h);
+  const record = { id: "exact-message", conversationId: "channel.shared", actorId: "operator", class: "human",
+    body: "a".repeat(65536), createdAt: Date.now(), metadata: { clientMessageId: "client-exact" } };
+  await broker.postJson(h.baseUrl, "/v1/messages", record);
+  const result = await broker.getJson<{ message: typeof record }>(h.baseUrl, "/v1/messages/exact-message");
+  expect(result.message).toMatchObject(record);
+  expect((await broker.requestJson(h.baseUrl, "/v1/messages/missing")).status).toBe(404);
+}, 15000);
