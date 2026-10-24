@@ -13,7 +13,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { resolvedPairingConfig } from "./core/pairing/runtime/config.ts";
 import { assertIsolatedPairingRunStateWrite } from "./pairing-run-state.ts";
-import { localConfigHome, resolveWebPort } from "@openscout/runtime/local-config";
+import { localConfigHome } from "@openscout/runtime/local-config";
 import { tryLoadIdentityPublicKeyHex } from "./core/pairing/runtime/security/identity.ts";
 
 const RECONCILE_INTERVAL_MS = 5_000;
@@ -167,8 +167,8 @@ export function startScoutPairLanBeacon(
   const relayPort = resolvedPairingConfig().port + 1;
   // Always advertise the real web port (the Mac's `/pair` endpoint) so the phone
   // never assumes a default. Prefer the bound port the caller passed; fall back to
-  // the configured web port rather than omitting it.
-  const webPort = normalizeWebPort(options.webPort) ?? resolveWebPort();
+  // the core bridge port rather than a departed web-app port.
+  const webPort = normalizeWebPort(options.webPort) ?? resolvedPairingConfig().port;
 
   let advert: ChildProcess | null = null;
   let stopped = false;

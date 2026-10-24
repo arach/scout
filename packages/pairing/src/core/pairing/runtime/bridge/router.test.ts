@@ -167,6 +167,8 @@ describe("bridgeRouter sync compatibility", () => {
     const previousHome = process.env.OPENSCOUT_HOME;
     const previousBrokerHost = process.env.OPENSCOUT_BROKER_HOST;
     const previousRtcPort = process.env.SCOUT_RTC_PORT;
+    const previousWebEntry = process.env.OPENSCOUT_WEB_SERVER_ENTRY;
+    process.env.OPENSCOUT_WEB_SERVER_ENTRY = "";
     const previousFetch = globalThis.fetch;
     process.env.OPENSCOUT_HOME = mkdtempSync(join(tmpdir(), "openscout-router-test-"));
     delete process.env.OPENSCOUT_BROKER_HOST;
@@ -194,7 +196,7 @@ describe("bridgeRouter sync compatibility", () => {
       expect(result.ports.web).toBe(43120);
       expect(result.ports.pairingBridge).toBe(43130);
       expect(result.endpoints.brokerUrl).toBe("http://127.0.0.1:43110");
-      expect(result.endpoints.webUrl).toBe("http://127.0.0.1:43120");
+      expect(result.endpoints.webUrl).toBeNull();
       expect(result.endpoints.pairingBridgeUrl).toBe("ws://127.0.0.1:43130");
       expect(result.voice).toEqual({
         available: false,
@@ -206,6 +208,7 @@ describe("bridgeRouter sync compatibility", () => {
       restoreEnvironment("OPENSCOUT_HOME", previousHome);
       restoreEnvironment("OPENSCOUT_BROKER_HOST", previousBrokerHost);
       restoreEnvironment("SCOUT_RTC_PORT", previousRtcPort);
+      restoreEnvironment("OPENSCOUT_WEB_SERVER_ENTRY", previousWebEntry);
       globalThis.fetch = previousFetch;
     }
   });
@@ -395,4 +398,33 @@ describe("bridgeRouter sync compatibility", () => {
     ]);
     expect(stub.replayCalls).toEqual(["latest-session"]);
   });
+});
+
+
+test("mobile endpoints advertise web/voice only when apps explicitly provide them", async () => {
+  const root = mkdtempSync(join(tmpdir(), "core-endpoints-"));
+  const before = { web: process.env.OPENSCOUT_WEB_SERVER_ENTRY, voice: process.env.SCOUT_RTC_PORT };
+  const originalFetch = globalThis.fetch;
+  let probes = 0;
+  globalThis.fetch = (async () => { probes++; throw Error("no app service"); }) as typeof fetch;
+  try {
+    process.env.OPENSCOUT_WEB_SERVER_ENTRY = "";
+    delete process.env.SCOUT_RTC_PORT;
+    const caller = bridgeRouter.createCaller({bridge: createBridgeStub().bridge, cwd: root, deviceId: "phone", secureTransport: true, trustedPeer: true});
+    const core = await caller.mobile.endpoints();
+    expect(core.endpoints.webUrl).toBeNull();
+    expect(core.voice.available).toBe(false);
+    expect(probes).toBe(0);
+    const entry = join(root, "selected-app.mjs");
+    writeFileSync(entry, "export {};", {mode: 0o600});
+    process.env.OPENSCOUT_WEB_SERVER_ENTRY = entry;
+    const withApp = await caller.mobile.endpoints();
+    expect(withApp.endpoints.webUrl).toContain(`:${withApp.ports.web}`);
+    expect(probes).toBe(1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnvironment("OPENSCOUT_WEB_SERVER_ENTRY", before.web);
+    restoreEnvironment("SCOUT_RTC_PORT", before.voice);
+    rmSync(root, {recursive:true, force:true});
+  }
 });

@@ -11,8 +11,8 @@ import { watchSharedScoutMessages } from "./broker-message-fanout.ts";
 // same signature as `startBridgeServer` so runtime.ts can swap between them.
 //
 // Architecture:
-//   - Hono handles HTTP (health, future REST endpoints)
-//   - @hono/trpc-server serves tRPC queries/mutations over HTTP
+//   - Hono handles health and host pairing HTTP ingress only
+//   - Bridge tRPC queries, mutations, and subscriptions remain Noise-only
 //   - WebSocket connections are upgraded manually and go through the same
 //     Noise Protocol handshake as the original server.  Once the secure
 //     channel is established, decrypted messages are parsed as tRPC wire

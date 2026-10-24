@@ -1,3 +1,4 @@
+import { resolveLegacyWebEntry } from "@openscout/runtime/web-full-client";
 // tRPC v11 router for the Bridge server.
 //
 // Maps every JSON-RPC method from the legacy switch statement in server.ts
@@ -278,12 +279,18 @@ async function buildMobileEndpointManifest(ctx: BridgeContext) {
   const pairingBridgePort = resolveConfig().port;
   const pairingFileServerPort = pairingBridgePort + 2;
   const brokerUrl = httpUrl(host, brokerPort);
-  const webUrl = httpUrl(host, webPort);
+  // A configured apps entry is optional; the core has no web application.
+  let webUrl: string | null = null;
+  try {
+    if (resolveLegacyWebEntry(process.env, import.meta.dir)) webUrl = httpUrl(host, webPort);
+  } catch { /* A missing/refused app must not become a confidently dead endpoint. */ }
   const pairingBridgeUrl = wsUrl(host, pairingBridgePort);
   const pairingFileServerUrl = httpUrl(host, pairingFileServerPort);
   const relayUrls = ctx.relayUrls ?? currentMobileRelayUrls(host, pairingBridgePort);
   const voicePort = resolveVoiceLegPort();
-  const voiceHealth = await probeVoiceLegHealth(voicePort);
+  const configuredVoice = Number(process.env.SCOUT_RTC_PORT);
+  const voiceHealth: VoiceLegHealth = webUrl !== null || (Number.isInteger(configuredVoice) && configuredVoice > 0 && configuredVoice < 65_536)
+    ? await probeVoiceLegHealth(voicePort) : { reachable: false, asr: "unknown" };
   const voiceReachableFromPhone = voiceHealth.reachable && isMobileReachableHost(host);
 
   const nodeName = process.env.OPENSCOUT_NODE_NAME?.trim() || osHostname();

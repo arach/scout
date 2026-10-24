@@ -76,3 +76,6 @@ export function readBundledScoutVersion(distDirectory: string): string | null {
   }
   return null;
 }
+
+// Reuse the existing explicit app-entry selector; do not rediscover app trees.
+export { resolveLegacyWebEntry } from "./legacy-app-services.js";
