@@ -1768,3 +1768,15 @@ test("exact flight reads avoid snapshots and distinguish absence from unavailabl
   h.deps.readFlight = async () => { throw Error("storage unavailable"); };
   expect((await requestRouter(h, "GET", "/v1/flights/unavailable")).response.status).toBe(503);
 });
+
+test("exact message reads do not snapshot and preserve durable bytes, absence and storage errors", async () => {
+  const message = { id: "message/encoded", conversationId: "conversation", actorId: "operator", class: "human", body: "x".repeat(65536), metadata: { clientMessageId: "client" }, createdAt: 1 };
+  const h = createHarness({ readMessage: async (id: string) => { expect(id).toBe("message/encoded"); return message; } } as never);
+  h.deps.runtime.snapshot = () => { throw Error("must not snapshot"); };
+  const result = await requestRouter(h, "GET", "/v1/messages/message%2Fencoded");
+  expect(result.response.status).toBe(200); expect(result.body).toEqual({ message });
+  h.deps.readMessage = async () => undefined;
+  expect((await requestRouter(h, "GET", "/v1/messages/absent")).response.status).toBe(404);
+  h.deps.readMessage = async () => { throw Error("storage unavailable"); };
+  expect((await requestRouter(h, "GET", "/v1/messages/unavailable")).response.status).toBe(503);
+});

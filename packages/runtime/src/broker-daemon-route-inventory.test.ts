@@ -85,6 +85,7 @@ const expectedRouteInventory = [
   "GET /v1/mesh/snapshot",
   "GET /v1/message-reactions",
   "GET /v1/messages",
+  "GET /v1/messages/:id",
   "GET /v1/missions/:id/log",
   "GET /v1/node",
   "GET /v1/notification-routing",

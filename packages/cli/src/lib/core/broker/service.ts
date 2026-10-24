@@ -5148,11 +5148,11 @@ export async function watchScoutMessages(
       const cached = messagesById.get(id);
       if (cached) return cached;
       // Exact durable reads survive both local cache and runtime hot-set eviction.
-      const stored = await recover(() => brokerReadJson<{ record: ScoutBrokerMessageRecord }>(
-        baseUrl, `/v1/history/records/message/${encodeURIComponent(id)}`, controller.signal,
+      const stored = await recover(() => brokerReadJson<{ message: ScoutBrokerMessageRecord }>(
+        baseUrl, `/v1/messages/${encodeURIComponent(id)}`, controller.signal,
       ));
-      if (!stored?.record) return undefined;
-      const reference = messageReference(stored.record);
+      if (!stored?.message) return undefined;
+      const reference = messageReference(stored.message);
       messagesById.set(reference);
       return reference;
     };

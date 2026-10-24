@@ -224,6 +224,7 @@ export type BrokerHttpRouterDeps = {
   historyQueries?: BrokerHistoryQueries;
   quarantineQueries?: BrokerQuarantineQueries;
   readFlight?: (id: string) => Promise<FlightRecord | undefined>;
+  readMessage?: (id: string) => Promise<MessageRecord | undefined>;
   readHistoricalInvocationSnapshot?: (id: string) => Promise<{ invocation: InvocationRequest | null; flight: FlightRecord | null; deliveries: DeliveryIntent[] }>;
   deliveryReceiptsOwnedByService?: boolean;
   mcpEvents?: BrokerMcpEvents;
@@ -1528,6 +1529,21 @@ export function createBrokerHttpRouter(
       json(response, 200, await brokerService.listMessageReactions?.(channelId) ?? []);
     } catch (error) {
       badRequest(response, error);
+    }
+    return;
+  }
+
+  const messageReadMatch = method === "GET" ? url.pathname.match(/^\/v1\/messages\/([^/]+)$/) : null;
+  if (messageReadMatch) {
+    try {
+      const id = decodeURIComponent(messageReadMatch[1]!);
+      if (!id || id.length > 1024) throw new TypeError("invalid message id");
+      if (!deps.readMessage) throw new Error("Message storage is unavailable.");
+      const message = await deps.readMessage(id);
+      json(response, message ? 200 : 404, message ? { message } : { error: "message_not_found" });
+    } catch (error) {
+      json(response, error instanceof TypeError || error instanceof URIError ? 400 : 503,
+        { error: "message_read_unavailable", detail: error instanceof Error ? error.message : String(error) });
     }
     return;
   }

@@ -55,7 +55,7 @@ test("lifecycle correlation survives both cache eviction and pre-watch records w
     } }));
     lookups.push(path);
     if (path.startsWith("/v1/invocations/")) return Response.json({ invocation: invocation(path.split("inv-")[1]) });
-    if (path.startsWith("/v1/history/records/message/")) return Response.json({ record: message(path.split("/").at(-1)!) });
+    if (path.startsWith("/v1/messages/")) return Response.json({ message: message(path.split("/").at(-1)!) });
     throw Error(`unexpected full-snapshot or live route ${path}`);
   }) as unknown as typeof fetch;
   await watchScoutMessages({ allConversations: true, onMessage() {}, onLifecycle(record) { lifecycle.push(record); } });
@@ -63,7 +63,7 @@ test("lifecycle correlation survives both cache eviction and pre-watch records w
     expect.objectContaining({ conversationId: "conversation", messageId: "0", clientMessageId: "client-0", invocationId: "inv-0", flightId: "flight-0", state: "completed" }),
     expect.objectContaining({ conversationId: "conversation", messageId: "before", clientMessageId: "client-before", invocationId: "inv-before", state: "acknowledged" }),
   ]);
-  expect(lookups).toEqual(["/v1/invocations/inv-0", "/v1/history/records/message/0", "/v1/invocations/inv-before", "/v1/history/records/message/before"]);
+  expect(lookups).toEqual(["/v1/invocations/inv-0", "/v1/messages/0", "/v1/invocations/inv-before", "/v1/messages/before"]);
 });
 
 test("cancellation releases a pending reader and never calls back after abort", async () => {
