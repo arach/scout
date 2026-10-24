@@ -1,4 +1,5 @@
 /** Real bound context; dependency and native sinks are isolated to this child. */
+import {fixtureRuntime} from "./fixtures/process-runtime-isolation.ts";
 import {mock} from "bun:test";
 import assert from "node:assert/strict";
 import {mkdirSync,writeFileSync,realpathSync} from "node:fs";
@@ -10,6 +11,7 @@ import {capsuleFixture} from "./fixtures/pairing-capsule.ts";
 import {fixtureHost,liveTransport,generateKeyPair} from "./fixtures/live-transport.ts";
 import {bytesToHex} from "../packages/runtime/src/pairing-security/identity.ts";
 import {TransportDomain,requireTransportContext} from "../packages/runtime/src/pairing-security/transport.ts";
+await fixtureRuntime.probe();
 const [kind,target,state,flavor="web"]=process.argv.slice(2),home=process.env.HOME!;
 assert(["router","engine","codex-turn"].includes(kind!));assert(["live","revoke","trusted-join"].includes(state!));
 process.env.OPENSCOUT_BUN_BIN=process.execPath;process.env.OPENSCOUT_PROBES_SOCKET=join(home,"absent.sock");process.env.OPENSCOUT_PI_SCOUT_EXTENSION="0";
@@ -75,4 +77,4 @@ try{
  if(state==="live"){assert.equal(effects,1);if(kind==="engine")assert.match(String(result),/fixture native launch submission observed/);}
  else if(kind==="codex-turn"&&target==="accepted"){assert.equal(effects,1,"accepted native input remains earlier work");assert(acceptedTracking!(),"accepted turn tracking must survive a later revoke ACK");assert.equal((result as any).threadId,"fixture-thread");}
  else{assert.equal(effects,state==="trusted-join"?1:0);if(state!=="trusted-join")assert.equal(lateMutations,0);assert.match(String(result),/Unauthorized|live authenticated/i);}
-}finally{release();if(operation)await operation;if(joined)await joined;if(cleanup)await cleanup();domain.dispose();}
+}finally{release();if(operation)await operation;if(joined)await joined;if(cleanup)await cleanup();domain.dispose();await fixtureRuntime.close();}

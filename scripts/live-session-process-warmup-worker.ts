@@ -1,5 +1,6 @@
 /** Real mobile dispatch and warmup owners; all files and sinks stay in HOME.
  * The launch sink records submission, never starts a native harness. */
+import {fixtureRuntime} from "./fixtures/process-runtime-isolation.ts";
 import {mock} from "bun:test";
 import assert from "node:assert/strict";
 import {mkdirSync,realpathSync,readFileSync,writeFileSync} from "node:fs";
@@ -10,6 +11,7 @@ import {capsuleFixture} from "./fixtures/pairing-capsule.ts";
 import {fixtureHost,liveTransport,generateKeyPair} from "./fixtures/live-transport.ts";
 import {bytesToHex} from "../packages/runtime/src/pairing-security/identity.ts";
 import {TransportDomain,requireTransportContext} from "../packages/runtime/src/pairing-security/transport.ts";
+await fixtureRuntime.probe();
 const [flavor,protocol,harness,stage,configPath]=process.argv.slice(2);
 assert(["web","desktop"].includes(flavor!));assert(["legacy","trpc"].includes(protocol!));
 assert(["claude"].includes(harness!));assert(["warmup-directory","happy","broker-residue"].includes(stage!));
@@ -22,7 +24,6 @@ const bin=join(home,"bin");mkdirSync(bin);for(const name of ["claude","tmux"])wr
 let launches=0,brokerEntered=false,brokerPosts=0,brokerRoutedAfterAck=false,brokerRelease:()=>void=()=>{};
 const brokerPause=new Promise<void>(r=>{brokerRelease=r;});
 let routeBroker:((body:any)=>Promise<unknown>)|undefined;
-let sandboxServer:ReturnType<typeof Bun.serve>|undefined;
 const probesPath=pathToFileURL(resolve("packages/runtime/src/system-probes/index.ts")).href;
 const probes=await import(probesPath);
 mock.module(probesPath,()=>({...probes,readTmuxSessionExists:async()=>false,readTmuxSessionExistsSnapshot:()=>false,execSystemFile:async(command:string,args:string[])=>{if(command==="tmux"&&args[0]==="new-session"){launches++;throw Error("fixture tmux launch submission observed");}return {stdout:"",stderr:"",exitCode:0};}}));
@@ -43,7 +44,7 @@ mock.module("node:fs/promises",()=>({...fs,
 }));
 if(config.local){const m=await import(pathToFileURL(config.local).href);mock.module(pathToFileURL(resolve("packages/runtime/src/local-agents.ts")).href,()=>m);}
 if(stage==="broker-residue"){
- sandboxServer=Bun.serve({hostname:"127.0.0.1",port:0,async fetch(request){
+ fixtureRuntime.setHandler(async request=>{
   const path=new URL(request.url).pathname;
   if(path==="/health"){brokerEntered=true;await brokerPause;return Response.json({ok:true,nodeId:"fixture",meshId:"fixture"});}
   if(path==="/v1/node")return Response.json({id:"fixture"});
@@ -52,11 +53,7 @@ if(stage==="broker-residue"){
   assert.equal(request.method,"POST");brokerPosts++;assert(revoked,"delivery must reach broker AFTER revoke ACK");brokerRoutedAfterAck=true;
   await routeBroker!(await request.json());
   return Response.json({kind:"delivery",accepted:true,conversation:{id:"fixture-conversation"},message:{id:"fixture-message"},flight:{id:"fixture-flight"}});
- }});
- process.env.OPENSCOUT_BROKER_URL=sandboxServer.url.href;process.env.OPENSCOUT_BROKER_INTERNAL_URL=sandboxServer.url.href;
- const originalFetch=globalThis.fetch;globalThis.fetch=((input:any,options:any)=>{const url=new URL(input instanceof Request?input.url:String(input));assert.equal(url.origin,sandboxServer!.url.origin,"fixture must never contact a shared broker");return originalFetch(input,options);}) as typeof fetch;
- const managersPath=pathToFileURL(resolve("packages/runtime/src/broker-process-manager.ts")).href,managers=await import(managersPath);
- mock.module(managersPath,()=>({...managers,resolveScoutBrokerControlUrl:()=>sandboxServer!.url.href,resolveBrokerSocketPathForBaseUrl:()=>null}));
+ });
 }
 const brokerPath=flavor==="web"?join(base,"broker/service.ts"):resolve("packages/cli/src/lib/core/broker/service.ts");
 const broker=await import(pathToFileURL(brokerPath).href);
@@ -104,4 +101,4 @@ try{
   assert.equal(bindings,0,"direct warmup refusal must not become a successful binding");
   assert.match(message,/Unauthorized|live authenticated/i,"must be authority refusal");
  }
-}finally{release();brokerRelease();if(brokerOutcome)await brokerOutcome;await sandboxServer?.stop(true);domain.dispose();}
+}finally{release();brokerRelease();if(brokerOutcome)await brokerOutcome;await fixtureRuntime.close();domain.dispose();}
