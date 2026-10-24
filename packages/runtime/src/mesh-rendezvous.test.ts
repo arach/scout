@@ -19,6 +19,7 @@ import {
 } from "./mesh-rendezvous.js";
 import { writeOpenScoutSettings } from "./setup.js";
 
+const originalPairingStatePath = process.env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH;
 const originalSupportDirectory = process.env.OPENSCOUT_SUPPORT_DIRECTORY;
 const originalControlHome = process.env.OPENSCOUT_CONTROL_HOME;
 const originalRelayHub = process.env.OPENSCOUT_RELAY_HUB;
@@ -27,12 +28,15 @@ const testDirectories = new Set<string>();
 beforeEach(() => {
   const home = mkdtempSync(join(tmpdir(), "openscout-rendezvous-test-"));
   testDirectories.add(home);
+  process.env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH = join(home, "runtime.json");
   process.env.OPENSCOUT_SUPPORT_DIRECTORY = join(home, "support");
   process.env.OPENSCOUT_CONTROL_HOME = join(home, "control");
   process.env.OPENSCOUT_RELAY_HUB = join(home, "relay");
 });
 
 afterEach(() => {
+  if (originalPairingStatePath === undefined) delete process.env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH;
+  else process.env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH = originalPairingStatePath;
   if (originalSupportDirectory === undefined) {
     delete process.env.OPENSCOUT_SUPPORT_DIRECTORY;
   } else {
@@ -231,6 +235,47 @@ describe("mesh rendezvous publisher", () => {
         expiresAt: 9_999,
       },
     }, 10_000)).toBeUndefined();
+  });
+
+  test("publishes only the host runtime's account room, never node-supplied invitations", async () => {
+    const snapshot = { pairing: {
+      relay: "wss://relay.example.test", accountRoom: "owner-account-room",
+      room: "pairing-code-room", publicKey: "a".repeat(64), expiresAt: Date.now() + 60_000,
+    } };
+    writeFileSync(process.env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH!, JSON.stringify(snapshot));
+    const node = makeNode();
+    node.meshEntrypoints = [{ kind: "mobile_pairing", relay: "wss://relay.example.test",
+      room: "node-supplied-room", publicKey: "b".repeat(64), expiresAt: Date.now() + 60_000,
+      metadata: { source: "openscout-pairing-runtime" } }];
+    const requests: unknown[] = [];
+    await publishMeshRendezvousPresence(node, {
+      config: { url: "https://mesh.example.test", token: "test", ttlMs: 60_000, intervalMs: 30_000 },
+      fetch: async (_input, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return new Response("{}", { status: 200 });
+      },
+    });
+    expect(requests).toHaveLength(1);
+    expect((requests[0] as { entrypoints: unknown[] }).entrypoints).toEqual([
+      expect.objectContaining({ kind: "mobile_pairing", room: "owner-account-room" }),
+    ]);
+    expect(JSON.stringify(requests)).not.toContain("pairing-code-room");
+    expect(JSON.stringify(requests)).not.toContain("node-supplied-room");
+  });
+
+  test("publishes no mobile pairing without an account room, including code-only snapshots", () => {
+    const node = makeNode({ meshEntrypoints: [], brokerUrl: "http://127.0.0.1:65501" });
+    expect(buildMeshRendezvousPresence(node)).toBeUndefined();
+    for (const pairing of [{}, { room: "pairing-code-room" }, { accountRoom: " " },
+      { accountRoom: "expired-account", expiresAt: Date.now() - 1 }]) {
+      writeFileSync(process.env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH!, JSON.stringify({ pairing: {
+        relay: "wss://relay.example.test", publicKey: "a".repeat(64), expiresAt: Date.now() + 60_000,
+        ...pairing,
+      } }));
+      expect(buildMeshRendezvousPresence(node)).toBeUndefined();
+    }
+    writeFileSync(process.env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH!, "not JSON");
+    expect(buildMeshRendezvousPresence(node)).toBeUndefined();
   });
 
   test("publishes signed-in-directory presence to the configured front door", async () => {

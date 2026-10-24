@@ -202,7 +202,6 @@ import {
   resolveBrokerUrl,
 } from "./broker-process-manager.js";
 import {
-  readMobilePairingMeshEntrypoint,
   resolveMeshRendezvousPublishConfig,
   startMeshRendezvousPublisher,
   type MeshRendezvousPublisher,
@@ -1378,23 +1377,6 @@ function localNodeWithBindState(node: NodeDefinition, state: MeshBindState): Nod
     advertiseScope: state.scope,
     brokerUrl: state.brokerUrl,
     meshEntrypoints: [...httpEntrypoints, ...otherEntrypoints],
-    lastSeenAt: Date.now(),
-  };
-}
-
-function currentRendezvousNode(): NodeDefinition {
-  const node = currentLocalNode();
-  const mobilePairingEntrypoint = readMobilePairingMeshEntrypoint();
-  if (!mobilePairingEntrypoint) {
-    return node;
-  }
-
-  return {
-    ...node,
-    meshEntrypoints: [
-      ...(node.meshEntrypoints ?? []).filter((entrypoint) => entrypoint.kind !== "mobile_pairing"),
-      mobilePairingEntrypoint,
-    ],
     lastSeenAt: Date.now(),
   };
 }
@@ -3629,7 +3611,7 @@ try {
   });
   const meshRendezvousConfig = meshInstanceRefusal ? undefined : resolveMeshRendezvousPublishConfig();
   if (meshRendezvousConfig) {
-    meshRendezvousPublisher = startMeshRendezvousPublisher(currentRendezvousNode, {
+    meshRendezvousPublisher = startMeshRendezvousPublisher(currentLocalNode, {
       config: meshRendezvousConfig,
       logger: console,
     });
