@@ -1,4 +1,4 @@
-import { rethrowEffectRefusal } from "./runtime/effect-admission.js";
+import { admitEffect, rethrowEffectRefusal } from "./runtime/effect-admission.js";
 import { execFile } from "node:child_process";
 import type {
   Adapter,
@@ -144,12 +144,13 @@ export class SessionRegistry {
     return adapter.session;
   }
 
-  send(prompt: Prompt): void {
+  send(prompt: Prompt, beforeEffect?: () => void): void {
     const adapter = this.sessions.get(prompt.sessionId);
     if (!adapter) {
       throw new SessionRegistryError("NOT_FOUND", `No session: ${prompt.sessionId}`);
     }
-    adapter.send(prompt);
+    admitEffect(beforeEffect);
+    adapter.send(prompt, beforeEffect);
   }
 
   interrupt(sessionId: string): void {

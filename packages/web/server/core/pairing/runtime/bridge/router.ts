@@ -1507,15 +1507,15 @@ const mobileRouter = t.router({
 
   agentStop: procedure
     .input(z.object({ agentId: z.string() }))
-    .mutation(async ({ input }) => {
-      const result = await stopLocalAgent(input.agentId);
+    .mutation(async ({ input, ctx }) => {
+      const result = await stopLocalAgent(input.agentId, () => { requireTransportContext(ctx); });
       return { ok: result !== null, agentId: input.agentId };
     }),
 
   agentInterrupt: procedure
     .input(z.object({ agentId: z.string() }))
-    .mutation(async ({ input }) => {
-      return interruptLocalAgent(input.agentId);
+    .mutation(async ({ input, ctx }) => {
+      return interruptLocalAgent(input.agentId, () => { requireTransportContext(ctx); });
     }),
 
   // -- Comms (channels + DMs) -------------------------------------------------
@@ -1935,7 +1935,7 @@ const promptRouter = t.router({
       log.info("prompt", `sending to session ${input.sessionId}`, {
         text: input.text?.slice(0, 80),
       });
-      ctx.bridge.send(input as Prompt);
+      ctx.bridge.send(input as Prompt, () => { requireTransportContext(ctx); });
       log.info("prompt", "send() returned — adapter should be streaming");
       return { ok: true };
     }),
@@ -2000,10 +2000,10 @@ const codexDeckRouter = t.router({
     .mutation(({ input, ctx }) => startCodexDeckTurn(input.agentId, input.text, () => { requireTransportContext(ctx); })),
   steer: procedure
     .input(z.object({ agentId: z.string().min(1), text: z.string().trim().min(1).max(65_536) }))
-    .mutation(({ input }) => steerCodexDeckTurn(input.agentId, input.text)),
+    .mutation(({ input, ctx }) => steerCodexDeckTurn(input.agentId, input.text, () => { requireTransportContext(ctx); })),
   interrupt: procedure
     .input(z.object({ agentId: z.string().min(1) }))
-    .mutation(({ input }) => interruptCodexDeckTurn(input.agentId)),
+    .mutation(({ input, ctx }) => interruptCodexDeckTurn(input.agentId, () => { requireTransportContext(ctx); })),
 });
 
 // -- Sync -------------------------------------------------------------------

@@ -4,12 +4,14 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 const cases:string[][]=[];
 for(const flavor of ["web","desktop"])for(const target of ["stop","interrupt","steer","codex-interrupt"])for(const state of ["live","revoke"])cases.push(["router",target,state,flavor]);
-for(const target of ["tmux","codex_app_server","claude_stream_json","pi_rpc","kimi_acp","interrupt"])for(const state of ["live","revoke"])cases.push(["local",target,state]);
+for(const target of ["tmux","codex_app_server","claude_stream_json","pi_rpc","kimi_acp","interrupt","restart"])for(const state of ["live","revoke"])cases.push(["local",target,state]);
 for(const target of ["steer","interrupt"])for(const state of ["live","revoke","accepted"])cases.push(["codex",target,state]);
 for(const target of ["initialize","authenticate","session/new","session/resume","session/load","session/set_model","recovery/load","recovery/new"])for(const state of ["live","revoke"])for(const flavor of ["web","desktop"])cases.push(["acp",target,state,flavor]);
 for(const flavor of ["web","desktop"])for(const protocol of ["trpc","legacy"])for(const state of ["live","revoke","accepted"])cases.push(["acp","prompt",state,flavor,protocol]);
 for(const target of ["steer","interrupt"])for(const state of ["live","revoke"])cases.push(["deck",target,state]);
 for(const state of ["live","revoke"])cases.push(["pool","close",state]);
+cases.push(["residue","codex-invoke","revoke"]);
+for(const target of ["stop","interrupt"])cases.push(["refusal",target,"live"]);
 for(const args of cases)test(`local commands ${args.join("/")}`,async()=>{
  const root=mkdtempSync(join(tmpdir(),"pairing-capsule-local-command-")),home=join(root,"home"),store=join(root,"pairing-capsule-store");mkdirSync(home);mkdirSync(store);
  let requests=0;const sentinel=Bun.serve({hostname:"127.0.0.1",port:0,fetch(){requests++;return Response.json({fixture:true});}});

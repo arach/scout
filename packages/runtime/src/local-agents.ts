@@ -2048,6 +2048,7 @@ export async function startCodexDeckTurn(
 export async function steerCodexDeckTurn(
   agentId: string,
   prompt: string,
+  beforeEffect?: () => void,
 ): Promise<{ accepted: true; agentId: string; threadId: string; mode: "steer" }> {
   const text = prompt.trim();
   if (!text) throw new Error("A non-empty Codex steer prompt is required.");
@@ -2059,7 +2060,7 @@ export async function steerCodexDeckTurn(
     throw new Error(`Codex agent ${agentId} has no active turn to steer.`);
   }
 
-  await steerCodexAppServerAgent({ ...options, prompt: text });
+  await steerCodexAppServerAgent({ ...options, prompt: text }, beforeEffect);
   const observedThreadId = snapshot?.session.providerMeta?.threadId;
   return {
     accepted: true,
@@ -2071,6 +2072,7 @@ export async function steerCodexDeckTurn(
 
 export async function interruptCodexDeckTurn(
   agentId: string,
+  beforeEffect?: () => void,
 ): Promise<{ accepted: true; agentId: string; threadId: string | null; mode: "interrupt" }> {
   const record = await requireCodexDeckRecord(agentId);
   const options = buildCodexAgentSessionOptions(agentId, record);
@@ -2078,7 +2080,7 @@ export async function interruptCodexDeckTurn(
   if (!activeCodexDeckTurnId(snapshot)) {
     throw new Error(`Codex agent ${agentId} has no active turn to interrupt.`);
   }
-  await interruptCodexAppServerAgent(options);
+  await interruptCodexAppServerAgent(options, beforeEffect);
   const observedThreadId = snapshot?.session.providerMeta?.threadId;
   return {
     accepted: true,
@@ -4537,10 +4539,15 @@ export function buildTmuxLaunchShellCommand(launchScript: string): string {
 }
 
 async function killAgentSession(sessionName: string, beforeEffect?: () => void): Promise<void> {
+  let admissionRefused = false;
+  const checked = beforeEffect ? () => {
+    try { admitSynchronousEffect(beforeEffect); } catch (error) { admissionRefused = true; throw error; }
+  } : undefined;
   try {
-    await execSystemFile("tmux", ["kill-session", "-t", sessionName], { timeoutMs: 3_000, beforeEffect });
+    await execSystemFile("tmux", ["kill-session", "-t", sessionName], { timeoutMs: 3_000, beforeEffect: checked });
     invalidateTmuxSessions({ reason: "local-agent.kill-session" });
-  } catch {
+  } catch (error) {
+    if (admissionRefused) throw error;
     // Ignore missing sessions during restart.
   }
   admitSynchronousEffect(beforeEffect);
@@ -5024,7 +5031,7 @@ export async function restartLocalAgent(
             : "kimi-acp",
         sessionId: sessionName,
         poolKey: localAgentAcpPoolKey(agentId, normalizedRecord),
-      });
+      }, options.beforeEffect);
     }
   } else {
     for (const sessionName of sessionsToStop) {
@@ -5535,7 +5542,7 @@ export async function startLocalAgent(input: StartLocalAgentInput, beforeConfigE
   return localAgentStatusFromRecord(targetAgentId, record, localAgentStatusSource(targetAgentId, finalOverrides));
 }
 
-export async function stopLocalAgent(agentId: string): Promise<ScoutLocalAgentStatus | null> {
+export async function stopLocalAgent(agentId: string, beforeEffect?: () => void): Promise<ScoutLocalAgentStatus | null> {
   const [registry, overrides] = await Promise.all([
     readLocalAgentRegistry(),
     readRelayAgentOverrides(),
@@ -5545,29 +5552,33 @@ export async function stopLocalAgent(agentId: string): Promise<ScoutLocalAgentSt
     return null;
   }
 
+  admitSynchronousEffect(beforeEffect); // command after registry discovery
   const normalizedRecord = normalizeLocalAgentRecord(agentId, record);
   const sessionsToStop = new Set<string>([normalizedRecord.tmuxSession]);
 
   if (normalizedRecord.transport === "codex_app_server") {
     for (const sessionName of sessionsToStop) {
+      admitSynchronousEffect(beforeEffect);
       await shutdownCodexAppServerAgent({
         ...buildCodexAgentSessionOptions(agentId, normalizedRecord),
         sessionId: sessionName,
       }, {
         resetThread: true,
-      });
+      }, beforeEffect);
     }
   } else if (normalizedRecord.transport === "claude_stream_json") {
     for (const sessionName of sessionsToStop) {
+      admitSynchronousEffect(beforeEffect);
       await shutdownClaudeStreamJsonAgent({
         ...buildClaudeAgentSessionOptions(agentId, normalizedRecord),
         sessionId: sessionName,
       }, {
         resetSession: true,
-      });
+      }, beforeEffect);
     }
   } else if (normalizedRecord.transport === "pi_rpc") {
     for (const sessionName of sessionsToStop) {
+      admitSynchronousEffect(beforeEffect);
       await shutdownPiRpcAgent({
         ...buildPiAgentSessionOptions(agentId, normalizedRecord),
         sessionId: sessionName,
@@ -5575,6 +5586,7 @@ export async function stopLocalAgent(agentId: string): Promise<ScoutLocalAgentSt
     }
   } else if (normalizedRecord.transport === "grok_acp" || normalizedRecord.transport === "kimi_acp" || normalizedRecord.transport === "devin_acp") {
     for (const sessionName of sessionsToStop) {
+      admitSynchronousEffect(beforeEffect);
       await shutdownAcpAgentSession({
         adapterType: normalizedRecord.transport === "grok_acp"
           ? "grok-acp"
@@ -5583,11 +5595,12 @@ export async function stopLocalAgent(agentId: string): Promise<ScoutLocalAgentSt
             : "kimi-acp",
         sessionId: sessionName,
         poolKey: localAgentAcpPoolKey(agentId, normalizedRecord),
-      });
+      }, beforeEffect);
     }
   } else {
     for (const sessionName of sessionsToStop) {
-      await killAgentSession(sessionName);
+      admitSynchronousEffect(beforeEffect);
+      await killAgentSession(sessionName, beforeEffect);
     }
   }
 
@@ -5597,20 +5610,26 @@ export async function stopLocalAgent(agentId: string): Promise<ScoutLocalAgentSt
   };
 }
 
-export async function interruptLocalAgent(agentId: string): Promise<{ ok: boolean; agentId: string }> {
+export async function interruptLocalAgent(agentId: string, beforeEffect?: () => void): Promise<{ ok: boolean; agentId: string }> {
   const registry = await readLocalAgentRegistry();
   const record = registry[agentId];
   if (!record) {
     return { ok: false, agentId };
   }
 
+  admitSynchronousEffect(beforeEffect); // command after registry discovery
   const normalizedRecord = normalizeLocalAgentRecord(agentId, record);
   const sessionName = normalizedRecord.tmuxSession;
 
+  let admissionRefused = false;
+  const checked = beforeEffect ? () => {
+    try { admitSynchronousEffect(beforeEffect); } catch (error) { admissionRefused = true; throw error; }
+  } : undefined;
   try {
-    await execSystemFile("tmux", ["send-keys", "-t", sessionName, "C-c"], { timeoutMs: 2_000 });
+    await execSystemFile("tmux", ["send-keys", "-t", sessionName, "C-c"], { timeoutMs: 2_000, beforeEffect: checked });
     return { ok: true, agentId };
-  } catch {
+  } catch (error) {
+    if (admissionRefused) throw error;
     return { ok: false, agentId };
   }
 }

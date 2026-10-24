@@ -17,24 +17,25 @@ await fixtureRuntime.probe();
 const [kind,target,state,flavor="web",protocol="trpc"]=process.argv.slice(2),home=process.env.HOME!,project=join(home,"project"),support=process.env.OPENSCOUT_SUPPORT_DIRECTORY!;
 mkdirSync(project);mkdirSync(support,{recursive:true});process.env.OPENSCOUT_PROBES_SOCKET=join(home,"absent.sock");process.env.OPENSCOUT_BUN_BIN=process.execPath;process.env.OPENSCOUT_NODE_QUALIFIER="fixture";
 const source=(p:string)=>pathToFileURL(resolve(p)).href;
-const host=generateKeyPair(),phone=generateKeyPair(),key=bytesToHex(phone.publicKey),fixture=capsuleFixture(realpathSync(process.env.OPENSCOUT_PAIRING_HOME!),{generations:2,keys:1,publicKeys:[key],migrate:true}),bridge:any={};
-const domain=new TransportDomain(bridge,bytesToHex(host.publicKey),fixture.owner);fixtureHost(domain,host);const peer=liveTransport(domain,phone);assert.equal(requireTransportContext(peer.ctx,true).publicKey,key);
-let entered=false,afterAck=false,effects=0,late=0,ownerReadsAfterAck=0,admissions=0,release!:()=>void;const pause=new Promise<void>(r=>release=r),admit=()=>{admissions++;requireTransportContext(peer.ctx,true);};
-const sink=()=>{effects++;if(afterAck)late++;};let run!:()=>Promise<unknown>,cleanup=async()=>{};
+const host=generateKeyPair(),phone=generateKeyPair(),otherPhone=generateKeyPair(),key=bytesToHex(phone.publicKey),otherKey=bytesToHex(otherPhone.publicKey),publicKeys=kind==="acp"&&target==="prompt"&&state==="revoke"?[key,otherKey]:[key],fixture=capsuleFixture(realpathSync(process.env.OPENSCOUT_PAIRING_HOME!),{generations:publicKeys.length+1,keys:publicKeys.length,publicKeys,migrate:true}),bridge:any={};
+const domain=new TransportDomain(bridge,bytesToHex(host.publicKey),fixture.owner);fixtureHost(domain,host);const peer=liveTransport(domain,phone),otherPeer=publicKeys.length>1?liveTransport(domain,otherPhone):undefined;assert.equal(requireTransportContext(peer.ctx,true).publicKey,key);
+let inCommandSink=false,refusalUsed=false;const oneShot=Object.assign(Error("fixture one-shot caller refusal"),{code:"ECONNREFUSED"});
+let entered=false,afterAck=false,effects=0,late=0,ownerReadsAfterAck=0,admissions=0,release!:()=>void;const pause=new Promise<void>(r=>release=r),admit=()=>{admissions++;requireTransportContext(peer.ctx,true);if(kind==="refusal"&&inCommandSink&&!refusalUsed){refusalUsed=true;throw oneShot;}};
+const sink=()=>{effects++;if(afterAck)late++;};let run!:()=>Promise<unknown>,cleanup=async()=>{};let siblingRun:(()=>Promise<void>)|undefined;
 if(kind==="router"){
  const path=source("packages/runtime/src/local-agents.ts"),actual=await import(path);
  const effect=async(hook?:()=>void)=>{entered=true;await pause;hook?.();sink();return {agentId:"fixture",accepted:true};};
  mock.module(path,()=>({...actual,stopLocalAgent:async(_id:string,hook?:()=>void)=>effect(hook),interruptLocalAgent:async(_id:string,hook?:()=>void)=>effect(hook),steerCodexDeckTurn:async(_id:string,_text:string,hook?:()=>void)=>effect(hook),interruptCodexDeckTurn:async(_id:string,hook?:()=>void)=>effect(hook)}));
  const root=flavor==="web"?"packages/web/server/core":"apps/desktop/src/core",{bridgeRouter}=await import(source(root+"/pairing/runtime/bridge/router.ts")),caller=bridgeRouter.createCaller(peer.ctx);
  run=()=>target==="stop"?caller.mobile.agentStop({agentId:"fixture"}):target==="interrupt"?caller.mobile.agentInterrupt({agentId:"fixture"}):target==="steer"?caller.codexDeck.steer({agentId:"fixture",text:"fixture"}):caller.codexDeck.interrupt({agentId:"fixture"});
-}else if(kind==="local"||kind==="deck"){
- const registry=join(support,"relay-agents.json");writeFileSync(registry,JSON.stringify({version:1,agents:{fixture:{agentId:"fixture",projectName:"fixture",projectRoot:project,runtime:{cwd:project,sessionId:"fixture",harness:kind==="deck"||target==="codex_app_server"?"codex":target==="pi_rpc"?"pi":target==="kimi_acp"?"kimi":"claude",transport:kind==="deck"?"codex_app_server":target==="interrupt"?"tmux":target},capabilities:[]}}}));
+}else if(kind==="local"||kind==="deck"||kind==="refusal"){
+ const registry=join(support,"relay-agents.json");writeFileSync(registry,JSON.stringify({version:1,agents:{fixture:{agentId:"fixture",projectName:"fixture",projectRoot:project,runtime:{cwd:project,sessionId:"fixture",harness:kind==="deck"||target==="codex_app_server"?"codex":target==="pi_rpc"?"pi":(target==="kimi_acp"||target==="restart")?"kimi":"claude",transport:kind==="refusal"?"tmux":kind==="deck"?"codex_app_server":target==="restart"?"kimi_acp":target==="interrupt"?"tmux":target},capabilities:[]}}}));
  const {buildRelayAgentInstance}=await import(source("packages/runtime/src/setup.ts"));const agentId=buildRelayAgentInstance("fixture",project).id;
- const read=fs.readFile;mock.module("node:fs/promises",()=>({...fs,readFile:async(...args:Parameters<typeof fs.readFile>)=>{const result=await (read as any)(...args);if(String(args[0])===registry&&!entered){entered=true;await pause;}return result;}}));
- const probesPath=source("packages/runtime/src/system-probes/index.ts"),probes=await import(probesPath);mock.module(probesPath,()=>({...probes,execSystemFile:async(_c:string,_a:any,o:any)=>{o?.beforeEffect?.();sink();return {stdout:"",stderr:"",exitCode:0};}}));
+ const read=fs.readFile;mock.module("node:fs/promises",()=>({...fs,readFile:async(...args:Parameters<typeof fs.readFile>)=>{const result=await (read as any)(...args);if(target!=="restart"&&String(args[0])===registry&&!entered){entered=true;await pause;}return result;}}));
+ const probesPath=source("packages/runtime/src/system-probes/index.ts"),probes=await import(probesPath);mock.module(probesPath,()=>({...probes,execSystemFile:async(_c:string,_a:any,o:any)=>{inCommandSink=true;try{o?.beforeEffect?.();sink();return {stdout:"",stderr:"",exitCode:0};}finally{inCommandSink=false;}}}));
  for(const [file,name] of [["codex-app-server","shutdownCodexAppServerAgent"],["claude-stream-json","shutdownClaudeStreamJsonAgent"],["pi-rpc","shutdownPiRpcAgent"]]){const path=source(`packages/runtime/src/${file}.ts`),actual=await import(path);mock.module(path,()=>({...actual,[name!]:async(_o:any,_s:any,hook?:()=>void)=>{hook?.();sink();},...(file==="codex-app-server"?{getCodexAppServerAgentSnapshot:async()=>({session:{id:"fixture",providerMeta:{threadId:"fixture"}},currentTurnId:"active",turns:[{id:"active",status:"started"}]}),steerCodexAppServerAgent:async(_o:any,hook?:()=>void)=>{hook?.();sink();},interruptCodexAppServerAgent:async(_o:any,hook?:()=>void)=>{hook?.();sink();}}:{})}));}
- const acpPath=source("packages/runtime/src/acp-agent-invocation.ts"),acp=await import(acpPath);mock.module(acpPath,()=>({...acp,shutdownAcpAgentSession:async(_o:any,hook?:()=>void)=>{hook?.();sink();}}));
- const local=await import(source("packages/runtime/src/local-agents.ts"));run=()=>kind==="deck"?(target==="steer"?local.steerCodexDeckTurn(agentId,"fixture",admit):local.interruptCodexDeckTurn(agentId,admit)):target==="interrupt"?local.interruptLocalAgent(agentId,admit):local.stopLocalAgent(agentId,admit);
+ const acpPath=source("packages/runtime/src/acp-agent-invocation.ts"),acp=await import(acpPath);mock.module(acpPath,()=>({...acp,shutdownAcpAgentSession:async(_o:any,hook?:()=>void)=>{if(target==="restart"){entered=true;await pause;}hook?.();sink();}}));
+ const local=await import(source("packages/runtime/src/local-agents.ts"));run=()=>target==="restart"?local.restartLocalAgent(agentId,{beforeEffect:admit}):kind==="deck"?(target==="steer"?local.steerCodexDeckTurn(agentId,"fixture",admit):local.interruptCodexDeckTurn(agentId,admit)):target==="interrupt"?local.interruptLocalAgent(agentId,admit):local.stopLocalAgent(agentId,admit);
 }else if(kind==="codex"){
  const rollout=join(home,"rollout.jsonl");writeFileSync(rollout,"");
  let commandRunning=false;const path=source("packages/agent-sessions/src/local/transports/codex-app-server-connection.ts"),actual=await import(path);
@@ -44,6 +45,24 @@ if(kind==="router"){
  const {getOrCreateCodexAppServerClient}=await import(source("packages/agent-sessions/src/local/transports/codex-app-server.ts")),client=getOrCreateCodexAppServerClient(options),transport=(client as any).transport,ensure=transport.ensureOnline.bind(transport);
  if(state!=="accepted")transport.ensureOnline=async(...args:any[])=>{const value=await ensure(...args);entered=true;await pause;return value;};
  run=()=>{commandRunning=true;return target==="steer"?runtime.steerCodexAppServerAgent({...options,prompt:"fixture"},admit):runtime.interruptCodexAppServerAgent(options,admit);};cleanup=()=>runtime.shutdownCodexAppServerAgent(options);
+}else if(kind==="residue"){
+ // The remaining harness-reply producer is a genuine phone RPC. Its broker
+ // submission happens after ACK; the owned runtime then performs the command.
+ process.env.OPENSCOUT_CODEX_HOME_SOURCE=join(home,"codex");
+ const rollout=join(home,"rollout.jsonl");writeFileSync(rollout,"");
+ const path=source("packages/agent-sessions/src/local/transports/codex-app-server-connection.ts"),actual=await import(path);
+ mock.module(path,()=>({...actual,spawnCodexAppServerStdioConnection:(input:any)=>{assert(afterAck);return {mode:"spawned",pid:null,socketPath:null,isOpen:()=>true,setReadingPaused(){},detach(){},async close(){},send(text:string){const q=JSON.parse(text);if(q.method==="turn/start")sink();if(!q.id)return;const result=q.method==="thread/start"?{thread:{id:"fixture-thread",path:rollout}}:q.method==="turn/start"?{turn:{id:"fixture-turn"}}:{};queueMicrotask(()=>{input.handlers.onMessage(JSON.stringify({id:q.id,result}));if(q.method==="turn/start")queueMicrotask(()=>{input.handlers.onMessage(JSON.stringify({method:"item/completed",params:{threadId:"fixture-thread",turnId:"fixture-turn",item:{type:"agentMessage",id:"fixture-message",text:"fixture reply"}}}));input.handlers.onMessage(JSON.stringify({method:"turn/completed",params:{threadId:"fixture-thread",turn:{id:"fixture-turn",status:"completed"}}}));});});}};}}));
+ const {invokeLocalAgentEndpoint}=await import(source("packages/runtime/src/local-agents.ts"));
+ fixtureRuntime.setHandler(async request=>{const p=new URL(request.url).pathname;
+  if(p==="/health")return Response.json({ok:true,nodeId:"fixture",meshId:"fixture"});
+  if(p==="/v1/node")return Response.json({id:"fixture",capabilities:["session-input-receipts/1"]});
+  if(p==="/v1/snapshot"){entered=true;await pause;return Response.json({actors:{},agents:{},endpoints:{},conversations:{},messages:{},flights:{}});}
+  assert.equal(request.method,"POST");const body:any=await request.json();assert(!Object.hasOwn(body,"beforeEffect"));assert(afterAck);
+  if(p==="/v1/deliver")await invokeLocalAgentEndpoint({id:"fixture-endpoint",agentId:"fixture",nodeId:"fixture",harness:"codex",transport:"codex_app_server",state:"idle",cwd:project,projectRoot:project,metadata:{}} as any,{...body,id:"fixture-invocation",targetAgentId:"fixture",requesterId:"operator",conversationId:"fixture-conversation",task:"fixture reply"} as any);
+  return Response.json(p==="/v1/deliver"?{kind:"delivery",conversation:{id:"fixture-conversation"},message:{id:"fixture-message"},flight:{id:"fixture-flight"}}:{ok:true});
+ });
+ const {bridgeRouter}=await import(source("packages/web/server/core/pairing/runtime/bridge/router.ts"));run=()=>bridgeRouter.createCaller({...peer.ctx,cwd:project}).mobile.askSession({sessionId:"fixture-session",harness:"codex",cwd:project,body:"fixture reply",clientMessageId:"fixture-reply"});
+ const {shutdownCodexAppServerAgent}=await import(source("packages/runtime/src/codex-app-server.ts"));const {buildCodexEndpointSessionOptions}=await import(source("packages/runtime/src/local-agents.ts"));cleanup=()=>shutdownCodexAppServerAgent(buildCodexEndpointSessionOptions({id:"fixture-endpoint",agentId:"fixture",nodeId:"fixture",harness:"codex",transport:"codex_app_server",state:"idle",cwd:project,projectRoot:project,metadata:{}} as any));
 }else if(kind==="pool"){
  const path=source("packages/agent-sessions/src/local/index.ts"),actual=await import(path);
  mock.module(path,()=>({...actual,createLocalAgentClient:async()=>{entered=true;await pause;return {turn:async()=>({text:"earlier host invocation",session:{nativeId:"fixture"}}),close:async()=>sink()};}}));
@@ -80,6 +99,15 @@ if(kind==="router"){
   if(state!=="accepted")entered=true;
   return await adapter.promptQueue;
  };
+ siblingRun=otherPeer?async()=>{
+  assert.throws(()=>requireTransportContext(otherPeer.ctx,true),/Unauthorized|live authenticated/i);
+  const fresh=liveTransport(domain,otherPhone);assert.equal(requireTransportContext(fresh.ctx,true).publicKey,otherKey);
+  const session=bridge.listSessions()[0];assert(session);
+  assert.equal(bridge.getSessionSnapshot(session.id)?.session.status,"idle","refused phone must not mark the shared provider failed");
+  const before=effects;const receipt=await bridgeRouter.createCaller(fresh.ctx).prompt.send({sessionId:session.id,text:"healthy sibling"});await adapter.promptQueue;
+  assert.equal(receipt.ok,true);assert.equal(effects,before+1,"another paired phone can reconnect and submit its own command");
+  console.log("STAGE5_SIBLING "+JSON.stringify({protocol,live:true,submissions:effects-before,providerState:bridge.getSessionSnapshot(session.id)?.session.status}));
+ }:undefined;
  cleanup=()=>actualBridge.shutdown();
 }
 let operation:Promise<unknown>|undefined;
@@ -87,8 +115,11 @@ try{
  let settled=false;operation=Promise.resolve(run()).catch(error=>error);operation.then(()=>{settled=true;});
  const until=performance.now()+15_000;while(!entered){if(settled)throw Error("operation settled before seam: "+String(await operation));if(performance.now()>until)throw Error("pause not reached");await Bun.sleep(1);}
  if(state!=="live"){fixture.owner.mutate(fixture.owner.read().revision,crypto.randomUUID(),{type:"revoke",publicKey:key});assert.throws(()=>requireTransportContext(peer.ctx,true));afterAck=true;}release();const result=await operation;
- console.log("STAGE5_EFFECT "+JSON.stringify({kind,target,state,flavor,effects,late,ownerReadsAfterAck,admissions,nativeExecutions:0,result:String(result)}));
- if(state==="accepted"){assert.equal(effects,1);assert.equal(ownerReadsAfterAck,1,"fixture owner first reads the accepted command after ACK");assert.equal(late,0,"queued receiver reads are earlier work");assert(!(result instanceof Error));}
+ console.log("STAGE5_EFFECT "+JSON.stringify({kind,target,state,flavor,protocol,effects,late,ownerReadsAfterAck,admissions,nativeExecutions:0,result:String(result)}));
+ if(kind==="refusal"){assert.equal(result,oneShot,"ordinary I/O handling must preserve the original one-shot refusal");assert.equal(effects,0);}
+ else if(kind==="residue"){assert.equal(effects,1);assert.equal(late,1,"remaining harness-reply producer reaches runtime command after ACK");}
+ else if(state==="accepted"){assert.equal(effects,1);assert.equal(ownerReadsAfterAck,1,"fixture owner first reads the accepted command after ACK");assert.equal(late,0,"queued receiver reads are earlier work");assert(!(result instanceof Error));}
  else if(state==="live"){if(kind!=="acp")assert.equal(effects,1);assert(!(result instanceof Error),String(result));}
  else{assert.equal(late,0,"no command submission after revoke ACK");assert.equal(effects,0,"no resumed command effect after revoke ACK");assert.match(String(result),/Unauthorized|live authenticated/i,"authority refusal must propagate");}
+ if(siblingRun)await siblingRun();
 }finally{release();if(operation)await operation;await cleanup();domain.dispose();await fixtureRuntime.close();}
