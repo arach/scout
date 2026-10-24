@@ -225,7 +225,7 @@ export function emptyReading(probeError: string | null = null): MachineUpdateRea
  * entry reproduces the audit exactly on both hosts.
  *
  * `scout.ts` belongs in the entry set: Mini runs its bridges from a source
- * checkout as `apps/desktop/bin/scout.ts mcp`.
+ * checkout as `packages/cli/bin/scout.mjs mcp`.
  * `main.mjs` belongs too: a bundled install launches its bridges as
  * `bun <package>/dist/main.mjs mesh bridge`.
  */
