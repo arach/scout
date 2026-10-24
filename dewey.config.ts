@@ -30,6 +30,7 @@ export default {
     rules: [
       { pattern: "packages/protocol/**", instruction: "Run bun run --cwd packages/protocol check." },
       { pattern: "packages/runtime/**", instruction: "Run bun run --cwd packages/runtime check and the narrow affected tests." },
+      { pattern: "packages/pairing/**", instruction: "Run bun run --cwd packages/pairing check." },
       { pattern: "process spawning or shell execution", instruction: "Run bun run sync-exec:fence before committing shell-execution changes." },
     ],
 

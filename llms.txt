@@ -10,10 +10,10 @@
 
 ## Overview
 
-Scout is the local runtime that coordinates coding agents on a host. The core
-includes the protocol, harness adapters, session observation and extraction,
-routing and delivery, CLI, TUI, mesh, and host side of phone pairing. The
-terminal is its interface.
+Scout is a local-first control plane for coding agents. It gives operators and
+agents one broker-backed model for identity, routing, durable work, session
+observation, and mesh reachability across harnesses such as Codex and Claude
+Code.
 
 ## Quickstart
 
