@@ -2,6 +2,7 @@ import { PairingTrustError } from "@openscout/runtime/pairing-security/trust-own
 import type { Context, Hono } from "hono";
 import {
   controlScoutWebPairingService,
+  decideHostPairingRequest,
   controlScoutWebApprovalPairing,
   removeScoutPairingTrustedPeer,
   type ScoutPairingControlAction,
@@ -78,6 +79,8 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
   app.get(`/${SCOUT_PAIRING_DEEP_LINK_PATH}`, async (c) => {
     c.header("cache-control", "no-store");
     const route = c.req.query("route")?.trim().toLowerCase() ?? null;
+    // Only the trusted account-admission callback may create an account row.
+    if (route === "account") return c.json({ error: "Account requests require an encrypted account connection" }, 400);
     const token = c.req.query("token")?.trim() || null;
     const wantsJson = (c.req.header("accept") ?? "").includes("application/json");
     const peerAddress = (options.resolvePeerAddress ?? resolveScoutRequestPeerAddress)(c);
@@ -125,6 +128,9 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
         return wantsJson
           ? c.json({ status: "expired", token }, 410)
           : c.text("Pairing request expired.", 410);
+      }
+      if (request.route === "account") {
+        return c.json({ error: "Account admission is completed on its encrypted connection" }, 400);
       }
       if (request.status === "denied") {
         return wantsJson
@@ -238,7 +244,8 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
           id: `pairing_request:${request.token}`,
           type: "pairing_request",
           title: `${pairRequesterDisplay(request)} wants to pair`,
-          body: `On your network${request.requesterIp ? ` · ${request.requesterIp}` : ""}.`,
+          body: request.route === "account" ? "Through your account. Allow only devices you recognize."
+            : `On your network${request.requesterIp ? ` · ${request.requesterIp}` : ""}.`,
           createdAt: request.createdAt,
           updatedAt: request.updatedAt,
           expiresAt: request.expiresAt,
@@ -260,29 +267,9 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
     if (!decision) {
       return c.json({ error: "decision must be 'approve' or 'deny'" }, 400);
     }
-    const req = pendingPairRequests.decide(token, decision);
-    if (!req) {
-      return c.json({ error: "unknown or expired pairing request" }, 404);
-    }
-    try {
-      const window = await controlScoutWebApprovalPairing(decision === "approve" ? "open" : "cancel", req, currentDirectory);
-      if (decision === "approve" && (!window || "status" in window)) {
-        return c.json({ error: "Pairing request window closed; make a new request" }, 409);
-      }
-      // Approval can wait for controller startup while another instance denies.
-      // Close even if that denial arrived before the runtime window existed.
-      if (decision === "approve" && pendingPairRequests.get(token)?.status === "denied") {
-        await controlScoutWebApprovalPairing("cancel", req, currentDirectory);
-        shellStateCache.invalidate();
-        return c.json({ error: "Pairing request was denied" }, 409);
-      }
-      // Fulfillment still rechecks status through the shared-store CAS.
-    } catch {
-      shellStateCache.invalidate();
-      return c.json({ error: "Pairing authority unavailable" }, 503);
-    }
+    const result = await decideHostPairingRequest(pendingPairRequests, token, decision, currentDirectory);
     shellStateCache.invalidate();
-    return c.json({ request: req });
+    return result.ok ? c.json({ request: result.request }) : c.json({ error: result.error }, result.status);
   });
 
   app.post("/api/pairing/control", async (c) => {

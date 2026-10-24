@@ -1,9 +1,12 @@
+import { createAccountAdmission } from "../packages/pairing/src/core/pairing/runtime/account-admission.ts";
+import { createPendingPairRequestStore, pairRequestStatePath } from "../packages/pairing/src/pairing-pair-requests.ts";
+import { localConfigHome } from "../packages/runtime/src/local-config.ts";
 // Process-isolated fixture: actual relay WebSockets and Noise, with application
 // sinks instrumented to count dispatches and secret/event delivery.
 import { mock } from "bun:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:net";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { resolve, join } from "node:path";
 import { generateKeyPair, type KeyPair } from "../packages/runtime/src/pairing-security/noise.ts";
@@ -33,6 +36,8 @@ const OriginalWebSocket = globalThis.WebSocket;
 const carriers: WebSocket[] = [];
 globalThis.WebSocket = class extends OriginalWebSocket {
   constructor(url: any, options?: any) {
+    const target = new URL(String(url));
+    if (!["127.0.0.1", "localhost", "[::1]"].includes(target.hostname)) throw Error("Fixture refuses non-loopback WebSocket");
     super(url, options);
     if (new URL(String(url)).searchParams.get("role") === "bridge") carriers.push(this);
   }
@@ -55,14 +60,62 @@ const bridge = {
 };
 let runtime: any, bridgePort = 0, workflowRoom: string | undefined;
 let connection: ReturnType<typeof connectToRelay>;
-if (scenario === "workflow") {
+let accountStore: ReturnType<typeof createPendingPairRequestStore> | undefined;
+let accountSignal: AbortSignal | undefined;
+let admittedCallbacks = 0;
+const accountMode = scenario.startsWith("account-");
+let accountClock = Date.now();
+let controllerMode = false;
+if (scenario === "account-controller") {
+  controllerMode = true;
+  // Real controller/runtime/HTTP/Noise, with OS discovery and hosted publishing
+  // disabled. No actual Bonjour, Tailscale probe or hosted service is touched.
+  mock.module(resolve(base,"relay-runtime.ts"),()=>({startManagedRelay:async()=>null}));
+  mock.module(resolve("packages/pairing/src/pairing-lan-beacon.ts"),()=>({startScoutPairLanBeacon:()=>null}));
+  mock.module(resolve(base,"rendezvous.ts"),()=>({startPairingRendezvousPublisher:()=>null}));
+  bridgePort = await freePort();
+  if (bridgePort > 65000) bridgePort = await freePort();
+  process.env.OPENSCOUT_PAIRING_PORT=String(bridgePort);
+  process.env.OPENSCOUT_PAIRING_RELAY_URL=url;
+  writeFileSync(join(process.env.OPENSCOUT_PAIRING_HOME!,"config.json"),JSON.stringify({port:bridgePort,secure:true,relay:url}));
+  const {runPairingRuntimeController}=await import(pathToFileURL(resolve(base,"../pairing-runtime-controller.ts")).href);
+  await runPairingRuntimeController();
+  const snapshot=JSON.parse(readFileSync(join(process.env.OPENSCOUT_PAIRING_HOME!,"runtime.json"),"utf8"));
+  assert.equal(snapshot.pairing,null);
+  assert(snapshot.accountPairing?.accountRoom);
+  workflowRoom=snapshot.accountPairing.accountRoom;
+  connection={qrPayload:{...snapshot.accountPairing,room:workflowRoom},disconnect(){},retire(){}} as any;
+  accountStore=createPendingPairRequestStore({statePath:pairRequestStatePath(localConfigHome())});
+} else if (scenario === "workflow" || scenario === "account-runtime" || scenario === "account-no-gate") {
   bridgePort = await freePort();
   process.env.OPENSCOUT_PAIRING_PORT = String(bridgePort);
   writeFileSync(join(process.env.OPENSCOUT_PAIRING_HOME!, "config.json"), JSON.stringify({port: bridgePort, secure: true}));
   const { startPairingRuntime } = await import(pathToFileURL(resolve(base, "runtime.ts")).href);
-  runtime = await startPairingRuntime({relayUrl: url});
+  if (scenario === "account-runtime") accountStore = createPendingPairRequestStore({statePath:pairRequestStatePath(localConfigHome())});
+  runtime = await startPairingRuntime({relayUrl: url,
+    ...(accountStore ? {admitAccountDevice:createAccountAdmission({store:accountStore,pollMs:1,maxWaitMs:2000})} : {}),
+  });
   host = runtime.identity;
   connection = runtime.relayConnection;
+  if (scenario === "account-runtime") {
+    workflowRoom = runtime.accountRoom;
+    assert(workflowRoom && runtime.relayConnections.length === 2);
+    const room = runtime.accountRoom, opened = runtime.openPairing();
+    assert.equal(runtime.accountRoom, room); runtime.cancelPairing(opened.windowId);
+  }
+} else if (accountMode) {
+  accountStore = createPendingPairRequestStore({statePath:pairRequestStatePath(localConfigHome())});
+  const store = accountStore;
+  const decisionStore = scenario === "account-cas-deny" || scenario === "account-cas-delivered" ? {
+    ...store, fulfill(token: string, status: any) {
+      if (scenario === "account-cas-deny") store.decide(token,"deny"); else store.fulfill(token,"approved");
+      return store.fulfill(token,status);
+    },
+  } : store;
+  const admit = createAccountAdmission({store:decisionStore,pollMs:1,maxWaitMs:2000,now:()=>accountClock});
+  connection = connectToRelay(url,host,bridge as any,{kind:"account",privateRoom:true,
+    admitNewDevice:(key,signal)=>{accountSignal=signal;admittedCallbacks++;return scenario === "account-error" ? Promise.reject(Error("fixture refusal")) : admit(key,signal);},
+  });
 } else {
   connection = connectToRelay(url, host, bridge as any, {
     kind: "pairing",
@@ -118,7 +171,66 @@ async function denied(pattern: "XX" | "IK", keys = phone) {
 }
 try {
   await Bun.sleep(40);
-  if (scenario === "revoked") {
+  if (scenario === "account-no-gate") {
+    assert.equal(runtime.accountRoom,null); assert.equal(runtime.relayConnections.length,1);
+    assert.throws(()=>connectToRelay(url,host,bridge as any,{kind:"account"}),/owner-admission callback/);
+    assert.throws(()=>connectToRelay(url,host,bridge as any,{kind:"account",secure:false,admitNewDevice:async()=>"admitted"}),/Noise/);
+    assert.equal(owner.read().peers.length,0);
+  } else if (accountMode) {
+    const p=await connect("XX");
+    if(scenario !== "account-error") await until(()=>accountStore!.list().length===1,"account request");
+    const row=accountStore?.list()[0];
+    if(scenario === "account-error") {await until(()=>p.state.closed===4003,"owner callback error close");}
+    else {
+      assert(row); assert.equal(row.requesterPublicKey,key); assert.equal(row.route,"account");
+      // Actual encrypted pre-admission traffic must never reach RPC, streams,
+      // bridge session events, or broker watches. Status is the sole exception.
+      p.transport.send(JSON.stringify({id:71,jsonrpc:"2.0",method:"query",params:{path:"probe"}}));
+      p.transport.send(JSON.stringify({id:72,jsonrpc:"2.0",method:"subscription",params:{path:"stream"}}));
+      p.transport.send(JSON.stringify({id:73,method:"session/list"}));
+      p.transport.send(JSON.stringify({id:74,jsonrpc:"2.0",method:"query",params:{path:"web.admission"}}));
+      await until(()=>p.data.some(x=>x.includes('"pending"')),"pending admission status");
+      assert.equal(dispatches,0);assert.equal(subscriptions,0);assert.equal(streamStops,0);
+      assert.equal(owner.read().peers.length,0);assert(!p.data.some(x=>x.includes("session-secret")||x.includes("rpc-secret")));
+      if(scenario === "account-runtime" || controllerMode) console.log("ACCOUNT_REQUEST "+row.token);
+      else if(scenario === "account-deny") accountStore!.decide(row.token,"deny");
+      else if(scenario === "account-expiry") accountClock += 3000;
+      else if(scenario === "account-disconnect") p.ws.close();
+      else if(scenario === "account-carrier") carriers.at(-1)!.close(1012,"fixture carrier drop");
+      else if(scenario === "account-authority") {
+        owner.mutate(0,"other-owner-change",{type:"grant",peer:{publicKey:bytesToHex(other.publicKey),pairedAt:"date"}});
+        accountStore!.decide(row.token,"approve");
+      } else if(scenario.startsWith("account-cas-")) accountStore!.decide(row.token,"approve");
+      if(scenario === "account-runtime" || controllerMode) {
+        await until(()=>owner.read().peers.some(peer=>peer.publicKey===key),"terminal decision committed canonical trust");
+        assert.equal(accountStore!.get(row.token),null);
+        p.transport.send(JSON.stringify({id:75,jsonrpc:"2.0",method:"query",params:{path:"probe"}}));
+        await until(()=>p.data.some(x=>x.includes("rpc-secret")),"approved RPC");
+        assert.equal(owner.read().revision,1);
+        if (controllerMode) {
+          const statePath=join(process.env.OPENSCOUT_PAIRING_HOME!,"runtime.json");
+          const initial=JSON.parse(readFileSync(statePath,"utf8"));
+          const opened=await requestLocalPairingOpportunity(bridgePort,"open");assert(opened);
+          const rotated=JSON.parse(readFileSync(statePath,"utf8"));
+          assert.equal(rotated.accountPairing.accountRoom,initial.accountPairing.accountRoom);
+          assert(rotated.accountPairing.expiresAt>=initial.accountPairing.expiresAt);
+          assert.notEqual(rotated.pairing.room,rotated.accountPairing.accountRoom);
+          await requestLocalPairingOpportunity(bridgePort,"cancel",opened.windowId);
+          const closed=JSON.parse(readFileSync(statePath,"utf8"));
+          assert.equal(closed.pairing,null);assert.equal(closed.accountPairing.accountRoom,initial.accountPairing.accountRoom);
+          console.log("CONTROLLER_OWNER_PATH_VERIFIED");
+        }
+      } else if(scenario === "account-disconnect" || scenario === "account-carrier") {
+        await until(()=>Boolean(accountSignal?.aborted),"departed account waiter aborted");
+        accountStore!.decide(row.token,"approve"); await Bun.sleep(20);
+        assert(!owner.read().peers.some(peer=>peer.publicKey===key));
+      } else {
+        await until(()=>p.state.closed===4003,"account refusal close");
+        assert(!owner.read().peers.some(peer=>peer.publicKey===key));
+        assert.equal(dispatches,0);assert.equal(subscriptions,0);
+      }
+    }
+  } else if (scenario === "revoked") {
     seed(); const first = await accepted(); revoke();
     // Already-connected revocation is the separate registry change. This fix
     // must not let an unadmitted reconnect evict this still-connected peer.
@@ -187,10 +299,18 @@ try {
     await denied("XX", other);
   } else throw Error("unknown scenario");
   console.log(JSON.stringify({ok: true, flavor, scenario, revision: owner.read().revision, dispatches, subscriptions}));
+} catch(error) {
+  console.error(error);
+  throw error;
 } finally {
+  if (controllerMode) {
+    process.kill(process.pid,"SIGTERM");
+    await new Promise(()=>{}); // controller's real shutdown writes withdrawal and exits
+  }
   for (const ws of sockets) ws.close();
   if (runtime) await runtime.stop(); else connection.disconnect();
   relay.stop();
+  accountStore?.dispose();
 }
 // Relay idle/grace timers are not application ownership; do not leave a worker
 // alive just to wait them out after its explicit shutdown.
