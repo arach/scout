@@ -50,7 +50,9 @@ test("concurrent slow readers have independent cursors and never overwrite queue
 for(const corrupt of ["mutate","truncate"]){test(`corrupt cache produces an incomplete failed stream: ${corrupt}`,async()=> {
  const cache=makeCache();const snapshot=createRuntimeRegistrySnapshot({messages:{one:cache.prepare(message("one","a".repeat(20000)))}});
  const fd=(cache as unknown as {fd:number}).fd;if(corrupt==="mutate")writeSync(fd,Buffer.from("b"),0,1,100);else ftruncateSync(fd,100);
- const response=new Response();await expect(writeBrokerSnapshot(response,snapshot,{encodedBodies:true,chunkBytes:1024})).rejects.toThrow("cache is unavailable");
+ const response=new Response();let failure:unknown;
+ try { await writeBrokerSnapshot(response,snapshot,{encodedBodies:true,chunkBytes:1024}); } catch(error) { failure=error; }
+ expect(failure).toBeInstanceOf(Error);expect((failure as Error).message).toContain("cache is unavailable");
  expect(response.destroyed).toBe(true);expect(response.writableEnded).toBe(false);expect(response.eventNames()).toEqual([]);
 });}
 test("stall deadline and disconnect release listeners without completing a response",async()=> {

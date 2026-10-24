@@ -8,7 +8,11 @@ listeners, registrations, jobs and restart sources still lack complete coverage.
 The default remains refusal. No daemon, app supervisor or launcher selects this
 adapter. Production readiness and P1 rollout remain closed.
 
-The native adapter supports only the audited Darwin Bun revisions for 1.3.13
+Scout requires Bun 1.4 or newer. Direct-child custody and carrier mapping
+remain unavailable on supported Bun releases until a new exact-revision audit.
+The migration does not transfer the old native-reaper proof to a new runtime.
+
+The historical native audit covered only Darwin Bun revisions for 1.3.13
 (`bf2e2cecf27e800962b1e7f03d66278f9d5d2e79`) and 1.3.14
 (`0d9b296af33f2b851fcbf4df3e9ec89751734ba4`), arm64/x64. Node, Linux,
 other architectures and other revisions refuse with

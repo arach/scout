@@ -309,11 +309,9 @@ test("shutdown preserves the observed Bun close code and reason for bridge and c
   const port = await getFreePort(); const relay = startRelay(port); activeRelays.push(relay);
   const bridge = await connect(port, "stop", "bridge"), client = await connect(port, "stop", "client");
   const endBridge = closed(bridge), endClient = closed(client); relay.stop();
-  // Both unmodified relays request 1001 then immediately call server.stop().
-  // Bun 1.3.13/1.3.14 expose 1000 on the wire in that sequence. Preserve it;
-  // do not change shutdown scheduling or replace baseline behavior in this move.
-  expect(await endBridge).toEqual({ code: 1000, reason: "Relay shutting down" });
-  expect(await endClient).toEqual({ code: 1000, reason: "Relay shutting down" });
+  // Bun 1.4 preserves the requested going-away code through server.stop().
+  expect(await endBridge).toEqual({ code: 1001, reason: "Relay shutting down" });
+  expect(await endClient).toEqual({ code: 1001, reason: "Relay shutting down" });
 });
 
 test("trusted HTTP composition is explicit and undefined delegates to the unchanged relay routes", async () => {

@@ -16,6 +16,7 @@ for (const wrapper of ["packages/runtime/bin/openscout-runtime.mjs", "packages/c
       mkdirSync(join(dir, "dist/node"));
       copyFileSync(join(root, wrapper), join(dir, "bin/entry.mjs"));
       copyFileSync(join(root, "packages/cli/bin/lifecycle-preflight.mjs"), join(dir, "bin/lifecycle-preflight.mjs"));
+      copyFileSync(join(root, "packages/cli/bin/bun-preflight.mjs"), join(dir, "bin/bun-preflight.mjs"));
       writeFileSync(join(dir, "package.json"), '{"version":"test"}');
       // An external marker catches imports even when the launcher swallows an
       // entrypoint error and falls back to help.

@@ -59,20 +59,11 @@ Messages are static; server error messages are never parsed as gap/cursor
 metadata. In particular, the broker's StreamResyncRequired arrives as a generic
 tRPC internal error, not a stable `resync_required` wire field.
 
-Bun 1.3.13/1.3.14's ws shim does not expose failed-upgrade HTTP status. Its
-opaque pre-open failures trigger a plain TCP probe to the same validated loopback
-host and port. The probe sends no bytes, closes immediately on connect, and has
-a 250 ms limit within the existing outage budget. Only error code ECONNREFUSED
-proves an outage and earns bounded retry. A successful connection is a live
-listener rejection: terminal handshake_error, with no second upgrade attempt.
-Timeout or any other probe error also fails closed as handshake_error; no error
-message is parsed. Abort, return and budget exhaustion cancel a pending probe.
-
-If the runtime appears between the failed upgrade and the probe, the probe can
-connect and conservatively stop. Inspect the listener and resubscribe to recover
-from handshake_error; it does not prove an authorization denial. Node retains
-its HTTP status classification and retries 503 within budget. Both engines
-resume post-open losses and recognize structured tRPC authorization errors.
+Bun 1.4 and Node expose failed-upgrade HTTP status. Both engines classify
+401/403 as terminal auth_denied and retry 503 within the existing outage budget.
+Other HTTP statuses are terminal server_error. The client never follows a
+redirect or sends a second diagnostic TCP connection. Both engines resume
+post-open losses and recognize structured tRPC authorization errors.
 This is not an authentication fallback. Mesh-peer ingress is a separate slice
 and requires review before any credential API is added.
 

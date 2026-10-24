@@ -1,3 +1,4 @@
+import "./bun-bootstrap.js";
 import type { RuntimeEnv, RuntimePlatform } from "./portable-types.js";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";

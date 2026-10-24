@@ -1,3 +1,4 @@
+import { MINIMUM_BUN_VERSION, supportedBunVersion } from "../../bin/bun-preflight.mjs";
 import { loadScoutCoreReport } from "../lib/core/setup/readiness.ts";
 import { assessCoreSetupCompletion } from "@openscout/runtime/core-report";
 import type { ScoutCommandContext } from "./context.ts";
@@ -6,6 +7,12 @@ import { loadSystemProbeDoctorReport } from "@openscout/runtime/system-probes";
 import { loadHarnessCatalogSnapshot } from "@openscout/runtime/harness-catalog";
 import { loadNativeScoutdDoctorReport, type NativeScoutdDoctorReport } from "./scoutd.ts";
 import { spawn } from "node:child_process";
+
+/** The executing Bun, not a different executable found later on PATH. */
+export function doctorBunReport(version = process.versions.bun) {
+  return { version: version ?? null, minimum: MINIMUM_BUN_VERSION,
+    supported: supportedBunVersion(version), upgrade: "bun upgrade" };
+}
 
 export const DOCTOR_CHECK_NAMES = ["broker", "native", "runtimes", "probes"] as const;
 export type DoctorCheckName = typeof DOCTOR_CHECK_NAMES[number];
