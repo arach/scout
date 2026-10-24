@@ -10,7 +10,8 @@ import {
 } from "@openscout/protocol";
 
 import { isLoopbackHost } from "./broker-process-manager.js";
-import { meshBridgeCredentialSource } from "./mesh-bridge-credential.js";
+import { isMeshBridgeCredentialUrl } from "./mesh-bridge-config.js";
+import { meshBridgeCredentialSource, type MeshBridgeCredential } from "./mesh-bridge-credential.js";
 import { readOpenScoutNetworkSettingsSync } from "./open-scout-network.js";
 import { resolveOpenScoutPairingHomeForEnv, resolveOpenScoutSupportPaths } from "./support-paths.js";
 
@@ -22,7 +23,7 @@ export interface MeshRendezvousPublishConfig {
    * The host's own approval, read before each publish (mesh-bridge-credential.ts).
    * Set when the environment carries no token or session.
    */
-  hostCredential?: () => Promise<string | null>;
+  hostCredential?: () => Promise<MeshBridgeCredential | null>;
   ttlMs: number;
   intervalMs: number;
 }
@@ -114,21 +115,38 @@ export function buildMeshRendezvousPresence(
   });
 }
 
+// Per publisher/options lifetime, not one warning per heartbeat or global state.
+const hostCredentialStates = new WeakMap<MeshRendezvousPublisherOptions, string>();
+function hostCredentialAllowed(options: MeshRendezvousPublisherOptions, credential?: MeshBridgeCredential): boolean {
+  let state = "unavailable";
+  if (credential) {
+    try {
+      const destination = new URL(options.config.url);
+      state = isMeshBridgeCredentialUrl(destination) && destination.origin === credential.relayOrigin ? "ready" : "issuer-mismatch";
+    } catch { state = "issuer-mismatch"; }
+  }
+  if (state !== hostCredentialStates.get(options)) {
+    hostCredentialStates.set(options, state);
+    if (state === "unavailable") options.logger?.log("[openscout-runtime] mesh rendezvous waits for this host's approval and valid bridge configuration: run `scout mesh bridge connect`");
+    if (state === "issuer-mismatch") options.logger?.warn("[openscout-runtime] mesh rendezvous skipped: host credential requires HTTPS (or loopback HTTP) and its bridge issuer's exact origin");
+  }
+  return state === "ready";
+}
+
 /** `hostCredential` is the host's approval, already read; a host without one publishes nothing. */
 export async function publishMeshRendezvousPresence(
   node: NodeDefinition,
   options: MeshRendezvousPublisherOptions,
-  hostCredential?: string,
+  hostCredential?: MeshBridgeCredential,
 ): Promise<boolean> {
   const presence = buildMeshRendezvousPresence(node, { ttlMs: options.config.ttlMs });
   if (!presence) {
     options.logger?.warn("[openscout-runtime] mesh rendezvous skipped: no reachable entrypoints to publish");
     return false;
   }
-  const credential = hostCredential ?? (await options.config.hostCredential?.()) ?? undefined;
-  if (options.config.hostCredential && !credential) {
-    return false;
-  }
+  const usesHostCredential = !options.config.token && !options.config.sessionToken && Boolean(options.config.hostCredential);
+  const credential = usesHostCredential ? hostCredential ?? (await options.config.hostCredential?.()) ?? undefined : undefined;
+  if (usesHostCredential && !hostCredentialAllowed(options, credential)) return false;
 
   const fetchImpl = options.fetch ?? fetch;
   const response = await fetchImpl(`${options.config.url}/v1/presence`, {
@@ -136,9 +154,10 @@ export async function publishMeshRendezvousPresence(
     headers: {
       "content-type": "application/json",
       accept: "application/json",
-      ...rendezvousAuthHeaders(options.config, credential),
+      ...rendezvousAuthHeaders(options.config, credential?.token),
     },
     body: JSON.stringify(presence),
+    ...(usesHostCredential ? { redirect: "error" as const } : {}),
   });
 
   if (!response.ok) {
@@ -161,19 +180,15 @@ export function startMeshRendezvousPublisher(
   let inFlight: Promise<void> | null = null;
   // Logged when they change, not on every beat.
   let publishing = false;
-  let waitingForApproval = false;
   // The host credential the rendezvous refused; a new approval replaces it.
   let refusedCredential: string | null = null;
 
   const publishOnce = async () => {
-    let credential: string | undefined;
-    if (options.config.hostCredential) {
+    let credential: MeshBridgeCredential | undefined;
+    if (!options.config.token && !options.config.sessionToken && options.config.hostCredential) {
       credential = (await options.config.hostCredential()) ?? undefined;
-      if (!credential && !waitingForApproval) {
-        options.logger?.log("[openscout-runtime] mesh rendezvous waits for this host's approval: run `scout mesh bridge connect`");
-      }
-      waitingForApproval = !credential;
-      if (!credential || credential === refusedCredential) return;
+      if (!hostCredentialAllowed(options, credential)) { publishing = false; return; }
+      if (credential?.token === refusedCredential) return;
     }
     try {
       if (await publishMeshRendezvousPresence(resolveNodeSource(node), options, credential)) {
@@ -189,7 +204,7 @@ export function startMeshRendezvousPublisher(
         && (error.status === 401 || error.status === 403)
       ) {
         if (credential) {
-          refusedCredential = credential;
+          refusedCredential = credential.token;
           options.logger?.warn(
             `[openscout-runtime] mesh rendezvous refused this host's credential; publishing resumes once the host is approved again (scout mesh bridge connect): ${error.message}`,
           );

@@ -185,6 +185,109 @@ describe("mesh rendezvous publisher", () => {
     expect(sent).toEqual(["Bearer osbr_revoked", "Bearer osbr_reapproved"]);
   });
 
+  test("host credentials refuse remote HTTP and cross-origin HTTPS before fetch", async () => {
+    writeBridgeConfig({ token: "osbr_approved" });
+    for (const url of ["http://mesh.oscout.net", "https://other.example.test", "https://mesh.oscout.net:444", "not-a-url"]) {
+      let requests = 0;
+      const warnings: string[] = [];
+      const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: url })!;
+      const publisher = startMeshRendezvousPublisher(makeNode(), { config: { ...config, intervalMs: 60_000 },
+        logger: { log() {}, warn: message => warnings.push(message) },
+        fetch: async () => { requests++; return Response.json({ ok: true }); },
+      });
+      await publisher.publishNow(); await publisher.publishNow(); publisher.stop();
+      expect(requests).toBe(0);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("exact origin");
+    }
+  });
+
+  test("invalid bridge configuration publishes nothing and logs once per blocked state", async () => {
+    writeBridgeConfig({ token: "osbr_approved", tokenFile: "/unrelated/private-key" });
+    const logs: string[] = [];
+    let requests = 0;
+    const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net" })!;
+    const publisher = startMeshRendezvousPublisher(makeNode(), { config: { ...config, intervalMs: 60_000 },
+      logger: { log: message => logs.push(message), warn() {} },
+      fetch: async () => { requests++; return Response.json({ ok: true }); },
+    });
+    await publisher.publishNow(); await publisher.publishNow();
+    expect(requests).toBe(0); expect(logs).toHaveLength(1);
+    writeBridgeConfig({ token: "osbr_approved" }, 1000);
+    await publisher.publishNow(); expect(requests).toBe(1);
+    writeBridgeConfig({ token: "invalid token" }, 1000);
+    await publisher.publishNow(); await publisher.publishNow(); publisher.stop();
+    expect(requests).toBe(1);
+    expect(logs.filter(message => message.includes("valid bridge configuration"))).toHaveLength(2);
+  });
+
+  test("compares the issuer every publish, including same-mtime changes and recovery", async () => {
+    writeBridgeConfig({ token: "osbr_approved" }, 1000);
+    let requests = 0;
+    const warnings: string[] = [];
+    const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: "https://mesh.oscout.net" })!;
+    const publisher = startMeshRendezvousPublisher(makeNode(), { config: { ...config, intervalMs: 60_000 },
+      logger: { log() {}, warn: message => warnings.push(message) },
+      fetch: async () => { requests++; return Response.json({ ok: true }); },
+    });
+    await publisher.publishNow(); expect(requests).toBe(1);
+    writeBridgeConfig({ token: "osbr_approved", relayUrl: "https://other.example.test" }, 1000);
+    await publisher.publishNow(); await publisher.publishNow(); expect(requests).toBe(1);
+    writeBridgeConfig({ token: "osbr_approved" }, 1000);
+    await publisher.publishNow(); expect(requests).toBe(2);
+    writeBridgeConfig({ token: "osbr_approved", relayUrl: "https://other.example.test" }, 1000);
+    await publisher.publishNow(); publisher.stop();
+    expect(requests).toBe(2); expect(warnings).toHaveLength(2);
+  });
+
+  test("direct publish permits same-origin loopback HTTP and refuses redirect following for host auth", async () => {
+    writeBridgeConfig({ token: "osbr_loopback", relayUrl: "http://127.0.0.1:43199" });
+    const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: "http://127.0.0.1:43199" })!;
+    const requests: RequestInit[] = [];
+    const options = { config, fetch: async (_input: any, init?: RequestInit) => {
+      requests.push(init!); return Response.json({ ok: true });
+    } };
+    expect(await publishMeshRendezvousPresence(makeNode(), options)).toBe(true);
+    expect(requests[0]?.headers).toMatchObject({ authorization: "Bearer osbr_loopback" });
+    expect(requests[0]?.redirect).toBe("error");
+    config.url = "https://other.example.test";
+    expect(await publishMeshRendezvousPresence(makeNode(), options)).toBe(false);
+    expect(requests).toHaveLength(1);
+  });
+
+  test("host-auth loopback HTTP reaches only presence and never follows a redirect", async () => {
+    const paths: string[] = [];
+    let redirect = false;
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+      paths.push(new URL(request.url).pathname);
+      expect(request.headers.get("authorization")).toBe("Bearer osbr_loopback");
+      return redirect ? new Response(null, { status: 302, headers: { location: "/unexpected" } }) : Response.json({ ok: true });
+    } });
+    try {
+      const url = `http://127.0.0.1:${server.port}`;
+      writeBridgeConfig({ token: "osbr_loopback", relayUrl: url });
+      const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: url })!;
+      expect(await publishMeshRendezvousPresence(makeNode(), { config })).toBe(true);
+      redirect = true;
+      await expect(publishMeshRendezvousPresence(makeNode(), { config })).rejects.toThrow();
+      expect(paths).toEqual(["/v1/presence", "/v1/presence"]);
+    } finally { server.stop(true); }
+  });
+
+  test("environment token and session keep explicit remote HTTP and cross-origin behavior", async () => {
+    writeBridgeConfig({ token: "invalid config token", tokenFile: "/unrelated/private-key" });
+    for (const auth of [{ OPENSCOUT_MESH_RENDEZVOUS_TOKEN: "env-token" }, { OPENSCOUT_MESH_RENDEZVOUS_SESSION: "env-session" }]) {
+      const config = resolveMeshRendezvousPublishConfig({ OPENSCOUT_MESH_RENDEZVOUS_URL: "http://explicit.example.test", ...auth })!;
+      expect(config.hostCredential).toBeUndefined();
+      const requests: RequestInit[] = [];
+      expect(await publishMeshRendezvousPresence(makeNode(), { config, fetch: async (_input, init) => {
+        requests.push(init!); return Response.json({ ok: true });
+      } })).toBe(true);
+      expect(requests[0]?.headers).toMatchObject({ authorization: auth.OPENSCOUT_MESH_RENDEZVOUS_TOKEN ? "Bearer env-token" : "Bearer osn_session_env-session" });
+      expect(requests[0]?.redirect).toBeUndefined();
+    }
+  });
+
   test("builds presence from Iroh entrypoints and skips loopback HTTP", () => {
     const presence = buildMeshRendezvousPresence(makeNode({
       brokerUrl: "http://127.0.0.1:65501",
@@ -402,7 +505,7 @@ function writeBridgeConfig(fields: Record<string, unknown>, mtimeMs?: number): v
   const supportDirectory = process.env.OPENSCOUT_SUPPORT_DIRECTORY!;
   mkdirSync(supportDirectory, { recursive: true });
   const path = join(supportDirectory, "mcp-bridge.json");
-  writeFileSync(path, JSON.stringify({ relayUrl: "https://mcp.oscout.net", ...fields }));
+  writeFileSync(path, JSON.stringify({ relayUrl: "https://mesh.oscout.net", ...fields }));
   if (mtimeMs !== undefined) utimesSync(path, new Date(mtimeMs), new Date(mtimeMs));
 }
 

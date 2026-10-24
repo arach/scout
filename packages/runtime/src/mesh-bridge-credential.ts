@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { closeSync, constants, fstatSync, openSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
 
+import { isMeshBridgeToken, readMeshBridgeConfigSnapshot, validateMeshBridgeConfig } from "./mesh-bridge-config.js";
 import { meshBridgeConfigPath } from "./mesh-bridge-supervisor.js";
 
 /**
@@ -25,53 +25,56 @@ export interface MeshBridgeCredentialOptions {
 /** After a read finds nothing, an unchanged config is read again this often. */
 const MISSING_CREDENTIAL_RETRY_MS = 5 * 60_000;
 
-export async function readMeshBridgeCredential(options: MeshBridgeCredentialOptions): Promise<string | null> {
-  let config: unknown;
+/** A credential stays paired with the issuer from the same validated snapshot. */
+export interface MeshBridgeCredential {
+  token: string;
+  relayOrigin: string;
+}
+
+type ValidatedSnapshot = ReturnType<typeof validatedSnapshot>;
+function validatedSnapshot(options: MeshBridgeCredentialOptions) {
   try {
-    config = JSON.parse(readFileSync(meshBridgeConfigPath(options.supportDirectory), "utf8"));
-  } catch {
-    return null;
-  }
-  if (!config || typeof config !== "object") return null;
-  const { token, tokenKeychainService, tokenFile } = config as Record<string, unknown>;
-  if (typeof token === "string" && token.trim()) return token.trim();
+    const snapshot = readMeshBridgeConfigSnapshot(meshBridgeConfigPath(options.supportDirectory));
+    return { ...snapshot, config: validateMeshBridgeConfig(snapshot.value, options.supportDirectory) };
+  } catch { return null; }
+}
+
+async function readSnapshotCredential(options: MeshBridgeCredentialOptions, snapshot: NonNullable<ValidatedSnapshot>): Promise<string | null> {
+  const { token, tokenKeychainService, tokenFile } = snapshot.config;
+  if (token) return token;
   if ((options.platform ?? process.platform) === "darwin") {
-    const service = typeof tokenKeychainService === "string" ? tokenKeychainService.trim() : "";
-    return service ? (options.readKeychain ?? readKeychainSecret)(service) : null;
+    const secret = tokenKeychainService ? await (options.readKeychain ?? readKeychainSecret)(tokenKeychainService) : null;
+    return isMeshBridgeToken(secret) ? secret : null;
   }
-  const path = typeof tokenFile === "string" && tokenFile.trim()
-    ? tokenFile.trim()
-    : join(options.supportDirectory, "mcp-bridge.token");
-  return readMode0600File(path);
+  return readMode0600File(tokenFile);
 }
 
-/**
- * Reads the credential again when the bridge config changes (connect,
- * disconnect), and retries a config that gave nothing every few minutes, so a
- * host approved after startup publishes without a restart.
- */
-export function meshBridgeCredentialSource(options: MeshBridgeCredentialOptions): () => Promise<string | null> {
+export async function readMeshBridgeCredential(options: MeshBridgeCredentialOptions): Promise<string | null> {
+  return (await meshBridgeCredentialSource(options)())?.token ?? null;
+}
+
+/** Revalidate the configuration and issuer every call; cache only secret lookup. */
+export function meshBridgeCredentialSource(options: MeshBridgeCredentialOptions): () => Promise<MeshBridgeCredential | null> {
   const now = options.now ?? Date.now;
-  let readMtimeMs: number | null | undefined;
+  let readIdentity: string | undefined;
   let readAt = 0;
-  let credential: string | null = null;
+  let token: string | null = null;
   return async () => {
-    const mtimeMs = configMtimeMs(options.supportDirectory);
-    if (mtimeMs !== readMtimeMs || (!credential && now() - readAt >= MISSING_CREDENTIAL_RETRY_MS)) {
-      readMtimeMs = mtimeMs;
+    const snapshot = validatedSnapshot(options);
+    if (!snapshot) { readIdentity = undefined; token = null; return null; }
+    const identity = `${snapshot.digest}:${snapshot.mtimeMs}`;
+    if (identity !== readIdentity || (!token && now() - readAt >= MISSING_CREDENTIAL_RETRY_MS)) {
+      token = await readSnapshotCredential(options, snapshot);
+      // A keychain lookup may yield while connect/disconnect rewrites the config.
+      const current = validatedSnapshot(options);
+      if (!current || current.digest !== snapshot.digest || current.mtimeMs !== snapshot.mtimeMs) {
+        readIdentity = undefined; token = null; return null;
+      }
+      readIdentity = identity;
       readAt = now();
-      credential = mtimeMs === null ? null : await readMeshBridgeCredential(options);
     }
-    return credential;
+    return token ? { token, relayOrigin: snapshot.config.relayOrigin } : null;
   };
-}
-
-function configMtimeMs(supportDirectory: string): number | null {
-  try {
-    return statSync(meshBridgeConfigPath(supportDirectory)).mtimeMs;
-  } catch {
-    return null;
-  }
 }
 
 function readKeychainSecret(service: string): Promise<string | null> {
@@ -89,12 +92,12 @@ function readMode0600File(path: string): string | null {
   if (typeof noFollow !== "number" || noFollow === 0) return null;
   let fd: number | null = null;
   try {
-    fd = openSync(path, constants.O_RDONLY | noFollow);
+    fd = openSync(path, constants.O_RDONLY | noFollow | constants.O_NONBLOCK);
     const stats = fstatSync(fd);
-    if (!stats.isFile() || (stats.mode & 0o777) !== 0o600) return null;
+    if (!stats.isFile() || stats.size > 8194 || (stats.mode & 0o777) !== 0o600) return null;
     if (typeof process.getuid === "function" && stats.uid !== process.getuid()) return null;
     const value = readFileSync(fd, "utf8").trim();
-    return value || null;
+    return isMeshBridgeToken(value) ? value : null;
   } catch {
     return null;
   } finally {

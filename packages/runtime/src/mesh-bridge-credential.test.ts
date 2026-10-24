@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -26,7 +26,7 @@ function writeConfig(directory: string, fields: Record<string, unknown>, mtimeMs
 describe("the host's bridge credential", () => {
   test("is the token the bridge config carries", async () => {
     const directory = supportDirectory();
-    writeConfig(directory, { token: " osbr_inline " });
+    writeConfig(directory, { token: "osbr_inline" });
     expect(await readMeshBridgeCredential({ supportDirectory: directory, platform: "darwin" })).toBe("osbr_inline");
   });
 
@@ -55,6 +55,67 @@ describe("the host's bridge credential", () => {
     expect(await readMeshBridgeCredential({ supportDirectory: directory, platform: "linux" })).toBeNull();
     chmodSync(tokenFile, 0o600);
     expect(await readMeshBridgeCredential({ supportDirectory: directory, platform: "linux" })).toBe("osbr_file");
+  });
+
+  test("refuses an arbitrary private-key-shaped 0600 file before reading a credential", async () => {
+    const directory = supportDirectory();
+    const privateKey = join(directory, "unrelated-private-key");
+    writeFileSync(privateKey, "-----BEGIN PRIVATE KEY-----\nsynthetic-fixture-only\n-----END PRIVATE KEY-----\n", { mode: 0o600 });
+    expect(statSync(privateKey).mode & 0o777).toBe(0o600);
+    if (process.getuid) expect(statSync(privateKey).uid).toBe(process.getuid());
+    writeConfig(directory, { tokenFile: privateKey });
+    expect(await readMeshBridgeCredential({ supportDirectory: directory, platform: "linux" })).toBeNull();
+  });
+
+  test("validates every configured field, even one hidden by inline token precedence", async () => {
+    const directory = supportDirectory();
+    let lookups = 0;
+    for (const fields of [
+      { token: " leading-space" }, { token: "trailing\n" }, { token: "" }, { token: "a".repeat(8193) }, { token: "line\nbreak" },
+      { token: 7 }, { tokenKeychainService: "bad service" }, { tokenKeychainService: "Valid\n" }, { tokenKeychainService: "-bad" },
+      { tokenKeychainService: "a".repeat(129) }, { tokenKeychainService: null },
+      { tokenFile: "/unrelated/credential" }, { tokenFile: "" }, { tokenFile: null },
+      { relayUrl: "http://issuer.example.test" }, { relayUrl: "https://issuer.example.test/path" },
+      { relayUrl: "https://user:password@issuer.example.test" }, { dir: "/caller/dir" },
+    ]) {
+      writeConfig(directory, { token: "osbr_inline", ...fields });
+      expect(await readMeshBridgeCredential({ supportDirectory: directory, platform: "darwin",
+        readKeychain: async () => { lookups++; return "osbr_lookup"; } })).toBeNull();
+    }
+    expect(lookups).toBe(0);
+  });
+
+  test("rejects non-token contents from the fixed file or keychain", async () => {
+    const directory = supportDirectory();
+    writeConfig(directory, { tokenKeychainService: "Valid.Service-1" });
+    expect(await readMeshBridgeCredential({ supportDirectory: directory, platform: "darwin",
+      readKeychain: async () => "two words" })).toBeNull();
+    writeConfig(directory, {});
+    writeFileSync(join(directory, "mcp-bridge.token"), "two words", { mode: 0o600 });
+    expect(await readMeshBridgeCredential({ supportDirectory: directory, platform: "linux" })).toBeNull();
+  });
+
+  test("refreshes issuer and validation on same-mtime edits, not just once at startup", async () => {
+    const directory = supportDirectory();
+    const source = meshBridgeCredentialSource({ supportDirectory: directory });
+    writeConfig(directory, { token: "osbr_inline" }, 1000);
+    expect(await source()).toEqual({ token: "osbr_inline", relayOrigin: "https://mcp.oscout.net" });
+    writeConfig(directory, { token: "osbr_inline", relayUrl: "https://other.example.test" }, 1000);
+    expect(await source()).toEqual({ token: "osbr_inline", relayOrigin: "https://other.example.test" });
+    writeConfig(directory, { token: "osbr_inline", tokenFile: "/unrelated/credential" }, 1000);
+    expect(await source()).toBeNull();
+  });
+
+  test("does not pair a yielded keychain result with a changed configuration", async () => {
+    const directory = supportDirectory();
+    writeConfig(directory, { tokenKeychainService: "Valid.Service" }, 1000);
+    const source = meshBridgeCredentialSource({ supportDirectory: directory, platform: "darwin",
+      readKeychain: async () => {
+        writeConfig(directory, { token: "osbr_new", relayUrl: "https://other.example.test" }, 1000);
+        return "osbr_old";
+      } });
+    expect(await source()).toBeNull();
+    expect(await source()).toEqual({ token: "osbr_new", relayOrigin: "https://other.example.test" });
   });
 
   test("is nothing on a host that was never approved", async () => {
@@ -87,13 +148,13 @@ describe("the host's bridge credential", () => {
     expect(reads).toBe(1);
 
     clock += 5 * 60_000;
-    expect(await credential()).toBe("osbr_later");
-    expect(await credential()).toBe("osbr_later");
+    expect(await credential()).toEqual({ token: "osbr_later", relayOrigin: "https://mcp.oscout.net" });
+    expect(await credential()).toEqual({ token: "osbr_later", relayOrigin: "https://mcp.oscout.net" });
     expect(reads).toBe(2);
 
     keychain = "osbr_reapproved";
     writeConfig(directory, { tokenKeychainService: "OPENSCOUT_MCP_BRIDGE_CREDENTIAL" }, 2_000);
-    expect(await credential()).toBe("osbr_reapproved");
+    expect(await credential()).toEqual({ token: "osbr_reapproved", relayOrigin: "https://mcp.oscout.net" });
     expect(reads).toBe(3);
   });
 });
