@@ -560,6 +560,12 @@
       "import": "./dist/supervision-handoff/index.js",
       "default": "./dist/supervision-handoff/index.js"
     },
+    "./extension-channel-qualification": {
+      "bun": "./src/extension-channel-qualification.ts",
+      "types": "./dist/extension-channel-qualification.d.ts",
+      "import": "./dist/extension-channel-qualification.js",
+      "default": "./dist/extension-channel-qualification.js"
+    },
     "./extension-channel-host": {
       "bun": "./src/extension-channel-host.ts",
       "types": "./dist/extension-channel-host.d.ts",

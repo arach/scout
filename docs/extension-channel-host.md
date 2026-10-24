@@ -1,8 +1,15 @@
-# Dormant extension channel host
+# Qualified extension context host
 
-The production context gate remains literal `false`. A qualified transport does
-not enable API 2 context or credential delivery. Activation requires a separate
-host review, exact-head two-platform evidence and an operator checkpoint.
+API 2 context-only delivery is enabled only on the exact qualified runtime
+coordinates below. The facade verifies the coordinate and fixed assets again
+immediately before allocation. Unsupported hosts refuse
+`context_backend_unproven` before native loading or provider spawn. There is
+no CLI or environment override. API 1 is unchanged.
+
+A nonempty credential declaration still refuses `input_backend_unproven`
+before either channel or child is created on a supported host. Grants and the
+metadata-only input session do not authorize delivery. This context activation
+is a separate review and operator checkpoint, never part of a cutover PR.
 
 The `extension-channel-host` runtime subpath exposes allocation through the
 single-owner adapter and fixed asset verification, not a raw close function,

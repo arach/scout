@@ -1,11 +1,12 @@
-/** API 1 is deliberately outside this new capability gate. */
+import { currentExtensionChannelCoordinate } from "@openscout/runtime/extension-channel-qualification";
+
+/** Context-only activation. API 1 and credential input authority are unchanged.
+ * A supported coordinate is necessary, not sufficient: the fixed host facade
+ * rechecks the coordinate and approved asset bytes synchronously at allocation.
+ * There is no environment/CLI opt-in or fallback to another transport.
+ */
 export function scoutExtensionContextBackend(): boolean {
-  // No qualified host. At exact 1.3.14 (0d9b296a) the native subprocess retains
-  // ownership of a Node-wrapped extra pipe's number and closes it again at GC
-  // after the wrapper's socket destroyed it — a measured double owner (macOS),
-  // with the finalizer path in shared non-Windows source. A backend qualifies
-  // only by passing the corrected reclaim witness with a single descriptor owner.
-  return false;
+  return currentExtensionChannelCoordinate() !== null;
 }
 
 /** Internal fixed resolver. No user flag or environment override can load code.
