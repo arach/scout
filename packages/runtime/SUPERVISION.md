@@ -1,4 +1,4 @@
-# Transitional app entry configuration
+# App entry configuration
 
 The broker no longer searches a source checkout for web or Scoutbot. An
 explicit entry must name an absolute regular file. A missing file is a
@@ -78,22 +78,12 @@ installation or reload mechanism.
 Set `OPENSCOUT_WEB_SERVER_ENTRY=""` or `OPENSCOUT_SCOUTBOT_PROCESS=""` to turn
 that role off explicitly; an empty override is not an absent override.
 
-## Installed npm compatibility until web removal
+## No bundled web fallback
 
-A public npm installation currently ships web. Preserve that behavior until
-the web packaging cutover: **only when no web entry variable and no durable
-configuration file are present**, the broker can use its installed CLI web
-bundle. Selection requires the neighboring package manifest to name
-`@openscout/scout` and its directory's real path to contain a `node_modules`
-path component. A built checkout or a linked package whose real path leaves
-`node_modules` requires explicit configuration. It accepts the current bundle name or its compatibility
-name. It never selects `packages/web` or walks the repository.
-
-This exception is not used after explicit configuration, including a configured
-missing file, blank entry, a present config without web, or malformed config.
-Scoutbot has no bundle/source fallback and no implicit enablement. Remove the
-npm exception with the web artifacts, not before existing npm users have a
-supported replacement.
+The public npm package contains no web app. A web client must be supplied by the
+separate apps layer and configured explicitly. The runtime does not search a
+source checkout or use a bundled CLI web client as a fallback. An unavailable
+app does not prevent core-only setup or readiness checks.
 
 ## Installer ordering
 

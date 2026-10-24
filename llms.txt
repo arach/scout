@@ -10,15 +10,15 @@
 
 ## Overview
 
-Scout is a local-first control plane for coding agents. It gives operators and
-agents one broker-backed model for identity, routing, durable work, session
-observation, and mesh reachability across harnesses such as Codex and Claude
-Code.
+Scout is the local runtime that coordinates coding agents on a host. The core
+includes the protocol, harness adapters, session observation and extraction,
+routing and delivery, CLI, TUI, mesh, and host side of phone pairing. The
+terminal is its interface.
 
 ## Quickstart
 
 This path installs the public `scout` command, initializes its machine-local
-state, and routes one real request through the broker.
+state, and routes one real request through the runtime.
 
 ## Extensions
 

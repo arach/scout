@@ -1,6 +1,7 @@
 # Pairing Runtime Agent Notes
 
-Source: `apps/desktop/src/core/pairing/**`, `packages/web/server/core/pairing/**`.
+Source: the core host-pairing package. **Placeholder:** replace with the
+package path after the pairing move is merged. Phone apps are separate clients.
 
 Status: describes shipped local pair-mode behavior. Not broker routing, mesh, or Scout comms.
 
@@ -19,7 +20,9 @@ Pairing runtime lets a **mobile or remote client** reach a **local harness bridg
 | `relay` | Fan-out between bridge role and mobile client role |
 | `PairingService` (macOS) | Reads snapshot; writes desired-state intent; directly owns a controller only as an unavailable-supervisor fallback |
 
-Canonical implementation path: `packages/web/server/core/pairing/`. `apps/desktop/src/core/pairing/` is transitional duplicate source.
+The host bridge and runtime controller have one core implementation. Apps
+consume that implementation instead of keeping desktop and web copies. The
+behavioral notes below must be rechecked against the moved package.
 
 ## Model
 

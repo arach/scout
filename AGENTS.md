@@ -20,100 +20,89 @@
 
 - Working with **packages/protocol/****? → Run bun run --cwd packages/protocol check.
 - Working with **packages/runtime/****? → Run bun run --cwd packages/runtime check and the narrow affected tests.
-- Working with **apps/desktop/****? → Run bun run --cwd apps/desktop check.
 - Working with **process spawning or shell execution**? → Run bun run sync-exec:fence before committing shell-execution changes.
 
 ## Overview
 
 > Scout's public architecture, ownership model, and repository boundary
 
-Scout is a local-first control plane for coding agents. It gives operators and
-agents one broker-backed model for identity, routing, durable work, session
-observation, and mesh reachability across harnesses such as Codex and Claude
-Code.
-
-Together, the local control plane and mesh network form a personal agent cloud
-across the machines the operator owns.
+Scout is the local runtime that coordinates coding agents on a host. The core
+includes the protocol, harness adapters, session observation and extraction,
+routing and delivery, CLI, TUI, mesh, and host side of phone pairing. The
+terminal is its interface.
 
 ## What Scout owns
 
-The broker is the canonical writer for Scout-owned coordination records:
+The runtime is the canonical writer for Scout-owned coordination records:
 
 - messages and conversations;
 - invocations, flights, and delivery plans;
 - questions and work items;
 - agent cards, sessions, endpoints, and bindings;
-- usage and lightweight coordination telemetry.
+- usage and coordination telemetry.
 
-External harness transcripts remain observed source material. Scout may index or
-project them for operator visibility, but does not bulk-import them as canonical
-Scout conversation history.
+External harness transcripts remain observed source material. Scout can index,
+extract, and display them without bulk-importing them as Scout messages.
 
 ## Routing model
 
-Routing is explicit and independent of the calling surface:
+- One target means a direct message.
+- Group coordination uses a named channel.
+- Broadcast is opt-in.
+- `tell` is for updates without requested work.
+- `ask` is for work, judgment, or a reply.
+- Exact session continuation uses `session:<id>`.
 
-- one target means a direct message;
-- group coordination uses a named channel;
-- broadcast is opt-in;
-- `send` is for tells and status updates;
-- `ask` is for requested work, judgment, or a reply;
-- exact session continuation uses `session:<id>`.
+Mesh provides reachability and coordination, not global consensus or
+exactly-once delivery.
 
 ## Repository map
 
 | Area | Path |
 | --- | --- |
-| Public CLI and bundle | `packages/cli` |
-| Broker and runtime | `packages/runtime` |
+| CLI, JSON output, MCP, and package bundle | `packages/cli` |
+| Runtime | `packages/runtime` |
 | Shared protocol | `packages/protocol` |
-| Harness observation | `packages/agent-sessions` |
-| Local web control plane | `packages/web` |
-| Desktop command surface | `apps/desktop` |
-| Native services | `crates` |
+| Harness adapters and session observation | `packages/agent-sessions` |
+| Native services and TUI | `crates` |
+
+The host-pairing package name is a **placeholder** until the pairing move is
+merged. `scout pair` remains the terminal entry point.
 
 ## Product boundary
 
-This repository is becoming the canonical home of Scout's reusable public
-primitives and complete baseline web control plane. The architecture is the
-target of an active migration: overlapping source and public release ownership
-are still being cut over, so the intended dependency model should not be read
-as proof that every migration phase is complete.
+The public core runs without an app. The Mac, iOS, Android, and web apps are
+separate clients built on the core. Hosted services are also separate. Neither
+app source nor a web client ships in the public core.
 
-Scout is currently for high-trust local developer pilots. It is not an
-enterprise-ready, compliance-ready, or hardened untrusted multi-tenant system.
+Apps consume released public packages and APIs. They do not copy core source;
+the core never imports private code. Other developers can build interfaces on
+the same runtime without adopting an existing app or hosted service.
 
-The target dependency runs one way. The private OpenScout product consumes
-exact released public packages and adds native macOS and iOS apps, hosted
-services, advanced operations, and product-specific UI through trusted
-build-time web composition. It keeps no copied public packages or mirrored
-`packages/web`; public Scout never imports or requires the private product.
-
-The public web floor is intentionally substantial: setup and health, agents and
-sessions, conversations and requests, flights and work, activity, runtimes and
-capabilities, projects, mesh and pairing, and settings should form a coherent
-standalone operator experience. See the
-[public-source boundary](./public-source-boundary.md) for current migration
-status, target ownership, and release invariants.
+Scout assumes trusted local users and agents. It is not an enterprise,
+compliance, or hardened untrusted multi-tenant boundary. See the
+[public-source boundary](./docs/public-source-boundary.md) for ownership and release
+invariants.
 
 ## Next
 
-- [Quickstart](./quickstart.md)
-- [CLI guide](../packages/cli/README.md)
-- [Runtime guide](../packages/runtime/README.md)
-- [Protocol guide](../packages/protocol/README.md)
+- [Quickstart](./docs/quickstart.md)
+- [CLI guide](./packages/cli/README.md)
+- [Runtime guide](./packages/runtime/README.md)
+- [Protocol guide](./packages/protocol/README.md)
 
 ## Quickstart
 
 > Install Scout, verify readiness, and route the first task
 
 This path installs the public `scout` command, initializes its machine-local
-state, and routes one real request through the broker.
+state, and routes one real request through the runtime.
 
 ## Prerequisites
 
 - Bun 1.3 or newer;
-- macOS or Linux;
+- Apple-silicon macOS, or Linux with a process manager for the foreground
+  runtime;
 - at least one supported coding-agent harness if you want Scout to launch or
   route work.
 
@@ -122,15 +111,28 @@ Install Bun from [bun.sh](https://bun.sh) if `bun --version` is unavailable.
 ## Installation
 
 ```bash
-bun add -g @openscout/scout
+npm install -g @openscout/scout
 scout --version
 ```
 
-Installing the package does not silently start services. Initialize the local
-control plane explicitly:
+Installing the package does not silently start services. On Apple-silicon
+macOS, initialize the local control plane explicitly:
 
 ```bash
 scout setup
+scout doctor
+```
+
+On Linux, `setup` initializes Scout but does not install a system service. Keep
+the runtime running under your process manager, then run `doctor` from another
+shell:
+
+```bash
+scout setup
+openscout-runtime broker
+```
+
+```bash
 scout doctor
 ```
 
@@ -157,17 +159,19 @@ scout ask --project . --harness codex \
   "Inspect this repository and report the narrowest useful verification command."
 ```
 
-Use `scout send --to <target>` for a tell or update where no reply is expected.
+Use `scout tell --to <target>` for a tell or update where no reply is expected.
 Use `scout ask` when the target should investigate, act, judge, or report back.
 
-## Next Steps
+## Next steps
 
-- Read the [CLI guide](../packages/cli/README.md) for routing, profiles,
+- Read [Extensions](./docs/extensions.md) to install trusted CLI verbs and enable tab completion.
+
+- Read the [CLI guide](./packages/cli/README.md) for routing, profiles,
   sessions, aliases, channels, and file-backed prompts.
-- Read the [overview](./overview.md) for the broker ownership and public/private
+- Read the [overview](./docs/overview.md) for the runtime ownership and public/private
   repository boundaries.
 - Run `scout doctor --fix` when the native daemon exposes a conservative repair
   for a reported readiness issue.
 
 ---
-Generated by [Dewey](https://github.com/arach/dewey) | Last updated: 2026-08-25
+Generated by [Dewey](https://github.com/arach/dewey) | Last updated: 2026-10-24

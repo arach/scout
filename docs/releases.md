@@ -1,5 +1,14 @@
 # Public package releases
 
+## Core-only source boundary
+
+The core release contains no web app or native app source. The Mac, iOS,
+Android, and web apps are separate clients. Historical release notes below
+about a bundled basic web client describe earlier artifacts, not the current
+package contract. Source exports and the former five-package web-composition
+plan are superseded by the [public-source boundary](./public-source-boundary.md).
+
+
 ## Standalone Scout Tailscale client
 
 `packages/scout-tailscale` is a separately versioned MIT Python client. Its
@@ -519,7 +528,7 @@ before that verification completes.
 After publication, verify that the git tag, both manifests, npm versions,
 dist-tags, package repository metadata, and public source commit agree. Install
 the packed CLI in an empty directory and exercise `scout --version`, setup,
-broker health, and the baseline web server. A partial or mismatched publication
+runtime health, and operation without an app or web client. A partial or mismatched publication
 is not promoted as a successful release.
 
 ## Hosted dev channel (dogfood prereleases)
@@ -600,7 +609,7 @@ bun run check
 bun run test:unit
 NPM_TAG=dev GITHUB_ACTIONS=true bash scripts/ship-npm.sh --dry-run
 # Review the version-only diff; commit only bumper/install output.
-git add package.json apps/desktop/package.json packages/*/package.json \
+git add package.json packages/*/package.json \
   packages/cli/src/lib/shared/product.ts docs.json bun.lock
 git commit -m "🔖 Prepare v${VERSION} dev release"
 git push -u origin HEAD
