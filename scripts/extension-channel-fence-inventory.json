@@ -380,9 +380,9 @@
     {
       "id": "core-only-app-tree-retirements",
       "sourceHead": "bd5eee3b053e249f8e699a0ec3a72bd5a2e24da6",
-      "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes.",
-      "fromCount": 173,
-      "toCount": 144,
+      "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes. The inherited host-keep-awake.ts and mesh-bridge-credential.ts policies stay in retained packages/runtime source; neither is retired with app trees. The inherited PR #139 watch-retention.test.ts Bun.spawn heap-probe policy stays in retained packages/cli source; it is not retired with app trees.",
+      "fromCount": 176,
+      "toCount": 147,
       "retired": [
         {
           "path": "apps/desktop/src/app/desktop/shell-utils.ts",
