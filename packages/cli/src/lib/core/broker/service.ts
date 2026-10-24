@@ -79,6 +79,7 @@ import {
   maybePostJsonToActiveScoutBrokerService,
   maybeReadJsonFromActiveScoutBrokerService,
   requestScoutBrokerJson,
+  ScoutBrokerHttpError,
   requestScoutBrokerJsonWithTrace,
   type ScoutBrokerBuildIdentity,
   type ScoutBrokerChildServiceSnapshots,
@@ -4475,10 +4476,17 @@ async function loadBrokerFlight(
   flightId: string,
   signal?: AbortSignal,
 ): Promise<ScoutFlightRecord | null> {
-  const snapshot = await brokerReadJson<{
-    flights?: Record<string, ScoutFlightRecord>;
-  }>(baseUrl, scoutBrokerPaths.v1.snapshot, signal);
-  return snapshot.flights?.[flightId] ?? null;
+  // A flight lookup must not materialize unrelated message bodies and outputs.
+  // This exact canonical read also survives eviction from the runtime hot set.
+  try {
+    const result = await brokerReadJson<{ flight: ScoutFlightRecord }>(
+      baseUrl, `/v1/flights/${encodeURIComponent(flightId)}`, signal,
+    );
+    return result.flight?.id === flightId ? result.flight : null;
+  } catch (error) {
+    if (error instanceof ScoutBrokerHttpError && error.status === 404) return null;
+    throw error;
+  }
 }
 
 export async function loadScoutFlight(

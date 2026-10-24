@@ -37,6 +37,7 @@ import {
   listScoutAgents,
   loadScoutBrokerContext,
   loadScoutBrokerContextResult,
+  loadScoutFlight,
   parseScoutHarness,
   parseScoutLocalHarness,
   readScoutCapabilityMatrix,
@@ -2252,12 +2253,31 @@ describe("waitForScoutFlight", () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
       paths.push(path);
-      if (path === "/v1/snapshot") return jsonResponse({ flights: { "flight-1": flight } });
+      if (path === "/v1/flights/flight-1") return jsonResponse({ flight });
       expect(path).toBe("/v1/invocations/inv-1");
       return jsonResponse({ flight: { ...flight, state: "completed" } });
     }) as typeof fetch;
     expect((await waitForScoutFlight("http://broker.test", "flight-1")).state).toBe("completed");
-    expect(paths).toEqual(["/v1/snapshot", "/v1/invocations/inv-1"]);
+    expect(paths).toEqual(["/v1/flights/flight-1", "/v1/invocations/inv-1"]);
+  });
+
+  test("exact flight reads encode IDs and distinguish absent flights from storage failures", async () => {
+    useIsolatedOpenScoutHome();
+    const paths: string[] = [];
+    let status = 200;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+      paths.push(path);
+      return status === 200
+        ? jsonResponse({ flight: { id: "flight/encoded", invocationId: "invocation", state: "completed" } })
+        : jsonResponse({ error: status === 404 ? "flight_not_found" : "flight_read_unavailable" }, status);
+    }) as typeof fetch;
+    expect((await loadScoutFlight("http://broker.test", "flight/encoded"))?.id).toBe("flight/encoded");
+    status = 404;
+    expect(await loadScoutFlight("http://broker.test", "flight/encoded")).toBeNull();
+    status = 503;
+    await expect(loadScoutFlight("http://broker.test", "flight/encoded")).rejects.toThrow("returned 503");
+    expect(paths).toEqual(Array(3).fill("/v1/flights/flight%2Fencoded"));
   });
 
   test("a known invocation skips the registry and cancellation stops polling", async () => {
@@ -2278,17 +2298,15 @@ describe("waitForScoutFlight", () => {
     useIsolatedOpenScoutHome();
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
-      expect(url.pathname).toBe("/v1/snapshot");
+      expect(url.pathname).toBe("/v1/flights/flight-1");
       return jsonResponse({
-        flights: {
-          "flight-1": {
+        flight: {
             id: "flight-1",
             invocationId: "inv-1",
             requesterId: "operator",
             targetAgentId: "hudson",
             state: "running",
             summary: "Hudson acknowledged via codex_app_server.",
-          },
         },
       });
     }) as unknown as typeof fetch;

@@ -3167,6 +3167,8 @@ const routeRequest = createBrokerHttpRouter({
   },
   requestReceipts,
   deliveryReceiptsOwnedByService: true,
+  readFlight: async id => runtime.flight(id)
+    ?? (sqliteDisabled ? undefined : (await projection.readFlights([id])).get(id)),
   readHistoricalInvocationSnapshot: id => projection.readInvocationSnapshot(id),
   historyQueries: { read: (kind, ids) => projection.readHistoricalRecords(kind, ids),
     page: options => projection.pageHistoricalRecords(options) },
