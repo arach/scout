@@ -62,6 +62,9 @@ jobs:
       - name: Sync exec fence
         run: bun run sync-exec:fence
 
+      - name: Core-only source boundary
+        run: bun run check:core
+
       - name: Public repository presentation
         run: bun run check:presentation
 

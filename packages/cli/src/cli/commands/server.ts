@@ -1,5 +1,4 @@
 import { SCOUT_APP_VERSION } from "../../lib/shared/product.ts";
-import { resolveLegacyWebEntry } from "../../../../runtime/src/legacy-app-services.ts";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -20,7 +19,7 @@ import {
   type OpenScoutLocalEdgeScheme,
 } from "@openscout/runtime/local-edge";
 import { readTailscaleSelfWebHostsSync } from "@openscout/runtime/mesh/tailscale";
-import { resolveInstalledWebFullClient } from "@openscout/runtime/web-full-client";
+import { resolveLegacyWebEntry, resolveInstalledWebFullClient } from "@openscout/runtime/web-full-client";
 import {
   resolveBunExecutable as resolveResolvedBunExecutable,
 } from "@openscout/runtime/tool-resolution";
