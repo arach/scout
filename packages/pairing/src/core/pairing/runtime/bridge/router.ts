@@ -1,5 +1,8 @@
 import { resolveLegacyWebEntry } from "@openscout/runtime/web-full-client";
 // tRPC v11 router for the Bridge server.
+// Reserved transport path: web.admission is answered by the account relay
+// before router dispatch, for waiting and admitted peers. Do not shadow it
+// with a router procedure; keep admission status outside ordinary RPC.
 //
 // Maps every JSON-RPC method from the legacy switch statement in server.ts
 // to a typed tRPC procedure with Zod v4 input validation.
