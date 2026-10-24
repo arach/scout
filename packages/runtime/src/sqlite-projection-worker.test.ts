@@ -592,3 +592,23 @@ test("one legal large quarantine record bypasses only the ordinary byte cap whil
   const later = await projection.quarantineRecord(message("after-large-preservation"), "next isolated record");
   expect(later.status).toBe("open");
 });
+
+
+test("exact flight projection reads cover live rows and archived records without a registry snapshot", async () => {
+  const { projection, journal } = await setup();
+  const invocation: InvocationRequest = { id: "exact-invocation", requesterId: "actor", requesterNodeId: "node", targetAgentId: "actor", action: "consult", task: "owned test", createdAt: 1_700_000_000_000 };
+  const flight: FlightRecord = { id: "exact-flight", invocationId: invocation.id, requesterId: "actor", targetAgentId: "actor", state: "completed", output: "canonical output", metadata: { nested: ["preserved"] } };
+  await journal.appendEntries([{ kind: "invocation.record", invocation }, { kind: "flight.record", flight }]);
+  await projection.warm(); await projection.flush();
+  expect((await projection.readFlights([flight.id])).get(flight.id)).toEqual(expect.objectContaining(flight));
+  const archived = { ...flight, id: "archived-flight", output: "complete archived output" };
+  await projection.publishHistoricalPage([{ kind: "flight", id: archived.id, record: archived, invocationId: invocation.id, timestamp: invocation.createdAt }]);
+  expect((await projection.readFlights([archived.id])).get(archived.id)).toEqual(archived);
+  expect((await projection.readFlights(["absent"])).size).toBe(0);
+  let capacityError: unknown;
+  try { await projection.readFlights(Array(129).fill(flight.id)); } catch (error) { capacityError = error; }
+  expect(capacityError).toBeInstanceOf(Error);
+  expect((capacityError as Error).message).toContain("capacity");
+  projection.close();
+  await expect(projection.readFlights([flight.id])).rejects.toThrow("unavailable");
+});

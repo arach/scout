@@ -223,6 +223,7 @@ export type BrokerHttpRouterDeps = {
   requestReceipts?: BrokerRequestReceipts;
   historyQueries?: BrokerHistoryQueries;
   quarantineQueries?: BrokerQuarantineQueries;
+  readFlight?: (id: string) => Promise<FlightRecord | undefined>;
   readHistoricalInvocationSnapshot?: (id: string) => Promise<{ invocation: InvocationRequest | null; flight: FlightRecord | null; deliveries: DeliveryIntent[] }>;
   deliveryReceiptsOwnedByService?: boolean;
   mcpEvents?: BrokerMcpEvents;
@@ -2151,6 +2152,21 @@ export function createBrokerHttpRouter(
     for (const delivery of currentDeliveries) mergedDeliveries.set(delivery.id, delivery);
     return { invocationId, invocation: currentInvocation ?? stored.invocation, flight: currentFlight ?? stored.flight,
       deliveries: [...mergedDeliveries.values()], dispatches };
+  }
+
+  const flightReadMatch = method === "GET" ? url.pathname.match(/^\/v1\/flights\/([^/]+)$/) : null;
+  if (flightReadMatch) {
+    try {
+      const id = decodeURIComponent(flightReadMatch[1]!);
+      if (!id || id.length > 1024) throw new TypeError("invalid flight id");
+      if (!deps.readFlight) throw new Error("Flight storage is unavailable.");
+      const flight = await deps.readFlight(id);
+      json(response, flight ? 200 : 404, flight ? { flight } : { error: "flight_not_found" });
+    } catch (error) {
+      json(response, error instanceof TypeError || error instanceof URIError ? 400 : 503,
+        { error: "flight_read_unavailable", detail: error instanceof Error ? error.message : String(error) });
+    }
+    return;
   }
 
   // Per-invocation snapshot — current state of the invocation, its flight,
