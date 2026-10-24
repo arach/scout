@@ -95,6 +95,11 @@ export async function runStandardDescriptorControl(input: {
               const until=Date.now()+3000;
               while(!existsSync(ready)&&child.exitCode===null&&Date.now()<until)await Bun.sleep(5);
               if(!existsSync(ready))throw Error("control request missing before stale close");
+              // Drain the request before destroying its socket. Linux resets a
+              // peer with unread data; that incidental child ECONNRESET races
+              // the intended parent ownership assertion. EOF is sufficient.
+              const request=Buffer.alloc(8),n=readSync(parent.fd,request,0,8,null);
+              if(n!==8||request.toString()!=="request\n")throw Error("control request mismatch before stale close");
             }
             closeSync(parent.fd);
           }

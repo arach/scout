@@ -8,13 +8,13 @@ import { bunVersionError, supportedBunVersion, MINIMUM_BUN_VERSION } from "../bi
 
 const root = new URL("../../../", import.meta.url);
 
-test("Bun floor accepts stable versions at or above 1.4.0, not older or prerelease builds", () => {
-  assert.equal(MINIMUM_BUN_VERSION, "1.4.0");
-  for (const version of ["1.4.0", "1.4.4", "1.4.99", "1.5.0", "2.0.0", "1.4.0+revision"]) {
+test("Bun floor accepts stable versions at or above 1.4.3, not older or prerelease builds", () => {
+  assert.equal(MINIMUM_BUN_VERSION, "1.4.3");
+  for (const version of ["1.4.3", "1.4.4", "1.4.99", "1.5.0", "2.0.0", "1.4.3+revision"]) {
     assert.equal(supportedBunVersion(version), true, version);
     assert.equal(bunVersionError(version), null);
   }
-  for (const version of ["1.3.13", "1.3.14", "1.3.999", "0.9.0", "1.4", "1.4.0-canary.1", "garbage", ""]) {
+  for (const version of ["1.4.0", "1.4.1", "1.4.2", "1.3.13", "1.3.14", "1.3.999", "0.9.0", "1.4", "1.4.3-canary.1", "garbage", ""]) {
     assert.equal(supportedBunVersion(version), false, version);
     assert.match(bunVersionError(version), /installed: .*\. Upgrade: bun upgrade$/);
   }
@@ -37,7 +37,7 @@ test("Bun entry wrappers refuse before help, dist resolution or daemon imports",
       const result = spawnSync(process.execPath, ["--require", preload, new URL(entry, root).pathname, "--help"], { env, encoding: "utf8", timeout: 5_000 });
       assert.equal(result.status, 1, `${entry}: ${result.stderr}`);
       assert.equal(result.stdout, "");
-      assert.equal(result.stderr, "Scout requires Bun 1.4.0 or newer; installed: 1.3.14. Upgrade: bun upgrade\n");
+      assert.equal(result.stderr, "Scout requires Bun 1.4.3 or newer; installed: 1.3.14. Upgrade: bun upgrade\n");
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });

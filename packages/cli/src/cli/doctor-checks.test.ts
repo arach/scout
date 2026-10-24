@@ -179,7 +179,8 @@ test("bridge doctor follows publisher env auth, anonymous mode and disable selec
 });
 
 test("doctor reports the executing Bun against the hard floor", () => {
-  expect(doctorBunReport("1.4.0")).toEqual({ version: "1.4.0", minimum: "1.4.0", supported: true, upgrade: "bun upgrade" });
+  expect(doctorBunReport("1.4.3")).toEqual({ version: "1.4.3", minimum: "1.4.3", supported: true, upgrade: "bun upgrade" });
+  expect(doctorBunReport("1.4.2").supported).toBe(false);
   expect(doctorBunReport("1.3.14").supported).toBe(false);
   expect(doctorBunReport("1.4.4").supported).toBe(true);
 });

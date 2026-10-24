@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@openscout/scout"><img alt="npm version" src="https://img.shields.io/npm/v/@openscout/scout?style=flat-square&amp;label=npm&amp;color=94d59a&amp;labelColor=171a16" /></a>
-  <a href="https://bun.sh"><img alt="Bun 1.4 or newer" src="https://img.shields.io/badge/runtime-Bun_%E2%89%A5_1.4-f7f4ea?style=flat-square&amp;labelColor=171a16&amp;logo=bun" /></a>
+  <a href="https://bun.sh"><img alt="Bun 1.4.3 or newer" src="https://img.shields.io/badge/runtime-Bun_%E2%89%A5_1.4.3-f7f4ea?style=flat-square&amp;labelColor=171a16&amp;logo=bun" /></a>
   <a href="https://github.com/oscout/scout/blob/main/LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-f7f4ea?style=flat-square&amp;labelColor=171a16" /></a>
   <a href="https://openscout.app"><img alt="OpenScout project homepage" src="https://img.shields.io/badge/project-openscout.app-dde6d8?style=flat-square&amp;labelColor=171a16" /></a>
 </p>
@@ -33,7 +33,7 @@ or the [discovery manifest](https://openscout.app/.well-known/scout.json).
 
 ## Start here
 
-Local agent coordination requires [Bun 1.4 or newer](https://bun.sh). The full
+Local agent coordination requires [Bun 1.4.3 or newer](https://bun.sh). The full
 runtime runs on Apple-silicon macOS and Linux. On Linux, run the foreground
 runtime under your process manager; see the [install guide](../../install.md).
 
