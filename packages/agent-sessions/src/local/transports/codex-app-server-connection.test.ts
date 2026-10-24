@@ -136,7 +136,9 @@ test("startup deadline spans the whole handshake and releases queued client oper
     if (request.method === "initialize") reply({ id: request.id, result: {} });
     // Neither thread/start nor turn/start is acknowledged.
   });
-  const client = new CodexAppServerClient(clientOptions(dir, { startupTimeoutMs: 30, controlRequestTimeoutMs: 1_000 }));
+  // Allow filesystem/socket setup on a loaded host. Startup must still time
+  // out before either the RPC fallback or the explicit outer test timeout.
+  const client = new CodexAppServerClient(clientOptions(dir, { startupTimeoutMs: 1_000, controlRequestTimeoutMs: 60_000 }));
   const first = client.invoke("first");
   const second = client.invoke("second");
   const results = await Promise.allSettled([first, second]);
@@ -147,7 +149,7 @@ test("startup deadline spans the whole handshake and releases queued client oper
   expect(fake.received.filter((request) => request.method === "initialize")).toHaveLength(2);
   expect(fake.received.some((request) => request.method === "turn/start")).toBe(false);
   expect(client.isAlive()).toBe(false);
-});
+}, 30_000);
 
 test("owner abort during initialize prevents subsequent thread or turn creation", async () => {
   const dir = await tempDir();
