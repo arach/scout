@@ -9,6 +9,7 @@ import {
   defaultSoloProProbes,
   observeNativeApp,
   readSoloProStatus,
+  summarizeSoloProAccess,
   type NativeAppObservation,
   type NativeAppProbeIO,
   type SoloProProbes,
@@ -79,6 +80,17 @@ const component = (status: SoloProStatus, id: string) => status.components.find(
 const commands = (status: SoloProStatus) =>
   [...status.access.actions, ...status.components.flatMap((entry) => entry.actions)]
     .map((action) => (action.kind === "command" ? action.command : action.kind === "link" ? action.href : action.kind));
+
+test("unavailable transport reasons end before the next sentence without duplicating punctuation", () => {
+  const raw = "connect ECONNREFUSED 192.0.2.1:443";
+  for (const ending of ["", ".", "!", "?"]) {
+    const summary = summarizeSoloProAccess({ state: "unavailable", checkedAt: NOW,
+      keyWhere: "SCOUT_DIST_KEY", reason: `  ${raw}${ending}  ` });
+    expect(summary.detail).toBe(`Scout couldn't get an answer: ${raw}${ending || "."} Nothing installed stops working.`);
+    expect(summary.confirmed).toBe(false);
+    expect(summary.tier).toBeNull();
+  }
+});
 
 describe("Scout Pro status: access × installed × ready", () => {
   test("confirmed access with everything installed and running is active", async () => {
