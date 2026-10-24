@@ -86,12 +86,11 @@ Its operator attention snapshot also exposes `tmuxHostAttention` read metadata,
 so capture failures are not rendered as evidence of no prompt. If local node
 identity is unavailable, it returns an unknown read without capturing.
 
-The private Herdr detector currently uses the thin web compatibility wrapper
-over the public parser; its probe/collector, continuation type and private
-phone bridge remain unchanged until the Herdr read half. The phone consumer is
-`packages/web/server/core/pairing/runtime/bridge/router.ts` →
-`collectHerdrHostAttention`. Herdr routing and permission answering are separate
-work, after read-contract review.
+The core phone bridge in
+`packages/pairing/src/core/pairing/runtime/bridge/router.ts` calls
+`collectHerdrHostAttention` through the runtime parser adapter. The collector
+and legacy permission-answer path remain separate from the newer answer kernel.
+The extraction does not activate a new input authority.
 
 ## Answering a tmux prompt
 
@@ -214,7 +213,7 @@ web permission/approval decision routes concern broker-managed requests and
 pairing approvals, not this rendered tmux observation. This PR does not wire
 the new function into any of them.
 
-The existing `packages/web/server/core/attention/herdr-permission-answer.ts`
+The existing `packages/pairing/src/core/attention/herdr-permission-answer.ts`
 reads blocked panes, captures again and compares its older numeric dialog
 fingerprint. It sends the first ordinary allow/deny option: `enter` only when
 that option is uniquely selected, otherwise its numeric index; missing denial
@@ -223,10 +222,10 @@ before sending. A changed/gone dialog refuses before the send; a successful
 send returns success **without a post-send capture**. Capture/check/send still
 has an external-writer/ABA race. Existing keys and semantics are not changed.
 
-Its production callers are `mobile.answerTerminalPermission` in both
-`packages/web/server/core/pairing/runtime/bridge/router.ts` and
-`apps/desktop/src/core/pairing/runtime/bridge/router.ts`. No direct web HTTP
-caller of `answerHerdrPermission` was found. Separate autonomous Herdr
+Its production caller is `mobile.answerTerminalPermission` in
+`packages/pairing/src/core/pairing/runtime/bridge/router.ts`. The former desktop
+and web callers now share this one implementation. No direct web HTTP caller
+of `answerHerdrPermission` is part of the core. Separate autonomous Herdr
 continuation has a second decision capture, topology/grant recheck and audit;
 it also reports a send rather than verified dialog disappearance.
 
@@ -401,7 +400,7 @@ The `@openscout/runtime/host-attention` subpath exports these added APIs:
   `HerdrHostAttentionJournalConformanceFactory` and
   `HerdrHostAttentionJournalConformanceCase`: the host's test adapter contract.
 
-The private pairing/attention host owns production composition, including
+The core pairing host owns the existing production composition, including
 admission policy and the real journal. That host owns `bridge/router.ts` and
 `terminal-hosts/herdr.ts`. It must bind callbacks to the authenticated caller
 and recheck admission under the journal lock. The phone and continuation
@@ -452,7 +451,7 @@ ignored-sync variants. Each weak variant must fail its named obligations.
 This proves the instrument detects those faults in the model. It does not
 measure a real filesystem's fsync behavior, authenticated pairing, live Herdr
 capture or exact-terminal dispatch. A host that fakes the crash/sync hooks
-cannot use a passing result as durability evidence. The private host must run
+cannot use a passing result as durability evidence. A consuming host must run
 these cases against its real implementation before adoption. Production
 activation remains separate and blocked on reviewed live capture and exact
-terminal dispatch; this work does not gate the public/private cutover.
+terminal dispatch; this contract does not certify a separately built app artifact.
