@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/mcp/scout-mcp.pending-soak.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "opt-in test starts only its scrubbed owned test child and reads disk capacity",
+  "owner": "cli-tests"
+}
