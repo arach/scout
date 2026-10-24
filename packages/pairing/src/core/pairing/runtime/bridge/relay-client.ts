@@ -1,3 +1,5 @@
+import { pairingTrustOwner } from "@openscout/runtime/pairing-security/trust-owner";
+import type { AdmitAccountDevice } from "../account-admission.ts";
 import { isTrustedPeer } from "@openscout/runtime/pairing-security/identity";
 import { watchSharedScoutMessages } from "./broker-message-fanout.ts";
 // Relay client — connects the bridge OUTBOUND to a relay server.
@@ -34,10 +36,12 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-export type RelayRoomKind = "pairing" | "reconnect";
+export type RelayRoomKind = "pairing" | "reconnect" | "account";
 
 export interface RelayClientOptions {
   kind?: RelayRoomKind;
+  /** Only the account room waits for this trusted, host-local decision path. */
+  admitNewDevice?: AdmitAccountDevice;
   /** Request windows must authorize trusted keys too, through the owner. */
   authorizePeer?: (publicKey: string, room: string, isLive: () => boolean) => boolean;
   privateRoom?: boolean;
@@ -92,6 +96,7 @@ interface RelayPeerState {
   trustedPeer?: boolean;
   publicKey?: string;
   admitted?: boolean;
+  awaitingAdmission?: AbortController;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +165,9 @@ export function connectToRelay(
   let retired = false;
   let onRetiredEmpty: (() => void) | undefined;
   const kind = options.kind ?? "reconnect";
+  if (kind === "account" && (!secure || typeof options.admitNewDevice !== "function")) {
+    throw new Error("Account rooms require Noise and a host owner-admission callback");
+  }
   let backoff = INITIAL_BACKOFF_MS;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -283,6 +291,10 @@ export function connectToRelay(
       {
         onReady: (remotePublicKey, readyInfo) => {
           const pubHex = bytesToHex(remotePublicKey);
+          if (kind === "account" && !isTrustedPeer(pubHex)) {
+            awaitAccountAdmission(peer, remotePublicKey);
+            return;
+          }
           try {
             const live = () => !stopped && ws?.readyState === WebSocket.OPEN && securePeers.get(clientId) === peer;
             const trusted = options.authorizePeer
@@ -302,22 +314,11 @@ export function connectToRelay(
             teardownSecurePeer(clientId);
             return;
           }
-          if (kind === "pairing") options.onPeerAdmitted?.();
-          replaceOlderPeerForSameDevice(peer);
-          ensureBridgeEventSubscription();
-          ensureBrokerMessageSubscription();
-          console.log(
-            `[relay-client] secure handshake complete (peer: ${pubHex.slice(0, 12)}..., trusted: ${peer.trustedPeer}, device: ${peer.deviceId}, client: ${clientId})`,
-          );
-          events?.onPaired?.({ relayUrl: eventRelayUrl, room: qrPayload.room, remotePublicKey });
-          sendExistingSessions((json) => {
-            if (peer.admitted && securePeers.get(peer.clientId) === peer && peer.transport.isReady()) {
-              peer.transport.send(json);
-            }
-          });
+          publishAdmittedPeer(peer, remotePublicKey);
         },
 
         onMessage: (message) => {
+          if (kind === "account" && securePeers.get(clientId) === peer && handleAccountAdmissionMessage(peer, message)) return;
           if (peer.admitted && securePeers.get(clientId) === peer) handleIncomingRPC(peer, message);
         },
 
@@ -341,6 +342,69 @@ export function connectToRelay(
     return peer;
   }
 
+  function publishAdmittedPeer(peer: RelayPeerState, remotePublicKey: Uint8Array): void {
+    const pubHex = bytesToHex(remotePublicKey), clientId = peer.clientId;
+    if (kind === "pairing") options.onPeerAdmitted?.();
+    replaceOlderPeerForSameDevice(peer);
+    ensureBridgeEventSubscription();
+    ensureBrokerMessageSubscription();
+    console.log(
+      `[relay-client] secure handshake complete (peer: ${pubHex.slice(0, 12)}..., trusted: ${peer.trustedPeer}, device: ${peer.deviceId}, client: ${clientId})`,
+    );
+    events?.onPaired?.({ relayUrl: eventRelayUrl, room: qrPayload.room, remotePublicKey });
+    sendExistingSessions((json) => {
+      if (peer.admitted && securePeers.get(peer.clientId) === peer && peer.transport.isReady()) {
+        peer.transport.send(json);
+      }
+    });
+  }
+
+  function awaitAccountAdmission(peer: RelayPeerState, remotePublicKey: Uint8Array): void {
+    const pubHex = bytesToHex(remotePublicKey), waiting = new AbortController();
+    const live = () => !stopped && !retired && !waiting.signal.aborted
+      && ws?.readyState === WebSocket.OPEN && securePeers.get(peer.clientId) === peer;
+    peer.publicKey = pubHex;
+    peer.deviceId = pubHex.slice(0, 16);
+    peer.awaitingAdmission = waiting;
+    let authorityStamp: string;
+    try { authorityStamp = pairingTrustOwner().pairingAuthorityStamp(); }
+    catch { reject(); return; }
+    function reject() {
+      if (securePeers.get(peer.clientId) !== peer) return;
+      sendRelayClose(peer.clientId, 4003, "Not allowed by the host");
+      teardownSecurePeer(peer.clientId);
+    }
+    void Promise.resolve().then(() => options.admitNewDevice!(pubHex, waiting.signal)).then(decision => {
+      if (!live()) return;
+      if (decision !== "admitted") { reject(); return; }
+      // Fulfillment is necessary, but a stale/withdrawn authority or a departed
+      // transport still cannot publish trust. Use the canonical live gate.
+      const opportunity = pairingTrustOwner().openPairingOpportunity(
+        qrPayload.room, Date.now() + 5_000, pubHex, authorityStamp,
+      );
+      try {
+        if (!opportunity.admit(pubHex, qrPayload.room, live)) { reject(); return; }
+      } finally { opportunity.cancel(); }
+      if (!live() || !isTrustedPeer(pubHex)) { reject(); return; }
+      peer.awaitingAdmission = undefined;
+      peer.trustedPeer = true;
+      peer.admitted = true;
+      publishAdmittedPeer(peer, remotePublicKey);
+    }).catch(() => { if (live()) reject(); });
+  }
+
+  function handleAccountAdmissionMessage(peer: RelayPeerState, message: string): boolean {
+    let req: any;
+    try { req = JSON.parse(message); } catch { return !peer.admitted; }
+    const statusQuery = req?.jsonrpc === "2.0" && req.method === "query" && req.params?.path === "web.admission";
+    if (!statusQuery && peer.admitted) return false;
+    if (req?.id == null || req?.method === "subscription.stop") return true;
+    peer.transport.send(JSON.stringify(statusQuery
+      ? { id: req.id, jsonrpc: "2.0", result: { type: "data", data: { state: peer.admitted ? "admitted" : "pending" } } }
+      : { id: req.id, jsonrpc: "2.0", error: { code: -32001, message: "Waiting for host approval", data: { code: "UNAUTHORIZED", httpStatus: 401 } } }));
+    return true;
+  }
+
   function replaceOlderPeerForSameDevice(peer: RelayPeerState): void {
     if (!peer.admitted || !peer.publicKey) return;
 
@@ -355,6 +419,7 @@ export function connectToRelay(
 
   function teardownSecurePeer(clientId: string): void {
     const leaving = securePeers.get(clientId);
+    leaving?.awaitingAdmission?.abort();
     for (const subscription of leaving?.subscriptions.values() ?? []) subscription.abort();
     leaving?.subscriptions.clear();
     if (!securePeers.has(clientId)) {
@@ -686,7 +751,12 @@ export function connectToRelay(
     eventUnsub = null;
     brokerWatchAbort?.abort();
     brokerWatchAbort = null;
-    for (const peer of securePeers.values()) peer.admitted = false;
+    for (const peer of securePeers.values()) {
+      peer.admitted = false;
+      peer.awaitingAdmission?.abort();
+      for (const subscription of peer.subscriptions.values()) subscription.abort();
+      peer.subscriptions.clear();
+    }
     securePeers.clear();
     plaintextClients.clear();
     ws = null;

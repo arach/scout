@@ -197,7 +197,7 @@ export interface PendingPairRequestStore {
   touch(token: string): void;
   list(): PairRequest[];
   /** Apply an approve/deny decision; returns the updated request or null. */
-  decide(token: string, decision: "approve" | "deny"): PairRequest | null;
+  decide(token: string, decision: "approve" | "deny", requiredStatus?: PairRequestStatus): PairRequest | null;
   /**
    * Hand a request's payload over: bury the token and report the row that was
    * delivered, or null when there is no live row here to deliver.
@@ -1214,12 +1214,17 @@ export function createPendingPairRequestStore(
   // Don't keep the process alive solely for the sweep.
   (sweepTimer as { unref?: () => void }).unref?.();
 
-  function findReusable(requesterIp: string | null, publicKey: string | null): PairRequest | null {
+  function findReusable(requesterIp: string | null, publicKey: string | null, route: string | null): PairRequest | null {
     if (!requesterIp) return null;
     const t = now();
     for (const req of byToken.values()) {
       if (
         req.requesterIp === requesterIp &&
+        // Account identity is the full key, including denied rows. LAN's
+        // source-address denial policy must not alias an account request.
+        (route === "account"
+          ? req.route === "account" && publicKey !== null && req.requesterPublicKey === publicKey
+          : req.route !== "account") &&
         (req.status === "denied" || (req.status === "pending" && (req.requesterPublicKey ?? null) === publicKey)) &&
         req.expiresAt > t
       ) {
@@ -1243,7 +1248,7 @@ export function createPendingPairRequestStore(
         // Re-evaluated per attempt, so a peer that registered this device while
         // we were losing the swap collapses the prompt rather than duplicating
         // it — which is the same reasoning as reusing within one instance.
-        const existing = findReusable(requesterIp, publicKey);
+        const existing = findReusable(requesterIp, publicKey, route);
         if (existing) {
           // One authoritative source gets at most one live row. A denied row is
           // also reused until it expires so repeated knocks cannot turn a deny
@@ -1327,10 +1332,10 @@ export function createPendingPairRequestStore(
       return [...byToken.values()].filter(isLive).sort((a, b) => b.createdAt - a.createdAt);
     },
 
-    decide(token, decision) {
+    decide(token, decision, requiredStatus) {
       return commit(() => {
         const req = byToken.get(token);
-        if (!req) return { value: null, touched: [] };
+        if (!req || (requiredStatus !== undefined && req.status !== requiredStatus)) return { value: null, touched: [] };
         req.status = decision === "approve" ? "approved" : "denied";
         req.updatedAt = now();
         // Give every human decision a fresh window: approvals need time to be

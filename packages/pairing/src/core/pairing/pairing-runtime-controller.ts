@@ -1,3 +1,4 @@
+import { createAccountAdmission, type AdmitAccountDevice } from "./runtime/account-admission.ts";
 import { startScoutPairLanBeacon, type ScoutPairLanBeacon } from "../../pairing-lan-beacon.ts";
 import {
   resolvedPairingConfig,
@@ -37,6 +38,8 @@ type PairingRuntimeControllerState = {
   current: PairingRuntimeSnapshot;
   restartTimer: ReturnType<typeof setTimeout> | null;
   parentWatchTimer: ReturnType<typeof setInterval> | null;
+  accountHeartbeatTimer: ReturnType<typeof setInterval> | null;
+  admitAccountDevice: AdmitAccountDevice;
   intentionalStop: boolean;
   shuttingDown: boolean;
   runtime: StartedPairingRuntime | null;
@@ -75,6 +78,8 @@ export async function runPairingRuntimeController(): Promise<void> {
     )),
     restartTimer: null,
     parentWatchTimer: null,
+    accountHeartbeatTimer: null,
+    admitAccountDevice: createAccountAdmission(),
     intentionalStop: false,
     shuttingDown: false,
     runtime: null,
@@ -193,6 +198,7 @@ async function startControlledPairingRuntime(state: PairingRuntimeControllerStat
 
     state.runtime = await startPairingRuntime({
       relayEndpoints,
+      admitAccountDevice: state.admitAccountDevice,
       onPairingOpportunity(payload) {
         writeCurrent(state, {pairing: payload ? {
           relay: payload.relay, fallbackRelays: payload.fallbackRelays,
@@ -238,6 +244,13 @@ async function startControlledPairingRuntime(state: PairingRuntimeControllerStat
     });
 
     state.rendezvousPublisher = startPairingRendezvousPublisher(() => state.current);
+    // Account discovery has its own short lease. QR consent remains explicit,
+    // null at startup and independently cancellable/rotatable.
+    state.accountHeartbeatTimer = setInterval(() => {
+      try { writeCurrent(state, {}); }
+      catch (error) { console.warn("[pairing] account discovery lease not renewed", error); }
+    }, 30_000);
+    state.accountHeartbeatTimer.unref?.();
     // Remote-relay hosts still advertise the core's real /pair listener.
     state.lanBeacon = startScoutPairLanBeacon(() => Boolean(state.bonjour), { webPort: state.runtime.config.port });
   } catch (error) {
@@ -337,6 +350,8 @@ function clearRestartTimer(state: PairingRuntimeControllerState): void {
 }
 
 async function stopControlledPairingRuntime(state: PairingRuntimeControllerState): Promise<void> {
+  if (state.accountHeartbeatTimer) clearInterval(state.accountHeartbeatTimer);
+  state.accountHeartbeatTimer = null;
   state.lanBeacon?.stop();
   state.lanBeacon = null;
   try {
@@ -480,6 +495,13 @@ function writeCurrent(
     ...overrides,
     pid: process.pid,
     childPid: patch.childPid ?? state.current.childPid ?? null,
+    accountPairing: state.runtime?.accountRoom && state.runtime.qrPayload ? {
+      relay: state.runtime.qrPayload.relay,
+      fallbackRelays: state.runtime.qrPayload.fallbackRelays,
+      accountRoom: state.runtime.accountRoom,
+      publicKey: state.runtime.qrPayload.publicKey,
+      expiresAt: Date.now() + 90_000,
+    } : null,
     lanDiscoveryAdvertised: state.bonjour !== null,
     updatedAt: Date.now(),
   });

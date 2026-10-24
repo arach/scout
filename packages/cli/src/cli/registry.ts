@@ -80,7 +80,7 @@ export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
     status: "deprecated",
     deprecationMessage: "`scout monitor` has been retired. Use `scout tui`.",
   },
-  { name: "pair", summary: "Pair a companion device via QR" },
+  { name: "pair", summary: "Pair devices or answer host-local pairing requests" },
   { name: "server", summary: "Run the Scout web UI (Bun; see: scout server start/open)" },
   { name: "web", summary: "Install the full web app with a download key (login/install/status)" },
   { name: "tui", summary: "Launch the Scout TUI" },

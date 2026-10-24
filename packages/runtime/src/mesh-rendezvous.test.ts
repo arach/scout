@@ -570,3 +570,51 @@ function makeNode(input: Partial<NodeDefinition> = {}): NodeDefinition {
     ],
   };
 }
+
+
+describe("owner-gated account discovery snapshot", () => {
+  const account = {relay:"wss://relay.example",fallbackRelays:["wss://backup.example"],accountRoom:"account-only",publicKey:"a".repeat(64),expiresAt:30_000};
+  test("top-level lease works with pairing null and never reads QR invitation fields", () => {
+    const entry = mobilePairingMeshEntrypointFromSnapshot({pairing:null,accountPairing:{...account,room:"qr-secret",qrValue:JSON.stringify({fallbackRelays:["wss://qr.example"]})}},10_000)!;
+    expect(entry.room).toBe("account-only"); expect(entry.fallbackRelays).toEqual(account.fallbackRelays);
+    expect(JSON.stringify(entry)).not.toContain("qr-secret"); expect(JSON.stringify(entry)).not.toContain("qr.example");
+  });
+  test("explicit withdrawal, malformed or expired top-level lease cannot revive legacy data", () => {
+    for (const top of [null,{},"bad",{...account,expiresAt:1}]) {
+      expect(mobilePairingMeshEntrypointFromSnapshot({accountPairing:top,pairing:account},10_000)).toBeUndefined();
+    }
+    expect(mobilePairingMeshEntrypointFromSnapshot({pairing:account},10_000)?.room).toBe("account-only");
+    expect(mobilePairingMeshEntrypointFromSnapshot({pairing:{...account,accountRoom:undefined,room:"qr-only"}},10_000)).toBeUndefined();
+  });
+  test("presence uses the selected snapshot and filters node-supplied invitations", () => {
+    writeFileSync(process.env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH!,JSON.stringify({pairing:null,accountPairing:{...account,expiresAt:Date.now()+60_000}}));
+    const node = {id:"host",meshId:"mesh",name:"Host",advertiseScope:"mesh",registeredAt:1,lastSeenAt:1,meshEntrypoints:[]} as NodeDefinition;
+    const presence = buildMeshRendezvousPresence(node)!;
+    expect(JSON.stringify(presence)).toContain("account-only");
+    writeFileSync(process.env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH!,JSON.stringify({accountPairing:null,pairing:account}));
+    expect(buildMeshRendezvousPresence(node)).toBeUndefined();
+  });
+  test("a top-level account lease still requires this host's approved credential and issuer audience", async () => {
+    const snapshot = {pairing: null, accountPairing: {...account, expiresAt: Date.now() + 60_000}};
+    writeFileSync(process.env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH!, JSON.stringify(snapshot));
+    const config = resolveMeshRendezvousPublishConfig({OPENSCOUT_MESH_RENDEZVOUS_URL: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL})!;
+    const requests: Request[] = [];
+    const options = {config, fetch: async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push(new Request(input, init)); return Response.json({ok: true});
+    }};
+    const node = makeNode({meshEntrypoints: []});
+    expect(await publishMeshRendezvousPresence(node, options)).toBe(false);
+    expect(requests).toHaveLength(0);
+    writeBridgeConfig({token: "osbr_approved"});
+    expect(await publishMeshRendezvousPresence(node, options)).toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(JSON.stringify(await requests[0]!.json())).toContain("account-only");
+    expect(requests[0]!.headers.get("authorization")).toBe("Bearer osbr_approved");
+    expect(await publishMeshRendezvousPresence(node, {...options, config: {...config, url: "https://other.example.test"}})).toBe(false);
+    expect(requests).toHaveLength(1);
+    writeFileSync(process.env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH!, JSON.stringify({accountPairing: null, pairing: snapshot.accountPairing}));
+    expect(await publishMeshRendezvousPresence(node, options)).toBe(false);
+    expect(requests).toHaveLength(1);
+  });
+
+});
