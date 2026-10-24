@@ -49,7 +49,7 @@ describe("resolveRuntimeServiceEntrypoint", () => {
         PATH: join(root, "bin"),
         OPENSCOUT_RUNTIME_BIN: explicitRuntime,
       },
-      moduleUrl: pathToFileURL(join(root, "apps", "desktop", "src", "app", "host", "runtime-service-client.ts")),
+      moduleUrl: pathToFileURL(join(root, "packages", "cli", "src", "lib", "app", "host", "runtime-service-client.ts")),
       currentWorkingDirectory: root,
     });
 
@@ -66,7 +66,7 @@ describe("resolveRuntimeServiceEntrypoint", () => {
         HOME: root,
         PATH: join(root, "bin"),
       },
-      moduleUrl: pathToFileURL(join(root, "apps", "desktop", "src", "app", "host", "runtime-service-client.ts")),
+      moduleUrl: pathToFileURL(join(root, "packages", "cli", "src", "lib", "app", "host", "runtime-service-client.ts")),
       currentWorkingDirectory: root,
     });
 
@@ -76,7 +76,7 @@ describe("resolveRuntimeServiceEntrypoint", () => {
   test("prefers repo runtime before PATH runtime when bundled runtime is absent", () => {
     const root = createTempRoot();
     const repoRuntime = writeModule(join(root, "packages", "runtime", "bin", "openscout-runtime.mjs"));
-    writeModule(join(root, "apps", "desktop", "bin", "scout.ts"));
+    writeModule(join(root, "packages", "cli", "bin", "scout.mjs"));
     writeExecutable(join(root, "bin", "openscout-runtime"));
 
     const entrypoint = resolveRuntimeServiceEntrypoint({
@@ -84,8 +84,8 @@ describe("resolveRuntimeServiceEntrypoint", () => {
         HOME: root,
         PATH: join(root, "bin"),
       },
-      moduleUrl: pathToFileURL(join(root, "apps", "desktop", "src", "app", "host", "runtime-service-client.ts")),
-      currentWorkingDirectory: join(root, "apps", "desktop"),
+      moduleUrl: pathToFileURL(join(root, "packages", "cli", "src", "lib", "app", "host", "runtime-service-client.ts")),
+      currentWorkingDirectory: join(root, "packages", "cli"),
     });
 
     expect(entrypoint).toBe(repoRuntime);
