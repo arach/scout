@@ -3,6 +3,9 @@
   "version": "0.3.9",
   "private": true,
   "type": "module",
+  "engines": {
+    "bun": ">=1.4.3"
+  },
   "description": "Host-side phone pairing, encrypted bridge and legacy phone RPC projections.",
   "exports": {
     ".": {

@@ -51,7 +51,7 @@ Null means no event has been yielded, not an unknown server cursor. Generation
 | retry_exhausted | true | Attempt or elapsed outage budget exhausted. |
 | protocol_error | true | Invalid text protocol or mismatched tracked IDs. |
 | auth_denied | false | Observable HTTP 401/403 or structured tRPC authorization denial. |
-| handshake_error | false | A live listener rejected the upgrade, or the diagnostic probe was inconclusive. |
+| handshake_error | false | Reserved legacy reason; the current client does not emit it. |
 | invalid_options | false | Invalid policy/origin or repeated iterator ownership. |
 | unsupported_ingress | false | Ingress other than trusted-loopback requested. |
 

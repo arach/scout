@@ -683,8 +683,8 @@ async function legacyCodec() {
       server.close((error: any) => (error ? no(error) : yes())),
     );
     // Bun 1.4 delivers the final server-side close after the close callback.
-      await until(() => server.clients.size === 0);
-      assert.equal(server.clients.size, 0);
+    await until(() => server.clients.size === 0);
+    assert.equal(server.clients.size, 0);
     assert.equal(listeners(), 0);
   }
 }

@@ -1,4 +1,10 @@
-/** Portable remote entrypoint: the normal native installer, with node/activity gates. */
+/**
+ * Portable remote entrypoint: the normal native installer, with node/activity gates.
+ * This uses the remote host's Bun, not the initiating CLI's enforced runtime.
+ * It does not upgrade Bun: refuse before broker reads or installation, then
+ * upgrade Bun and retry. The existing Scout installation remains untouched.
+ */
+import "./bun-bootstrap.ts";
 import { readScoutBrokerHealth, readScoutBrokerSnapshot } from "./lib/core/broker/service.ts";
 import { createScoutCommandContext } from "./cli/context.ts";
 import { runInstallCommand } from "./cli/commands/install.ts";
