@@ -1,11 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import {
-  registerActiveScoutBrokerService,
-  type ActiveScoutBrokerService,
-} from "@openscout/runtime/broker-api";
-
-import {
   getScoutMobileAgents,
   getScoutMobileRuntimeCapabilities,
   getScoutMobileActivity,
@@ -16,14 +11,21 @@ import {
   rehomeScoutMobileWorkspacePath,
 } from "./service.ts";
 
-const originalBrokerUrl = process.env.OPENSCOUT_BROKER_URL;
+import { invalidateScoutBrokerContextCache } from "../broker/service.ts";
+
+let broker: ReturnType<typeof Bun.serve> | undefined;
+const originalBrokerUrl = process.env.OPENSCOUT_BROKER_INTERNAL_URL;
 afterEach(() => {
   if (originalBrokerUrl === undefined) {
-    delete process.env.OPENSCOUT_BROKER_URL;
+    delete process.env.OPENSCOUT_BROKER_INTERNAL_URL;
   } else {
-    process.env.OPENSCOUT_BROKER_URL = originalBrokerUrl;
+    process.env.OPENSCOUT_BROKER_INTERNAL_URL = originalBrokerUrl;
   }
-  registerActiveScoutBrokerService(null);
+  if (broker) {
+    invalidateScoutBrokerContextCache(broker.url.origin);
+    broker.stop(true);
+    broker = undefined;
+  }
 });
 
 test("transitional mobile gauges keep stable empty compatibility shapes", async () => {
@@ -39,9 +41,9 @@ test("mobile runtime capabilities hide the duplicate Grok harness", async () => 
 
 describe("getScoutMobileSessionSnapshot", () => {
   test("rebases stale macOS account paths onto the current Scout home", () => {
-    expect(rehomeScoutMobileWorkspacePath("/Users/arach/dev/dewey", "/Users/art"))
-      .toBe("/Users/art/dev/dewey");
-    expect(rehomeScoutMobileWorkspacePath("/opt/projects/dewey", "/Users/art"))
+    expect(rehomeScoutMobileWorkspacePath("/Users/previous/dev/dewey", "/Users/current"))
+      .toBe("/Users/current/dev/dewey");
+    expect(rehomeScoutMobileWorkspacePath("/opt/projects/dewey", "/Users/current"))
       .toBe(null);
   });
 
@@ -246,7 +248,7 @@ describe("getScoutMobileSessionSnapshot", () => {
       harness: "claude",
       transport: "claude_session",
       state: "active",
-      projectRoot: "/Users/art/dev/openscout",
+      projectRoot: "/Users/current/dev/openscout",
       metadata: { lastSeenAt: 20_000 },
     };
     installBrokerSnapshot(brokerSnapshot);
@@ -254,7 +256,7 @@ describe("getScoutMobileSessionSnapshot", () => {
     const [agent] = await getScoutMobileAgents({ limit: 1 });
 
     expect(agent?.harness).toBe("claude");
-    expect(agent?.workspaceRoot).toBe("/Users/art/dev/openscout");
+    expect(agent?.workspaceRoot).toBe("/Users/current/dev/openscout");
     expect(agent?.state).toBe("available");
     expect(agent?.lastActiveAt).toBe(20_000_000);
   });
@@ -329,9 +331,9 @@ function brokerSnapshotWithFlight(flight: {
 }
 
 function installBrokerSnapshot(snapshot: unknown) {
-  process.env.OPENSCOUT_BROKER_URL = "http://broker.test";
-  registerActiveScoutBrokerService({
-    baseUrl: "http://broker.test",
+  // The core client uses the HTTP broker wire, not the legacy in-process registry.
+  // INTERNAL_URL selects the control endpoint; BROKER_URL is advertisement only.
+  const service = {
     readHealth: async () => ({
       ok: true,
       nodeId: "node-1",
@@ -340,6 +342,18 @@ function installBrokerSnapshot(snapshot: unknown) {
     }),
     readNode: async () => ({ id: "node-1", name: "Test Mac" }) as never,
     readSnapshot: async () => snapshot as never,
-    executeCommand: async () => ({ ok: true }),
-  } satisfies ActiveScoutBrokerService);
+  };
+  broker = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      switch (new URL(request.url).pathname) {
+        case "/health": return Response.json(await service.readHealth());
+        case "/v1/node": return Response.json(await service.readNode());
+        case "/v1/snapshot": return Response.json(await service.readSnapshot());
+        default: return new Response("unexpected broker route", { status: 404 });
+      }
+    },
+  });
+  process.env.OPENSCOUT_BROKER_INTERNAL_URL = broker.url.origin;
 }

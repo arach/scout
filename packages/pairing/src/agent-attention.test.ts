@@ -6,7 +6,7 @@ import {
   applyAgentAttention,
   buildAgentAttentionIndex,
 } from "./core/attention/agent-attention.ts";
-import type { WebAgent } from "../shared/api/web.ts";
+import type { WebAgent } from "./shared/api/web.ts";
 
 function sessionItem(overrides: Partial<SessionAttentionItem>): SessionAttentionItem {
   return {

@@ -9,7 +9,7 @@ import {
   compareMessagesAsc,
   encodeMessageHistoryCursor,
   parseMessageHistoryCursor,
-} from "../../shared/message-pagination.ts";
+} from "./message-pagination.ts";
 
 /**
  * The reviewer's tie-break fixture: three id families at one timestamp whose
