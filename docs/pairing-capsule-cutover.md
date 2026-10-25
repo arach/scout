@@ -12,9 +12,11 @@ after the root has migrated. This ID is separate from trust-mutation IDs.
 
 ## Before activation
 
-1. Ship the v2-aware owner in **every first-party store opener in the same
-   release train**: desktop app, CLI and web runtime. Do not ship the completed
-   engine alone. Do not activate while an installed opener still needs v1.
+1. Qualify a **compatible artifact set covering every store opener**: core
+   CLI/host runtime and separately built apps. Each artifact must resolve the
+   verified v2-aware runtime owner. App and core version numbers need not match.
+   Do not ship the engine alone or activate while an installed opener still
+   needs v1.
 2. Verify release provenance. Build the runtime with
    `bun run --cwd packages/runtime build`; its compiled output must contain
    `trust-owner.js`, `trust-capsule.js`, `trust-cutover.js` and
@@ -31,7 +33,7 @@ after the root has migrated. This ID is separate from trust-mutation IDs.
    proof that an old installed binary was updated. A consuming private build
    needs its own artifact evidence; public source tests do not certify it.
 4. **Drain and stop all processes that open this pairing root**, including
-   desktop, CLI and web runtime. Use each program's normal stop mechanism.
+   core host runtime, CLI and separately built app processes. Use each program's normal stop mechanism.
    Prevent old binaries, raw editors and pre-owner projection writers from
    resuming. This is a one-time drain/restart, not zero-interruption migration.
 5. Keep at least 3 GiB free for pilot qualification. This observation is separate
@@ -58,7 +60,7 @@ const owner = pairingTrustOwner(configuredPairingRoot);
 owner.pairingAuthorityStamp(); // Explicitly initializes an empty root if needed.
 const receipt = owner.migrateToCapsule(stableMigrationId);
 // Persist the operation's ID/result in trusted maintenance records, then start
-// only the verified v2-aware desktop, CLI and web runtime.
+// only the verified v2-aware core and consuming app artifacts.
 ```
 
 The caller must retain the original migration ID for ACK-loss retry. The method
@@ -160,7 +162,7 @@ authority; it consumes no canonical slot. For such metadata, or capacity occupie
 by nonempty uncommitted claims, the trusted operator can recover under explicit
 quiescence:
 
-1. Stop every desktop, CLI, web runtime and maintenance caller. Prove that none
+1. Stop every core host, CLI, separate app and maintenance caller. Prove that none
    can still access the root; do not infer quiescence from elapsed time.
 2. From trusted local maintenance code, call the canonical owner operation with
    a stable recovery ID. The assertion is an operator fact, not a liveness test:

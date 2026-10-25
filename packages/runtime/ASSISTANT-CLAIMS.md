@@ -106,8 +106,9 @@ can share its authority. This remains a high-trust local system.
 
 ## App compatibility and adoption
 
-`packages/web/server/scoutbot/answerer-claim.ts` is the shared claimant for the
-in-process web runner and the standalone process. Holder labels include mode,
+`packages/pairing/src/scoutbot/answerer-claim.ts` retains the core claimant
+used by the host projection closure. Web and standalone app integrations live
+with the separate apps; their source is not part of this core checkout. Holder labels include mode,
 pid and a unique process-instance suffix. Both acquire before registration,
 endpoint retirement, event consumption or answering. They renew at half the
 TTL. A busy candidate stays posting-only and retries quietly once per second.
@@ -132,29 +133,27 @@ An older runtime cannot guarantee exclusive answering. The new
 runtime always refuses claimless assistant mutations; discovery does not turn
 off its enforcement.
 
-The web runner attaches proof in its broker POST helper. Its UI posting and
+A consuming app runner must attach proof in its broker POST helper. Its UI posting and
 thread-read APIs do not register or warm an answering endpoint. The standalone
-process attaches proof in `process/broker-link.ts`. Its stdio MCP child uses a
-generation-bound Unix socket proxy (`process/claim-broker-proxy.ts`) so tool
+app process attaches proof in its own broker adapter. Its stdio MCP child uses a
+generation-bound Unix socket proxy in that app so tool
 writes get the same proof without exposing it in child environment, tool
 arguments or dispatch receipts. The proxy directory is mode 0700 and its socket
 is 0600. It cannot manage claims, and a stopped generation cannot forward new
 work with a successor's token. The proxy closes with the generation; it is not
 a second answerer or a process supervisor.
 
-The runtime claim change and this public claimant must ship in the same release.
-Public npm installs retain a working assistant while the web is included. At
-the app/runtime cutover, the private app adopts this claimant module unchanged,
-along with the two runner integrations and the standalone transport adapter.
-No port to the current private runtime is required: the new claimant can use
-its old-runtime compatibility path until the paired cutover. Do not ship a new,
-enforcing runtime with a claimless app build.
+Qualify the enforcing runtime and each consuming app as a compatible artifact
+set. The core npm package contains no web runner or browser client. An app
+must use the released runtime's claim protocol before enabling its answerer;
+do not pair an enforcing runtime with a claimless app build. App versions need
+not equal core versions, but dependency locks and bundle provenance must identify
+the exact runtime authority they consume.
 
-Affected tests pair the public runners and claimant with the runtime guard and
-HTTP claim/answer routes. They cover a stray web without `managed`, quiet busy
-retry, death and expiry, delayed old-token posts, renewal failure, stalled
-renewal, broker restart, old-runtime discovery, and the generation-bound tool
-socket. These are fixture tests; they do not start or change installed apps.
+Core claimant tests live in `packages/pairing/src/scoutbot/answerer-claim.test.ts`;
+runtime claim/HTTP enforcement tests remain under `packages/runtime/src`.
+App-runner and tool-proxy integration tests belong with those app implementations.
+Core fixture tests do not certify an installed app's claim behavior.
 
 The lease establishes exclusivity, not preferred-owner selection. The app
 launcher's desired-state handoff still determines which process should claim.

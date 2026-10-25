@@ -1,3 +1,7 @@
+import { inspectMeshBridgeCredentialConfig } from "@openscout/runtime/mesh-bridge-config";
+import { resolveMeshRendezvousPublishConfig } from "@openscout/runtime";
+import { resolveOpenScoutSupportPaths } from "@openscout/runtime/support-paths";
+import { MINIMUM_BUN_VERSION, supportedBunVersion } from "../../bin/bun-preflight.mjs";
 import { loadScoutCoreReport } from "../lib/core/setup/readiness.ts";
 import { assessCoreSetupCompletion } from "@openscout/runtime/core-report";
 import type { ScoutCommandContext } from "./context.ts";
@@ -7,7 +11,13 @@ import { loadHarnessCatalogSnapshot } from "@openscout/runtime/harness-catalog";
 import { loadNativeScoutdDoctorReport, type NativeScoutdDoctorReport } from "./scoutd.ts";
 import { spawn } from "node:child_process";
 
-export const DOCTOR_CHECK_NAMES = ["broker", "native", "runtimes", "probes"] as const;
+/** The executing Bun, not a different executable found later on PATH. */
+export function doctorBunReport(version = process.versions.bun) {
+  return { version: version ?? null, minimum: MINIMUM_BUN_VERSION,
+    supported: supportedBunVersion(version), upgrade: "bun upgrade" };
+}
+
+export const DOCTOR_CHECK_NAMES = ["broker", "native", "runtimes", "mesh-bridge", "probes"] as const;
 export type DoctorCheckName = typeof DOCTOR_CHECK_NAMES[number];
 export type DoctorCheck = {
   name: DoctorCheckName;
@@ -60,9 +70,31 @@ export function doctorNativeCheck(report: NativeScoutdDoctorReport): DoctorCheck
   };
 }
 
+export function doctorMeshBridgeCheck(
+  supportDirectory: string,
+  rendezvousUrl?: string,
+  mode: "host-credential" | "external" | "disabled" = "host-credential",
+): DoctorCheck {
+  // Launch config remains relevant to the bridge even when presence uses another auth path.
+  const report = inspectMeshBridgeCredentialConfig(supportDirectory, mode === "host-credential" ? rendezvousUrl : undefined);
+  const detail = mode === "disabled" ? `Rendezvous publishing disabled. ${report.detail}`
+    : mode === "external" ? `Rendezvous uses environment authentication or anonymous mode; host credential audience not checked. ${report.detail}`
+    : report.detail;
+  return { name: "mesh-bridge", state: report.ok ? "working" : "impaired", detail,
+    ...(!report.ok ? { next: mode === "host-credential"
+      ? "Remove unsupported dir from mcp-bridge.json; use the issuer origin or the default relay/rendezvous pair, then run scout mesh bridge connect."
+      : "Repair unsupported fields in mcp-bridge.json before starting the bridge; host credential audience is not selected." } : {}) };
+}
+
 /** Internal read-only worker. Never routes through startup maintenance. */
 export async function collectDoctorCheck(name: DoctorCheckName, context: ScoutCommandContext): Promise<DoctorCheck> {
   switch (name) {
+    case "mesh-bridge": {
+      // Use the publisher's real selection rules; constructing its credential source does not read a secret.
+      const config = resolveMeshRendezvousPublishConfig(context.env);
+      return doctorMeshBridgeCheck(resolveOpenScoutSupportPaths().supportDirectory, config?.url,
+        !config ? "disabled" : config.hostCredential ? "host-credential" : "external");
+    }
     case "broker": {
       const completion = assessCoreSetupCompletion({ report: await loadScoutCoreReport({ env: context.env }) });
       return { name, state: completion.outcome === "failed" ? "impaired" : completion.outcome === "complete" ? "working" : "inconclusive",

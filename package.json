@@ -3,7 +3,7 @@
   "version": "0.3.9",
   "description": "Your personal agent cloud: a local control plane and mesh network for coding agents",
   "private": true,
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.4",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/oscout/scout.git"
@@ -13,7 +13,6 @@
   },
   "homepage": "https://github.com/oscout/scout#readme",
   "workspaces": [
-    "apps/*",
     "packages/*"
   ],
   "overrides": {
@@ -21,18 +20,11 @@
     "jimp": "1.6.1"
   },
   "scripts": {
-    "dev": "bun run --cwd packages/web dev",
-    "dev:m1": "bun run --cwd packages/web dev:m1",
-    "dev:m1:http": "bun run --cwd packages/web dev:m1:http",
-    "dev:m1:https": "bun run --cwd packages/web dev:m1:https",
-    "dev:edge": "bun run --cwd packages/web dev:edge",
-    "dev:edge:m1": "bun run --cwd packages/web dev:edge:m1",
-    "dev:edge:m1:http": "bun run --cwd packages/web dev:edge:m1:http",
-    "dev:edge:m1:https": "bun run --cwd packages/web dev:edge:m1:https",
+    "dev": "bun run cli:dev",
     "scout:tui": "bun packages/cli/src/main.ts tui",
-    "build": "bun run cli:build && bun run web:build",
-    "check": "bun run sync-exec:fence && bun run check:types",
-    "check:types": "bun run --cwd packages/protocol check && bun run --cwd packages/agent-sessions check && bun run --cwd packages/runtime check && bun run --cwd packages/session-trace check && bun run --cwd packages/session-trace-react check && bun run --cwd packages/cli check && bun run --cwd apps/desktop check && bun run --cwd packages/web check && bun run --cwd packages/mesh-extension check",
+    "build": "bun run cli:build",
+    "check": "bun run sync-exec:fence && bun run check:core && bun run check:types",
+    "check:types": "bun run --cwd packages/protocol check && bun run --cwd packages/agent-sessions check && bun run --cwd packages/runtime check && bun run --cwd packages/session-trace check && bun run --cwd packages/pairing check && bun run --cwd packages/cli check && bun run --cwd packages/mesh-extension check",
     "check:presentation": "node scripts/check-public-repo-presentation.mjs",
     "diagram:readme": "node scripts/render-readme-diagram.mjs",
     "docs:generate": "dewey generate",
@@ -40,11 +32,11 @@
     "test": "bun run test:unit",
     "test:unit": "bun run test:cli && bun run test:unit:source",
     "test:cli": "bun run --cwd packages/cli test:happy",
-    "test:unit:source": "bun run test:remote-target-programs && bun run --cwd packages/protocol test && bun run --cwd packages/agent-sessions test && bun run --cwd packages/runtime test && bun run --cwd packages/cli test:source && bun run --cwd apps/desktop test && bun run --cwd packages/web test && bun run --cwd packages/session-trace test && bun run --cwd packages/session-trace-react test && node --test scripts/ship-release.test.mjs scripts/bundle-scout-web.test.mjs scripts/check-packed-dependencies.test.mjs && bun run --cwd packages/mesh-extension test && bun run test:pairing-capsule",
+    "test:unit:source": "bun run test:remote-target-programs && bun run --cwd packages/protocol test && bun run --cwd packages/agent-sessions test && bun run --cwd packages/runtime test && bun run --cwd packages/pairing test && bun run --cwd packages/cli test:source && bun run --cwd packages/session-trace test && node --test scripts/ship-release.test.mjs scripts/bundle-core.test.mjs scripts/check-core-boundary.test.mjs scripts/check-packed-dependencies.test.mjs && bun run --cwd packages/mesh-extension test && bun run test:pairing-capsule",
     "test:pairing-capsule": "bun test --isolate packages/runtime/src/pairing-security/trust-authority-view.test.ts scripts/pairing-trust-owner-process.test.ts scripts/pairing-trust-owner-census.test.ts scripts/pairing-cutover-process.test.ts scripts/pairing-slot-reclamation-process.test.ts scripts/pairing-quiescent-reclamation-process.test.ts scripts/pairing-authority-view-fixtures.test.ts scripts/pairing-v1-closure.test.ts && bun test scripts/pairing-slot-identity.test.ts && bun scripts/pairing-capsule-controls.ts && bun scripts/pairing-slot-identity-controls.ts && bun scripts/pairing-slot-reclamation-controls.ts && bun scripts/pairing-authority-view-controls.ts && bun scripts/pairing-quiescent-reclamation-controls.ts && bun scripts/pairing-cutover-controls.ts && bun run test:pairing-cutover:compiled && node scripts/pairing-authority-view-compiled-smoke.mjs",
     "test:pairing-cutover:compiled": "bun run --cwd packages/runtime build && node scripts/pairing-cutover-compiled-smoke.mjs",
     "test:remote-target-programs": "bun test scripts/remote-target-programs.test.ts",
-    "test:happy": "cd apps/desktop && bun run test:happy && cd ../../packages/cli && bun run test:happy",
+    "test:happy": "bun run test:cli",
     "test:scenarios": "bun run --cwd packages/runtime test:scenarios",
     "test:e2e": "bun run check && bun run test:scenarios && bun run test:e2e:agents",
     "test:e2e:agents": "bun run --cwd packages/runtime test:e2e:local-agent-pass",
@@ -57,8 +49,6 @@
     "pi:minimax:down": "bun scripts/pi-minimax-up.mjs --down",
     "cli:build": "bun run protocol:build && bun run runtime:build && bun run --cwd packages/cli build",
     "cli:dev": "bun run --cwd packages/cli dev",
-    "web:build": "bun run --cwd packages/web build",
-    "web:check": "bun run --cwd packages/web check",
     "protocol:build": "bun run --cwd packages/protocol build",
     "protocol:check": "bun run --cwd packages/protocol check",
     "runtime:build": "bun run protocol:build && bun run --cwd packages/runtime build",
@@ -80,12 +70,9 @@
     "repo-service:build": "bash scripts/cargo.sh build --manifest-path crates/openscout-repo-service/Cargo.toml",
     "repo-service:run": "bash scripts/cargo.sh run --manifest-path crates/openscout-repo-service/Cargo.toml --",
     "mesh:iroh:smoke": "bun scripts/mesh-iroh-smoke.mjs",
-    "dev:cleanup": "bash scripts/dev-cleanup.sh",
-    "dev:cleanup:ports": "bash scripts/dev-cleanup.sh --ports-only",
     "derived:roster": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/derived-state/roster.py",
     "derived:inventory": "PYTHONDONTWRITEBYTECODE=1 python3 scripts/derived-state/inventory.py",
     "derived:janitor": "PYTHONDONTWRITEBYTECODE=1 bash scripts/derived-state/janitor.sh",
-    "capture:web": "bun scripts/capture-web.mjs",
     "logs:event-types": "bun run --cwd packages/agent-sessions event-types",
     "ship:npm": "bash scripts/ship-npm.sh",
     "ship:release": "node scripts/ship-release.mjs",
@@ -94,7 +81,9 @@
     "scout:tui:check": "bash scripts/cargo.sh check --manifest-path crates/scout-tui/Cargo.toml",
     "scout:tui:build": "bash scripts/cargo.sh build --release --manifest-path crates/scout-tui/Cargo.toml",
     "scout:tui:install": "bash scripts/cargo.sh install --locked --path crates/scout-tui",
-    "test:extension-channel:qualification": "bun scripts/extension-channel-qualification.ts"
+    "test:extension-channel:qualification": "bun scripts/extension-channel-qualification.ts",
+    "check:core": "bun scripts/check-core-boundary.mjs",
+    "test:pairing": "bun test --isolate scripts/relay-pairing.test.ts scripts/approval-pairing.test.ts scripts/pairing-trust-owner-process.test.ts"
   },
   "ignoreScripts": [
     "sharp",

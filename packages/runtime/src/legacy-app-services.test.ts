@@ -52,9 +52,9 @@ describe("explicit app service entries", () => {
     const moduleDirectory = dirname(f.file("packages/cli/dist/runtime/broker-daemon.mjs"));
     expect(resolveLegacyWebEntry(f.env, moduleDirectory)).toBeNull();
   });
-  test("a real node_modules installation can select its own web bundle", () => {
+  test("a real node_modules installation never resurrects a stale web bundle", () => {
     const f = fixture(true);
-    expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBe(f.bundle);
+    expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBeNull();
   });
   test("a bun-linked package escaping node_modules requires explicit configuration", () => {
     const f = fixture(); f.file("package.json", JSON.stringify({ name: "@openscout/scout" }));
@@ -64,9 +64,9 @@ describe("explicit app service entries", () => {
     expect(resolveLegacyWebEntry(f.env, moduleDirectory)).toBeNull();
     expect(resolveLegacyWebEntry({ ...f.env, OPENSCOUT_WEB_SERVER_ENTRY: f.entry }, moduleDirectory)).toBe(f.entry);
   });
-  test("keeps the installed npm bundle only when explicit configuration is absent", () => {
+  test("never uses a stale bundle, with or without explicit configuration", () => {
     const f = fixture(true);
-    expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBe(f.bundle);
+    expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBeNull();
     f.config({ version: 1 });
     expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBeNull();
     f.config({ version: 1, web: { entry: null } });
@@ -74,14 +74,14 @@ describe("explicit app service entries", () => {
     f.config({ version: 1, web: { entry: join(f.root, "missing") } });
     expect(() => resolveLegacyWebEntry(f.env, f.moduleDirectory)).toThrow("unavailable");
   });
-  test("the compatibility bundle is restricted to the installed CLI package", () => {
+  test("the compatibility bundle is never selected implicitly", () => {
     const f = fixture(true);
     f.file("package.json", JSON.stringify({ name: "@openscout/runtime" }));
     expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBeNull();
     f.file("package.json", JSON.stringify({ name: "@openscout/scout" }));
     rmSync(f.bundle);
     const compatibility = f.file("dist/scout-web-server.mjs");
-    expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBe(compatibility);
+    expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBeNull();
   });
   test("invalid enablement and enabled-without-entry have diagnostics", () => {
     const f = fixture();
@@ -133,7 +133,7 @@ describe("explicit app service entries", () => {
   });
   test("only ENOENT makes config absent; permission and path errors fail closed", () => {
     const f = fixture(true);
-    expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBe(f.bundle);
+    expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBeNull();
     f.config({ version: 1, web: { entry: f.entry } });
     const path = legacyAppServicesPath(f.env), open = fs.openSync;
     const deny = spyOn(fs, "openSync").mockImplementation(((candidate: fs.PathLike, ...args: any[]) => {

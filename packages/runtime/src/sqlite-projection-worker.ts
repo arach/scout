@@ -187,6 +187,10 @@ export class WorkerSQLiteProjection {
     if (this.closed || this.options.disabled) return Promise.reject(new Error("Historical invocation storage is unavailable."));
     return this.read("readInvocations", args, new Map());
   }
+  readFlights(...args: Parameters<RecoverableSQLiteProjection["readFlights"]>): ReturnType<RecoverableSQLiteProjection["readFlights"]> {
+    if (this.closed || this.options.disabled) return Promise.reject(new Error("Historical flight storage is unavailable."));
+    return this.read("readFlights", args, new Map());
+  }
   readInvocationSnapshot(...args: Parameters<RecoverableSQLiteProjection["readInvocationSnapshot"]>): ReturnType<RecoverableSQLiteProjection["readInvocationSnapshot"]> {
     if (this.closed || this.options.disabled) return Promise.reject(new Error("Historical invocation storage is unavailable."));
     return this.read("readInvocationSnapshot", args, { invocation: null, flight: null, deliveries: [] });

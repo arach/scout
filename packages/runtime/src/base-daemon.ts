@@ -706,8 +706,7 @@ function resolvePairingControllerCommand(): PairingControllerCommand | null {
   const candidates = [
     explicit,
     repoRoot ? join(repoRoot, "packages", "cli", "dist", "pairing-runtime-controller.mjs") : null,
-    repoRoot ? join(repoRoot, "packages", "web", "dist", "pairing-runtime-controller.mjs") : null,
-    repoRoot ? join(repoRoot, "packages", "web", "server", "pairing-runtime-controller.ts") : null,
+    repoRoot ? join(repoRoot, "packages", "pairing", "src", "pairing-runtime-controller.ts") : null,
     resolve(moduleDirectory, "..", "pairing-runtime-controller.mjs"),
     join(homedir(), ".bun", "install", "global", "node_modules", "@openscout", "scout", "dist", "pairing-runtime-controller.mjs"),
     join(homedir(), ".bun", "node_modules", "@openscout", "scout", "dist", "pairing-runtime-controller.mjs"),
@@ -722,7 +721,7 @@ function resolvePairingControllerCommand(): PairingControllerCommand | null {
     if (!openScoutInstanceBootstrap.layout.isProd) {
       warn("pairing controller skipped: no instance-aware entrypoint", {
         instance: openScoutInstanceBootstrap.layout.name,
-        hint: "Rebuild packages/web or run from source; pre-instance builds would use prod's pairing state.",
+        hint: "Rebuild @openscout/scout or run from source; pre-instance builds would use prod's pairing state.",
       });
     }
     return null;

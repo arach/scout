@@ -18,7 +18,7 @@ test("npm metadata points visitors to the OpenScout project", () => {
   assert.deepEqual(packageJson.bugs, { url: "https://github.com/oscout/scout/issues" });
   assert.match(packageJson.description, /^Coordinate Claude Code, Codex/);
   assert.match(packageJson.description, /local-first/);
-  assert.equal(packageJson.engines?.bun, ">=1.3");
+  assert.equal(packageJson.engines?.bun, ">=1.4.3");
   assert.ok(packageJson.files?.includes("NOTICE"), "NOTICE must ship with the Apache-2.0 package");
 
   for (const keyword of ["ai-agents", "agent-coordination", "local-first", "claude-code", "codex"]) {

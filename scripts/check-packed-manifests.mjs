@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { checkCliPrivateInventory } from "./check-cli-private-inventory.mjs";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -29,9 +28,8 @@ function findWorkspaceDirs() {
     "packages/agent-sessions",
     "packages/runtime",
     "packages/cli",
-    "packages/web",
+    "packages/pairing",
     "packages/session-trace",
-    "packages/session-trace-react",
   ]
     .map((relativePath) => path.join(repoRoot, relativePath))
     .filter((dir) => existsSync(path.join(dir, "package.json")))
@@ -115,26 +113,21 @@ function findWorkspaceLeaks(pkg) {
 const REQUIRED_PACKED_FILES = {
   "@openscout/scout": [
     "package/bin/scoutd",
-    "package/dist/scout-control-plane-web.mjs",
+    "package/dist/main.mjs",
+    "package/dist/pairing-runtime-controller.mjs",
     "package/dist/knowledge-index-child.mjs",
-    "package/dist/scout-web-server.mjs",
-    "package/dist/client/index.html",
   ],
 };
 
 const FORBIDDEN_PACKED_PREFIXES = {
   "@openscout/scout": [
-    "package/dist/client/characters/",
-    // Crew artwork stays out of npm entirely; the basic client never shows it.
-    "package/dist/client/crew/",
-    "package/dist/client/crew-preview.html",
+    "package/apps/", "package/packages/web/", "package/dist/client/",
+    "package/dist/scout-control-plane-web.mjs", "package/dist/scout-web-server.mjs",
+    "package/dist/openscout-terminal-relay.mjs",
   ],
 };
 
-// Basic npm web ships Home, DMs and Tail. Retain the existing total ceilings
-// until the exact release candidate is measured; excluded surfaces are checked
-// directly below. The separate 1 KB compatibility ceiling remains unchanged.
-// Raising these ceilings remains a deliberate release-review decision.
+// Keep the reviewed total ceilings; removal does not authorize future growth.
 const PACKED_FOOTPRINT_BUDGETS = {
   "@openscout/scout": {
     maxPackedBytes: 26_000_000,
@@ -143,14 +136,7 @@ const PACKED_FOOTPRINT_BUDGETS = {
   },
 };
 
-// The old entry name remains as a compatibility import only. Keeping its own
-// small ceiling prevents the full server graph from being duplicated again
-// even if unrelated package files later shrink enough to fit the total budget.
-const PACKED_FILE_BUDGETS = {
-  "@openscout/scout": {
-    "package/dist/scout-web-server.mjs": 1_024,
-  },
-};
+const PACKED_FILE_BUDGETS = {};
 
 function parseTarOctal(field, label) {
   const value = field.toString("ascii").replace(/\0.*$/s, "").trim();
@@ -234,23 +220,18 @@ function listTarballEntries(tarballPath, packageDir) {
     .filter(Boolean);
 }
 
-/** Audit the actual packaged browser scripts, independent of the build directory. */
-export function findBasicPackedClientFailures(entries, readEntry) {
+/** Reject departed app artifacts and source modules in the exact packed candidate. */
+export function findCorePackedFilesFailures(entries, readEntry) {
   const failures = [];
-  const scripts = entries.filter((entry) => /^package\/dist\/client\/assets\/.*\.js$/.test(entry));
-  if (scripts.length === 0) failures.push("basic client has no emitted scripts");
-  let hasBasicShell = false;
-  for (const script of scripts) {
-    const source = readEntry(script);
-    if (source.includes("sb-shell")) hasBasicShell = true;
-    for (const marker of ["No logs on the wire", "Nothing unattended", "Forward to new task", "WebGLRenderer", "createScoutApp"]) {
-      if (source.includes(marker)) failures.push(`${script}: excluded full-app marker ${JSON.stringify(marker)}`);
+  const forbidden = FORBIDDEN_PACKED_PREFIXES["@openscout/scout"];
+  for (const entry of entries) {
+    if (forbidden.some(prefix => entry.startsWith(prefix))) failures.push("App artifact returned: " + entry);
+    if (/\.(?:mjs|cjs|js)$/.test(entry)) {
+      const source = readEntry(entry);
+      if (/^\/\/[ \t]+(?:\S*\/)?(?:packages\/web\/|apps\/desktop\/|\.\.\/web\/)\S+\.[cm]?[jt]sx?$/m.test(source)) {
+        failures.push("App source returned in bundle: " + entry);
+      }
     }
-  }
-  if (!hasBasicShell) failures.push("basic client shell is missing from emitted scripts");
-  const index = "package/dist/client/index.html";
-  if (entries.includes(index) && /src=["']\/(?:basic\/)?main\.tsx["']/.test(readEntry(index))) {
-    failures.push("basic client index contains an unbuilt source entry");
   }
   return failures;
 }
@@ -282,8 +263,8 @@ function auditTarball(tarballPath, packageDir = repoRoot) {
     forbiddenFiles,
     footprint,
     footprintFailures: findFootprintFailures(pkg.name, footprint),
-    basicClientFailures: pkg.name === "@openscout/scout"
-      ? findBasicPackedClientFailures(entries, (entry) => execFileSync("tar", ["-xOf", tarballPath, entry], {
+    coreBoundaryFailures: pkg.name === "@openscout/scout"
+      ? findCorePackedFilesFailures(entries, (entry) => execFileSync("tar", ["-xOf", tarballPath, entry], {
           cwd: packageDir, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
         }))
       : [],
@@ -316,7 +297,7 @@ function reportFailures(results) {
     || result.missingFiles.length > 0
     || result.forbiddenFiles.length > 0
     || result.footprintFailures.length > 0
-    || result.basicClientFailures.length > 0
+    || result.coreBoundaryFailures.length > 0
   );
   for (const result of results) {
     if (PACKED_FOOTPRINT_BUDGETS[result.name]) {
@@ -342,9 +323,9 @@ function reportFailures(results) {
       console.error(`${failure.name} contains private product assets:`);
       for (const forbidden of failure.forbiddenFiles) console.error(`  - ${forbidden}`);
     }
-    if (failure.basicClientFailures.length > 0) {
-      console.error(`${failure.name} does not contain the basic web client:`);
-      for (const error of failure.basicClientFailures) console.error(`  - ${error}`);
+    if (failure.coreBoundaryFailures.length > 0) {
+      console.error(`${failure.name} violates the core-only package boundary:`);
+      for (const error of failure.coreBoundaryFailures) console.error(`  - ${error}`);
     }
     if (failure.footprintFailures.length > 0) {
       console.error(`${failure.name} exceeds its reviewed package footprint:`);
@@ -367,20 +348,6 @@ async function main() {
     const failures = [...findWorkspaceLeaks(pkg), ...findPublishDependencyFailures(pkg)];
     if (failures.length) { console.error(failures.join("\n")); process.exitCode = 1; }
     else console.log("Packed dependency policy passed (manifest-only; not a full archive audit).");
-    return;
-  }
-  // Independent of native packaging: validate a named JS-only or full candidate
-  // against freshly collected source/output metadata. Never refresh on check.
-  if (process.argv[2] === "--private-inventory") {
-    const [expectedPath, observedPath, tarball] = process.argv.slice(3);
-    if (!tarball) throw new Error("--private-inventory requires reviewed JSON, observed JSON and one exact tarball");
-    const expected = JSON.parse(readFileSync(expectedPath, "utf8"));
-    const observed = JSON.parse(readFileSync(observedPath, "utf8"));
-    const footprint = readTarballFootprint(tarball);
-    const failures = checkCliPrivateInventory(expected, observed, [...footprint.fileSizes.keys()],
-      (entry) => execFileSync("tar", ["-xOf", tarball, entry], { maxBuffer: 64 * 1024 * 1024 }));
-    if (failures.length) { console.error(failures.join("\n")); process.exitCode = 1; }
-    else console.log("Named private inventory matches exact packed candidate.");
     return;
   }
   if (process.argv[2] === "--tarball") {

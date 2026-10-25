@@ -22,7 +22,7 @@ function fixture() {
     const path = join(home, relative); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, contents); return path;
   }
   // A discoverable checkout and all historical fallback entries are present.
-  file("apps/desktop/bin/scout.ts"); file("packages/runtime/bin/openscout-runtime.mjs");
+  file("packages/cli/bin/scout.mjs"); file("packages/runtime/bin/openscout-runtime.mjs");
   file("packages/web/server/index.ts"); file("packages/web/server/scoutbot/process/main.ts");
   file("packages/runtime/scout-control-plane-web.mjs");
   const moduleDirectory = dirname(file("packages/runtime/src/fixture.ts"));
@@ -51,7 +51,7 @@ test.each(["absent", "present", "missing"])("web never chooses sibling packages/
     expect(spawned).toEqual([["run", f.entry]]); expect(result.ok).toBe(true);
   } else {
     expect(spawned).toEqual([]); expect(result.ok).toBe(false);
-    expect(result.error).toContain(mode === "missing" ? "Configured web entry is unavailable" : "Could not find");
+    expect(result.error).toContain(mode === "missing" ? "Configured web entry is unavailable" : "supplied by OpenScout apps");
   }
   await service.stop();
 });

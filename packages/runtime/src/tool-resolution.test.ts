@@ -1,7 +1,8 @@
 import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 
 import {
   resolveBunExecutable,
@@ -103,14 +104,14 @@ describe("tool resolution", () => {
   test("finds an OpenScout repo root only when both required entrypoints exist", () => {
     const directory = mkdtempSync(join(tmpdir(), "openscout-tool-resolution-repo-"));
     const repoRoot = join(directory, "repo");
-    const nestedDirectory = join(repoRoot, "apps", "macos", "Sources");
+    const nestedDirectory = join(repoRoot, "packages", "cli", "src");
 
     try {
-      mkdirSync(join(repoRoot, "apps", "desktop", "bin"), { recursive: true });
+      mkdirSync(join(repoRoot, "packages", "cli", "bin"), { recursive: true });
       mkdirSync(join(repoRoot, "packages", "runtime", "bin"), { recursive: true });
       mkdirSync(nestedDirectory, { recursive: true });
 
-      writeFileSync(join(repoRoot, "apps", "desktop", "bin", "scout.ts"), "export {};\n");
+      writeFileSync(join(repoRoot, "packages", "cli", "bin", "scout.mjs"), "export {};\n");
       writeFileSync(join(repoRoot, "packages", "runtime", "bin", "openscout-runtime.mjs"), "export {};\n");
 
       expect(
@@ -118,9 +119,17 @@ describe("tool resolution", () => {
           startDirectories: [nestedDirectory],
         }),
       ).toBe(repoRoot);
+      rmSync(join(repoRoot, "packages", "cli", "bin", "scout.mjs"));
+      expect(resolveOpenScoutRepoRoot({ startDirectories: [nestedDirectory] })).toBeNull();
     } finally {
       rmSync(directory, { force: true, recursive: true });
     }
+  });
+
+  test("finds this real core-only checkout without synthesizing app paths", () => {
+    const sourceDirectory = dirname(fileURLToPath(import.meta.url));
+    expect(resolveOpenScoutRepoRoot({ startDirectories: [sourceDirectory] }))
+      .toBe(dirname(dirname(dirname(sourceDirectory))));
   });
 
   test("finds node_modules package entrypoints above the current module directory", () => {

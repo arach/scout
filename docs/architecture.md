@@ -4,6 +4,17 @@ This document is the system-level map for OpenScout: what the system is made of,
 
 Read this after the repo [`README.md`](../README.md) if you are orienting to the project for the first time. If you want the command-first ramp first, read [`quickstart.md`](./quickstart.md) before this page. For the precise meaning of Scout's core nouns and how they map onto external agent protocols, read [`concepts.md`](./concepts.md). For the question, work-item, and delegation semantics between agents, read [`agents-and-collaboration.md`](./agents-and-collaboration.md). License is Apache-2.0; see the repo [`LICENSE`](../LICENSE) and [`NOTICE`](../NOTICE).
 
+## Core and clients
+
+This repository owns the runtime, protocol, harness adapters, session
+observation and extraction, CLI, TUI, and host side of phone pairing. The
+terminal is the core interface. The Mac, iOS, Android, and web apps are separate
+clients, not source packages here. Hosted services are also separate.
+
+Descriptions of web or native presentation in this guide explain client
+behavior and shared semantics, not a bundled core app. See the
+[public-source boundary](./public-source-boundary.md) for ownership.
+
 ## Working Thesis
 
 Scout is the stable intermediary across agent implementations, with multiple

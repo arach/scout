@@ -1,91 +1,73 @@
-# Scout — coordinate Claude Code, Codex, and other AI agents
+# Scout
 
-<!-- scout-illustration:start -->
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/scout-illustration-dark.svg" />
-    <img src=".github/assets/scout-illustration-light.svg" alt="Scout connects distinct coding-agent surfaces through a shared local broker." width="100%" />
-  </picture>
-</p>
-<p align="center"><em>One local broker connects work across your coding-agent tools.</em></p>
-<!-- scout-illustration:end -->
-
-<p align="center">
-  <strong>Your personal agent cloud.</strong><br />
-  A local control plane and mesh network for coding agents across the machines you own.
-</p>
-
-<p align="center">
-  <a href="https://www.npmjs.com/package/@openscout/scout"><img alt="npm version" src="https://img.shields.io/npm/v/@openscout/scout?style=flat-square&label=npm&color=94d59a&labelColor=171a16" /></a>
-  <a href="https://github.com/oscout/scout/blob/main/LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-f7f4ea?style=flat-square&labelColor=171a16" /></a>
-  <a href="https://openscout.app"><img alt="OpenScout" src="https://img.shields.io/badge/built_for-OpenScout-dde6d8?style=flat-square&labelColor=171a16" /></a>
-</p>
-
----
-
-Scout connects coding agents through a local broker for **agent-to-agent
-communication, multi-agent coding workflows, and tracked code reviews**. Ask
-Claude Code to review a Codex change, route a task to another project, and return
-to the same request when you need a follow-up.
+Scout is the local runtime that coordinates coding agents on a host. It connects
+Claude Code, Codex, and other harnesses through one model for identity, routing,
+requests, replies, and durable work. Mesh connects runtimes across trusted hosts.
 
 Keep using your existing agent tools and provider accounts. Scout supplies the
-CLI, runtime, **Model Context Protocol (MCP) server**, and web control surface
-that connect their work. Optional mesh features extend coordination across
-trusted machines you own.
+runtime, harness adapters, session observation and extraction, CLI, TUI, and
+host side of phone pairing. The terminal is the core's interface.
 
-> **Current posture:** Scout is for high-trust local developer pilots. It is
-> not yet a hardened multi-tenant or compliance-ready control plane.
+The Mac, iOS, Android, and web apps are separate clients built on this core.
+Their source is not in this repository, and the npm package includes no web app.
+Hosted services are also separate. You can build your own interface without
+adopting any of those clients or services.
 
-[Quickstart](#get-started) · [Workflows](#what-can-you-do-with-scout) ·
-[Integrations](#choose-your-agent-tool) · [MCP setup](#mcp-server) ·
-[Common questions](#coding-agent-workflows-explained) ·
-[Architecture](#the-small-model) · [Documentation](#go-deeper)
+[Install](#install-and-first-run) · [Terminal workflows](#terminal-workflows) ·
+[Build an interface](#build-your-own-interface) · [Source boundary](./docs/public-source-boundary.md)
 
-## What can you do with Scout?
+## Install and first run
 
-| Your task | A practical workflow |
-| --- | --- |
-| **Get a second code review** | Implement with Codex, then ask Claude Code to inspect a stable diff and return findings. Keep the review read-only until you assess the result. |
-| **Run coding agents in parallel** | Give workers separate tasks and worktrees, track their requests, and keep one owner responsible for integration. Worktrees do not isolate shared databases or ports. |
-| **Hand off between projects** | Include the destination project, goal, constraints, and expected result in the request. The receiving session needs that context explicitly. |
-| **Follow up without losing the thread** | Save the returned reference, read the result, and ask a follow-up against the same work. An accepted request is distinct from completed work. |
-| **Coordinate across trusted machines** | Use the mesh and pairing workflow to extend reachability. Check the destination checkout and runtime; reachability does not synchronize files or agent transcripts. |
-
-Start with [Claude Code and Codex code review](https://openscout.app/blog/claude-code-codex-review-workflow),
-then explore [multi-agent coding](https://openscout.app/blog/multi-agent-coding-workflow)
-and [AI agent orchestration](https://openscout.app/blog/ai-agent-orchestration).
-
-## Get started
-
-Local coordination uses [Bun](https://bun.sh) 1.3 or newer and at least one
-installed, authenticated coding-agent tool. Start on Apple Silicon macOS:
+Local coordination requires [Bun 1.4.3 or newer](https://bun.sh), Apple-silicon
+macOS or Linux, and an installed, authenticated coding-agent harness for routed
+work. Install the package with npm; Bun runs the local runtime.
 
 ```bash
-bun add -g @openscout/scout
+npm install -g @openscout/scout
+scout --version
 scout setup
 scout doctor
+```
+
+Installing the package does not silently start services. On macOS, `setup`
+configures and starts the local runtime. On Linux, `setup` saves configuration;
+start the foreground runtime in a separate terminal or under your process
+manager:
+
+```bash
+openscout-runtime broker
+```
+
+Then run `scout doctor` again. If readiness fails, follow the first blocking
+diagnostic. See [Install Scout](./install.md) for Linux service configuration
+and recovery steps.
+
+From a project directory, inspect your identity and available harnesses:
+
+```bash
+scout whoami
+scout who
 scout runtimes
 ```
 
-Installing the package does not start services silently. `scout setup`
-configures the local broker; `scout doctor` checks its readiness. On Linux, run
-the broker as a foreground process under your process manager; follow the
-[quickstart](./docs/quickstart.md) for that lifecycle.
+`who` lists known agents, not proof of live work. A runtime catalog entry needs
+an installed harness, authentication, and provider access before it can run.
 
-### Have Claude Code review a Codex change
+## Terminal workflows
 
-From the project containing the change, pause edits while the reviewer reads
-it. Claude Code must be installed and authenticated on the reviewing machine.
+### Ask another agent to review a change
+
+Pause edits while the reviewer reads the diff. This example requires Claude
+Code on the destination host:
 
 ```bash
 scout ask --project . --harness claude --notify \
   "Review the uncommitted diff for correctness. Return findings with file and line references, or say no findings. Do not edit files or run tests."
 ```
 
-Scout resolves or starts a suitable worker, records the request, and prints a
-receipt with a flight id and, when the broker binds one, a `ref:` handle.
-`--notify` returns after that receipt instead of holding your terminal. Replace
-`ref:RETURNED` below with the handle from your receipt:
+Scout resolves or starts a worker and prints a receipt. `--notify` returns after
+the receipt instead of holding the terminal. A receipt confirms acceptance, not
+completion. Replace `ref:RETURNED` with the handle from the receipt:
 
 ```bash
 scout wait ref:RETURNED --timeout 600
@@ -93,286 +75,98 @@ scout ask --ref ref:RETURNED \
   "Explain the most important finding and the input that triggers it. Do not edit files."
 ```
 
-`scout wait` also accepts the flight or invocation id. A wait timeout means the
-result is not available yet; it is not proof of failure, so run the same wait
-again. A receipt means the broker accepted the request, not that the review
-finished. To have Codex review Claude Code's work, use `--harness codex` in the
-first request.
+`wait` also accepts a flight or invocation id. A timeout does not cancel the
+work; wait on the same handle again. To use Codex instead, set
+`--harness codex` in the first request. Other execution routes include
+`grok-acp`, `opencode`, `kimi`, and `pi`; inspect `scout runtimes` for readiness.
 
-## Choose your agent tool
+### Choose the right route
 
-<p>
-  <a href="https://github.com/oscout/claude-scout"><img src=".github/assets/agents/claude-code.svg" alt="Claude Code" height="24"></a>
-  <a href="https://github.com/oscout/codex-scout"><img src=".github/assets/agents/codex.svg" alt="Codex" height="24"></a>
-  <a href="https://github.com/oscout/cursor-scout"><img src=".github/assets/agents/cursor.svg" alt="Cursor" height="24"></a>
-  <a href="#choose-your-agent-tool"><img src=".github/assets/agents/grok.svg" alt="Grok CLI" height="24"></a>
-  <a href="https://openscout.app/opencode"><img src=".github/assets/agents/opencode.svg" alt="OpenCode" height="24"></a>
-  <a href="https://openscout.app/kimi"><img src=".github/assets/agents/kimi.svg" alt="Kimi Code" height="24"></a>
-  <a href="https://openscout.app/devin"><img src=".github/assets/agents/devin.svg" alt="Devin" height="24"></a>
-  <a href="https://github.com/oscout/pi-scout"><img src=".github/assets/agents/pi.svg" alt="pi" height="24"></a>
-  <a href="https://github.com/oscout/hermes-scout"><img src=".github/assets/agents/hermes.svg" alt="Hermes Agent" height="24"></a>
-  <a href="https://github.com/oscout/herdr-scout"><img src=".github/assets/agents/herdr.svg" alt="Herdr" height="24"></a>
-  <a href="#mcp-server"><img src=".github/assets/agents/mcp.svg" alt="Any MCP client" height="24"></a>
-</p>
+| Intent | Command |
+| --- | --- |
+| Request work and a reply | `scout ask --to <target> "<request>"` |
+| Send an update without requesting work | `scout tell --to <target> "<update>"` |
+| Start work in a project | `scout ask --project . --harness codex "<request>"` |
+| Continue an exact session | `scout ask --to session:<id> "<request>"` |
+| Post to a named group | `scout tell --channel <name> "<update>"` |
 
-A **harness** runs the coding agent. An **integration** connects a tool to Scout;
-some integrations expose MCP tools or terminal state without being execution
-harnesses. Use the setup link for the tool you already work in; every
-integration repository lives in the [oscout organization](https://github.com/oscout)
-for installation and usage.
+One target is a direct message. Group coordination requires an explicit channel;
+broadcast is opt-in. Sessions do not share context. Include the goal, checkout,
+revision, constraints, and expected result, or pass a brief with `--prompt-file`.
 
-| Tool | What it is | How it connects to Scout |
-| --- | --- | --- |
-| **Claude Code** | Anthropic's coding agent for working in a repository. | Route review or implementation tasks with `--harness claude`; the [Claude Code plugin](https://github.com/oscout/claude-scout) adds Scout commands and channel integration. |
-| **OpenAI Codex** | OpenAI's coding-agent tooling, including a CLI. | Route tasks with `--harness codex`; the [Codex plugin](https://github.com/oscout/codex-scout) supplies MCP tools and coordination guidance. |
-| **Cursor** | An AI code editor with agent tooling. | The [Cursor integration](https://github.com/oscout/cursor-scout) connects the editor to `scout mcp`. Scout's catalog also lists a `cursor` (Cursor CLI) execution route, which needs that CLI installed. |
-| **Grok CLI** | xAI's terminal coding agent (Grok Build), binary `grok`. | Route tasks with `--harness grok-acp`, which drives the CLI over the Agent Client Protocol; a hidden `grok` route also exists. Grok Bot, xAI's hosted agent product, can call Scout through a separate [hosted MCP connector](https://github.com/oscout/grok-scout), currently an operator-assisted pilot; it is not a launchable worker. |
-| **OpenCode** | An open-source coding agent with configurable model providers. | Route tasks with `--harness opencode`. Its models depend on provider configuration; a Grok model inside OpenCode is still an OpenCode session. See the [OpenCode guide](https://openscout.app/opencode). |
-| **Kimi Code** | Kimi's terminal coding agent. | Route tasks with `--harness kimi`; see the [Kimi guide](https://openscout.app/kimi) for setup. |
-| **Devin** | Coding-agent tooling with its own execution environment. | Scout's catalog includes a Devin route. Follow the [Devin integration guide](https://openscout.app/devin) for its prerequisites and current limits; catalog presence alone does not establish account access. |
-| **pi** | An extensible terminal coding-agent tool. | The [pi extension](https://github.com/oscout/pi-scout) brings Scout messages, requests, and agent discovery into pi sessions; Scout also lists a `pi` execution route. |
-| **Hermes Agent** | An agent host with its own sessions and tools. | The [Hermes plugin](https://github.com/oscout/hermes-scout) bridges Scout MCP tools into those sessions. Hermes is an MCP host, not a Scout dispatch harness. |
-| **Herdr** | A terminal host for working with agent panes. | [Herdr](https://github.com/ogulcancelik/herdr) exposes terminal and agent-state surfaces around supported sessions. It is not a model or dispatch harness. The [herdr plugin](https://github.com/oscout/herdr-scout) adds Scout ask and feed actions to its command palette. |
-| **Other MCP clients** | Applications that can connect to a local stdio MCP server. | Configure `scout mcp` using the [MCP setup below](#mcp-server). Calling Scout tools does not automatically make the client a launchable worker. |
-
-Run `scout runtimes --json` for the runtime and model combinations Scout knows
-about. A catalog entry is not proof that a route works on your machine: the
-harness must be installed and authenticated, and the provider must grant access
-to the selected model. `scout doctor` reports local readiness. See the [integration catalog](https://openscout.app/integrations)
-for additional tool-specific guides and their current setup requirements.
-
-## Collaboration across Claude Code, Codex, Grok, and OpenCode
-
-Scout connects coding agents as **collaborating peers**. No tool has a fixed
-role or authority over another. A task can start in any connected agent, and
-its recipient can return findings or request a follow-up.
-
-Scout routes work between coding-agent harnesses in either direction:
-**Codex ↔ Claude Code**, **Claude Code ↔ Grok**, **Grok ↔ Codex**,
-**Codex ↔ OpenCode**, and other catalog routes such as Kimi Code and pi. A
-direction works when two things are true:
-
-- the **destination** harness is installed and authenticated where it runs;
-- the **calling** session can reach Scout, by running the `scout` CLI or through
-  Scout's [MCP tools](#mcp-server).
+### Inspect work from the terminal
 
 ```bash
-# Ask Grok CLI for a read-only investigation of the current project
-scout ask --project . --harness grok-acp --notify \
-  "Investigate why the retry test is flaky. Cite files and lines. Do not edit files."
+scout status
+scout tui
+scout mesh status
+scout pair
 ```
 
-Change `--harness` to `claude`, `codex`, `opencode`, or `kimi` to pick a
-different destination. Sessions do not share context: pass the goal, the exact
-revision, and earlier findings in each request, or use `--prompt-file` for a
-longer brief. The roles below are examples, not claims that one model is best at
-a particular job.
+The TUI is a core terminal interface. `scout tui` resolves a local binary or
+downloads the version-matched release binary when needed. `scout pair` starts
+phone pairing on the host; the phone app is a separate client.
 
-| Collaboration path | What to pass | What to get back |
-| --- | --- | --- |
-| **Codex ↔ Claude Code** | Goal, checkout, commit or diff, review constraints | Findings, explanation, and a reference for follow-up |
-| **Claude Code ↔ Grok** | Research question or implementation scope, sources, limits | Sourced research or a scoped change with unresolved questions |
-| **Grok ↔ Codex** | Agreed requirements and the evidence behind them | Implementation revision, checks performed, and remaining work |
-| **Codex ↔ OpenCode** | Stable review target and the intended behavior | Independent review findings or an explicitly bounded next task |
-| **Several agents in parallel** | Separate ownership, worktrees, and shared interface contracts | Independently reviewable changes for one integrator |
+Mesh extends reachability, not filesystem synchronization, transcript
+replication, global consensus, or exactly-once delivery. A remote task still
+needs the intended checkout and an authenticated harness on its destination.
+Scout assumes trusted local users and agents; it is not a hardened untrusted
+multi-tenant or compliance boundary. Model inference remains with your provider.
 
-Start with one request and its reply before building a longer chain. The
-[coding-agent collaboration guide](./docs/coding-agent-collaboration-2026.md)
-([web version](https://openscout.app/blog/coding-agent-collaboration-2026))
-covers handoff templates, connection mechanisms, native subagents versus separate
-harnesses, and coordination across machines.
+## Build your own interface
 
-### How do the connections work?
+Use the same runtime as the CLI. Your client can present agents, sessions,
+messages, flights, and work without depending on an existing Scout app.
 
-Codex app-server, OpenCode's detached service, Claude Code's structured CLI,
-ACP, and tmux expose different ways to exchange work. Separate the interface,
-runtime, transport, session, and artifacts before choosing one. Scout's selected
-adapter may use a different surface from a tool's native server: for example,
-broker-created OpenCode tasks default to ACP while its product-V2 service has
-an explicit adapter path. The guide explains [the moving parts and their
-lifecycle](./docs/coding-agent-collaboration-2026.md#how-the-agents-connect-the-moving-parts),
-including session identity, process ownership, permissions, and completion.
+### Start with JSON or MCP
 
-## Coding-agent workflows explained
-
-### Claude Code vs Codex: can I use both together?
-
-Yes. Give one agent implementation ownership and the other a focused review of
-an exact revision, with the project path and intended behavior. Each keeps its
-own session, so the reviewer only knows what the request tells it. Reverse the
-roles for a different task. The
-[Claude Code–Codex review workflow](https://openscout.app/blog/claude-code-codex-review-workflow)
-walks through the request, result, and follow-up.
-
-The Claude Code plugin, Codex plugin, and MCP server expose Scout's coordination
-tools inside those clients. They do not turn a Claude session into a Codex
-session or transfer conversation history between providers.
-
-### Multi-agent coding, subagents, and Git worktrees
-
-Claude Code subagents, Claude Code's experimental agent teams, and Codex
-subagents already handle parallel work inside one tool. Scout is for work that
-crosses harnesses, projects, or machines.
-
-Either way, parallel agents help when tasks can proceed independently. Agree on
-shared interfaces first, give each task one owner, and give concurrent writers
-separate Git worktrees. Worktrees isolate working files, not shared ports,
-databases, secrets, or external services. Ask each worker for a revision, checks
-performed, and unresolved issues, and have one integrator review the combined
-result. Read the
-[multi-agent coding guide](https://openscout.app/blog/multi-agent-coding-workflow).
-
-### AI agent orchestration, task delegation, and handoffs
-
-Here, orchestration means assigning work to existing coding agents, tracking its
-state, and continuing the right conversation. A useful handoff names the goal,
-destination checkout, stable inputs, constraints, and expected result. Use
-`scout ask` when you need a reply, `scout wait` to collect it, and
-`scout ask --ref` to follow up on the same work. Use `scout send` for an update
-that needs no reply.
-
-The local broker owns Scout's coordination records. Each agent keeps its own
-provider, permissions, and execution environment. See
-[AI agent orchestration](https://openscout.app/blog/ai-agent-orchestration)
-for the ownership decisions behind this model.
-
-### Agent-to-agent communication: is this like Slack for agents?
-
-The analogy fits direct messages and named group channels. Coding work also
-needs a result: who accepted the task, whether it finished, and where to follow
-up. Scout records those requests and replies through its broker. Group
-coordination uses a named channel; broadcast is opt-in.
-
-A literal Slack connection is a separate
-[integration](https://openscout.app/slack) with its own requirements. Read about
-[agent-to-agent communication](https://openscout.app/blog/agent-to-agent-local-broker)
-for the local broker model.
-
-### Claude Code history, Codex sessions, and finding earlier decisions
-
-Use Scout's [session search](./docs/session-search.md) to find text in observed
-harness sessions after explicitly indexing the relevant history:
+Use structured CLI output instead of parsing terminal prose. `doctor --json`
+retains its NDJSON diagnostic stream:
 
 ```bash
-scout search status
-scout search index --source sessions --harness claude --days 3
-scout search query "review decision" --harness claude --days 3
+scout doctor --json
+scout who --json
+scout runtimes --json
+scout status --json
 ```
 
-Search covers only the sources and time ranges you indexed. Finding a transcript
-helps recover context; it does not resume that session or import its history
-into another agent.
-
-### MCP vs A2A vs ACP: where does Scout fit?
-
-- **MCP (Model Context Protocol)** connects an AI client to tools. It is Scout's
-  agent-facing interface: `scout mcp` exposes tools such as `ask`,
-  `messages_send`, and `invocations_wait`.
-- **ACP (Agent Client Protocol)** connects an editor or client to a coding
-  agent. Scout acts as an ACP *client* to drive some harnesses, such as the
-  `grok-acp` route; it is not an ACP agent server. BeeAI's Agent Communication
-  Protocol shares the acronym, and Scout does not implement it.
-- **A2A (Agent2Agent)** is an interoperability protocol between agents. The
-  broker exposes a subset (agent cards and JSON-RPC task methods projected from
-  Scout flights). This is not full conformance: streaming, push notifications,
-  authenticated extended cards, and production security controls remain open.
-
-See [Scout concepts](./docs/concepts.md#what-maps-to-open-protocols) for the
-exact mapping and the
-[ACP, A2A, and MCP comparison](https://openscout.app/blog/acp-vs-a2a-vs-mcp)
-for background.
-
-### Remote coding agents and coordination across machines
-
-Scout's optional mesh extends reachability between trusted machines. A remote
-handoff still needs a reachable destination, an installed agent runtime, and the
-intended checkout on that machine. Mesh does not synchronize repositories,
-replicate external transcripts, or guarantee exactly-once delivery.
-
-Claude Code's own Remote Control and cross-session messaging connect Claude Code
-sessions to each other and to claude.ai; they do not route work to other
-harnesses. See the [documentation](https://openscout.app/docs) for Scout's mesh
-and pairing requirements. A local broker does not make model inference local:
-your agent provider still receives the task data it needs.
-
-## MCP server
-
-OpenScout includes an MCP server implemented with the official TypeScript
-`@modelcontextprotocol/sdk`, using `McpServer` and `StdioServerTransport`.
-The `scout mcp` command starts it over stdin/stdout. MCP clients call tools that
-connect to Scout's local broker; the internal Scout protocol describes broker
-records and is separate from the MCP interface exposed to clients.
-
-### Install and connect
-
-Requires **Bun 1.3 or newer** on macOS or Linux. Initialize the local broker
-before using coordination tools:
-
-```bash
-bun add -g @openscout/scout
-scout setup
-scout doctor
-```
-
-Add this entry to an MCP client's command-based stdio configuration:
+For an agent-facing integration, run `scout mcp` as a stdio MCP server. A client
+that accepts command-based MCP configuration can use the installed CLI:
 
 ```json
 {
   "mcpServers": {
-    "openscout": {
-      "command": "bunx",
-      "args": ["@openscout/scout", "mcp"]
+    "scout": {
+      "command": "scout",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-The client must be able to find `bunx` on its PATH. The client launches the
-server and communicates over stdio; this command does not start a public HTTP
-MCP endpoint. Only connect trusted clients: coordination tools can launch local
-coding agents, send messages, and update broker-owned work.
+The client's PATH must include `scout` and Bun. Initialize the runtime before
+using coordination tools. Use MCP `tools/list` to inspect tool names and input
+schemas. Tools include `ask` for work, `messages_send` for updates, and
+`invocations_get` and `invocations_wait` to follow results. See the
+[MCP API guide](./docs/mcp-api-posture.md) and
+[integration contract](./docs/agent-integration-contract.md).
 
-### MCP tools
+### Use the public packages
 
-Representative tools exposed by the server:
-
-| Tools | Purpose |
+| Package | Use it for |
 | --- | --- |
-| `whoami` | Identify the current broker actor and project context. |
-| `agents_search`, `agents_resolve` | Discover and resolve coding-agent targets. |
-| `ask` | Request work, investigation, review, or a reply from an agent. |
-| `messages_send`, `messages_inbox`, `messages_reply` | Send updates, read messages, and reply in context. |
-| `invocations_get`, `invocations_wait` | Observe an existing flight and its result. |
-| `work_update` | Report progress or change the state of existing work. |
+| [`@openscout/protocol`](./packages/protocol) | Identity grammar, messages, requests, flights, and shared wire contracts |
+| [`@openscout/runtime`](./packages/runtime) | Host-side routing, storage, lifecycle, discovery, mesh, and client APIs |
+| [`@openscout/agent-sessions`](./packages/agent-sessions) | Harness adapters, observed events, snapshots, approvals, and session extraction |
+| [`@openscout/scout`](./packages/cli) | Installed CLI, bundled runtime, JSON output, and MCP server |
 
-Use MCP `tools/list` to inspect the current tool names and input schemas.
-`ask` creates owned work; `messages_send` is for updates that need no reply.
-The broker remains the canonical writer of coordination records.
-
-### Implementation and verification
-
-- [MCP server implementation](./packages/cli/src/mcp/scout-mcp.ts): SDK imports, tool registrations, and stdio transport.
-- [CLI entry point](./packages/cli/src/cli/commands/mcp.ts): the `scout mcp` command.
-- [MCP tests](./packages/cli/src/mcp/scout-mcp.test.ts): client/server connection, `tools/list`, and tool behavior.
-- [Package registry metadata](./packages/cli/server.json): `io.github.oscout/scout`, npm package, and stdio launch arguments.
-- [MCP API guide](./docs/mcp-api-posture.md) and [CLI setup guide](./packages/cli/README.md#mcp-server).
-
-## The small model
-
-| You mean… | Use… | What Scout records |
-| --- | --- | --- |
-| “Heads up.” | `scout send --to <target>` | A durable message |
-| “Do this and get back to me.” | `scout ask --to <target>` | An invocation, flight, and reply path |
-| “Start fresh in this project.” | `scout ask --project . --harness <harness>` | A capability-routed session |
-| “Follow up on that result.” | `scout ask --ref <ref>` | A follow-up bound to the earlier work |
-| “Continue that exact run.” | `scout ask --to session:<id>` | A continuation on one concrete session |
-| “Coordinate the group.” | `scout send --channel <name>` | An explicit channel message |
-
-One target is a DM. Group coordination uses a named channel. Broadcast is
-opt-in. Routing lives in structured metadata—not in accidental `@mentions`
-inside the message body.
-
-## One broker, many surfaces
+Read each package's export map before importing a subpath. For example,
+`@openscout/runtime/broker-api` provides the runtime's HTTP client helpers;
+`@openscout/runtime/host-attention` provides host attention reads. The runtime
+is host-side code, not a browser library. Put it behind your own host service
+when building a browser interface. Start with the runtime guide's
+[in-memory example](./packages/runtime/README.md#quickstart-embed-the-in-memory-runtime)
+and the agent-sessions guide's [adapter example](./packages/agent-sessions/README.md#quickstart).
 
 <!-- arc:control-plane:start -->
 
@@ -380,9 +174,9 @@ inside the message body.
 
 ```text
                                                     ╔══════════════════════╗
-                     ╔══════════════════════╗       ║ ◆ Local broker       ║
+                     ╔══════════════════════╗       ║ ◆ Local runtime      ║
                      ║ ◆ Scout surfaces     ║       ║ canonical writer     ║
-┌────────────────┐   ║ CLI + local web      ║   ┌──▶║ route + run          ║
+┌────────────────┐   ║ CLI + TUI + MCP      ║   ┌──▶║ route + run          ║
 │ ◆ Operator     │ ┌▶║ one control plane    ║───┘   ║                      ║
 │ or agent       │─┘ ║                      ║       ╚══════════════════════╝
 └────────────────┘   ╚══════════════════════╝                   │
@@ -401,57 +195,34 @@ inside the message body.
 
 <!-- arc:control-plane:end -->
 
-The broker is the canonical writer for Scout-owned coordination records.
-Harness transcripts remain observed source material; Scout does not bulk-import
-them as first-party conversation history. “Mesh” means reachability and
-coordination—not global consensus or exactly-once delivery.
+The runtime is the canonical writer of Scout-owned coordination records. Clients
+submit commands through its APIs; they do not write its database or maintain a
+competing registry. Harness transcripts remain observed source material, not
+imported Scout conversation history.
 
-## What ships here
+The host side of phone pairing lives in `packages/pairing` as
+`@openscout/pairing`. Its closed exports are `.`, `/runtime`, `/controller`,
+`/terminal`, `/host`, `/http`, `/pair-requests`, `/lan-beacon`, `/web-handoff`
+and `/artifacts`. Bun resolves source; ESM and types resolve the package's
+compiled `dist`. Use `scout pair` as the terminal entry point.
 
-| Surface | Path | Role |
-| --- | --- | --- |
-| CLI package | [`packages/cli`](./packages/cli) | `scout` command and bundled distribution |
-| Broker/runtime | [`packages/runtime`](./packages/runtime) | routing, mesh, pairing, knowledge, durable work |
-| Shared protocol | [`packages/protocol`](./packages/protocol) | wire types, identities, runtime catalog |
-| Harness sessions | [`packages/agent-sessions`](./packages/agent-sessions) | observed session descriptors and lifecycle |
-| Web control plane | [`packages/web`](./packages/web) | baseline local operator UI, reusable web primitives, app shell, and local server |
-| Trace tooling | [`packages/session-trace`](./packages/session-trace) | portable trace model and React viewer |
-| Native services | [`crates`](./crates) | `scoutd`, repo service, portable voice core |
+The package is internal to the core workspace and bundled into
+`@openscout/scout`; it is not a separately published npm package. A standalone
+controller build starts from `packages/pairing/src/pairing-runtime-controller.ts`,
+which applies instance isolation before launching the controller. Importing
+`/controller` supplies its function, not an automatically started process.
 
-### Public core, private product
+### Add a CLI extension
 
-This is the destination for Scout's strong public primitives **and** a complete
-baseline web control plane. A public installation should support the ordinary
-local workflow—setup and health, agents and sessions, conversations and
-requests, work and activity, runtimes, projects, mesh, and settings—without
-private-only placeholders.
+An extension adds a verb through an explicitly installed local artifact with
+an `extension.json` manifest and an executable. Built-in verbs take precedence;
+the CLI does not discover extensions by searching PATH. Extensions use the same
+public runtime APIs as other clients.
 
-The product split is an active migration, not a claim that the repositories and
-release pipeline have already been cut over. The target is one-way: the private
-OpenScout product consumes exact released public packages and adds native apps,
-hosted services, advanced operations, and product-specific UI through trusted
-build-time web composition. It must not carry copied public source or a mirrored
-`packages/web`, and public Scout must never depend on private code.
-
-See the [public-source boundary](./docs/public-source-boundary.md) for current
-migration status, target ownership, and release invariants.
-
-## Linux desktop examples
-
-The optional [Omarchy popup and launcher](./integrations/omarchy/README.md)
-provide attention, tracked work, provider limits, machines, and quick actions.
-They consume the installed public CLI and preserve local desktop preferences.
-
-The optional [Omarchy notification integration](./docs/linux-desktop.md)
-includes a live broker-event observer, a user-service installer, configurable
-controls and native notification cards. It is installed from this checkout,
-separately from the npm CLI package.
-
-The [compact usage study](./examples/linux-usage/README.md) compares LED,
-progress and bar treatments with synthetic fixtures. It runs with Bun alone
-and does not query accounts or replace the installed desktop widget. Read
-[Making Scout at home on Omarchy](./docs/blog/making-scout-at-home-on-omarchy.md)
-for the local pilot's design history and preview cards.
+See [Extensions](./docs/extensions.md) for an artifact example, installation,
+completion, and help. CLI extensions do not require a web app or a UI composition
+framework. `scout server` and `scout web` use a web client only when the separate
+apps layer supplies one; neither command makes a web app part of the core.
 
 ## Work on Scout
 
@@ -459,31 +230,29 @@ for the local pilot's design history and preview cards.
 git clone https://github.com/oscout/scout.git
 cd scout
 bun install
-
 bun run --cwd packages/cli build
 ./packages/cli/bin/scout --version
 ```
 
-Run `bun run sync-exec:fence` before submitting changes that add or modify shell
-execution. Use the package-local checks for the area you changed; the complete
-suite is available through `bun run check` and `bun run test:unit`.
+The source tree includes the packages above and native services in
+[`crates`](./crates), including `scoutd`, the repository service, and the Rust
+TUI. No private checkout is required to build or test the core.
+
+Run package-local checks for the area you change. Run `bun run sync-exec:fence`
+before submitting shell-execution changes. See [Contributing](./CONTRIBUTING.md)
+and the [release guide](./docs/releases.md).
 
 ## Go deeper
 
-- [Install and verify](./install.md) — supported installation paths and clear success criteria
-- [CLI guide](./packages/cli/README.md) — setup, routing, profiles, sessions, and operator commands
-- [Runtime guide](./packages/runtime/README.md) — broker and runtime internals
-- [Protocol guide](./packages/protocol/README.md) — integration contracts and shared types
-- [Agent sessions](./packages/agent-sessions/README.md) — harness observation and session models
-- [Concepts](./docs/concepts.md) — Scout's vocabulary and how it maps to A2A, ACP, and MCP
-- [Coding-agent collaboration guide](./docs/coding-agent-collaboration-2026.md) — handoffs across Codex, Claude Code, Grok, and OpenCode
-- [Public-source boundary](./docs/public-source-boundary.md) — what ships here and how package/source parity stays verifiable
-- [Release guide](./docs/releases.md) — reviewed-source, package, tag, and registry invariants
-- [OpenScout for macOS](./releases/macos/README.md) — public downloads, updater trust, and verification
-- [Architecture diagram source](./.github/diagrams/control-plane.arc.json) — editable Arc model behind the README diagram
-- [Brand assets](./.github/assets/README.md) — canonical mark, hero, avatar, and social preview sources
-- [OpenScout](https://openscout.app) — product context and project home
+- [Quickstart](./docs/quickstart.md)
+- [CLI guide](./packages/cli/README.md)
+- [Architecture](./docs/architecture.md) and [concepts](./docs/concepts.md)
+- [Session search](./docs/session-search.md)
+- [Coding-agent collaboration](./docs/coding-agent-collaboration-2026.md)
+- [Public-source boundary](./docs/public-source-boundary.md)
+- [Linux desktop integrations](./docs/linux-desktop.md) and [Omarchy launcher](./integrations/omarchy/README.md)
+- [Integration repositories](https://github.com/oscout)
 
 ## License
 
-Apache-2.0. See [LICENSE](./LICENSE).
+Apache 2.0. See [LICENSE](./LICENSE).

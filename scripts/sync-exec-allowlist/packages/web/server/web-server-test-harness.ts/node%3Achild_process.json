@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/web-server-test-harness.ts",
-  "symbol": "node:child_process",
-  "category": "test",
-  "reason": "test subprocess fixture or git fixture setup",
-  "owner": "tests"
-}

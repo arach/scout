@@ -25,9 +25,9 @@ nativeTest.each(["default", "ignore", "no-cldwait", "default-again"])("isolated 
     expect(exit).toBe(0); expect(stderr).toBe("");
     const result = JSON.parse(stdout);
     const safe = mode === "default" || mode === "default-again";
-    expect(result.capability).toEqual(safe ? { available: true, backend: "darwin-event-loop-wait4/1" }
-      : { available: false, reason: mode === "ignore" ? "sigchld_ignored" : "sigchld_no_cldwait" });
+    // The OS disposition probe still runs; it cannot qualify a new Bun reaper.
+    expect(result.capability).toEqual({ available: false, reason: "child_custody_backend_unproven" });
     expect(result.probe).toEqual(safe ? { safe: true } : { safe: false, reason: mode === "ignore" ? "sigchld_ignored" : "sigchld_no_cldwait" });
-    if (mode === "default-again") expect(result.first).toEqual({ available: false, reason: "sigchld_ignored" });
+    if (mode === "default-again") expect(result.first).toEqual({ available: false, reason: "child_custody_backend_unproven" });
   } finally { clearTimeout(timer); child.kill("SIGKILL"); await child.exited; }
 }, 10_000);

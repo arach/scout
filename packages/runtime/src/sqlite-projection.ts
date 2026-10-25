@@ -10,6 +10,7 @@ import type {
   ControlEvent,
   MessageRecord,
   InvocationRequest,
+  FlightRecord,
   DeliveryIntent,
   NodeDefinition,
   ThreadEventEnvelope,
@@ -927,6 +928,15 @@ export class RecoverableSQLiteProjection {
     const store = await this.ensureStore();
     if (!store) throw new Error("Historical invocation storage is unavailable.");
     return store.readInvocations([...ids]);
+  }
+
+  async readFlights(ids: readonly string[]): Promise<Map<string, FlightRecord>> {
+    if (ids.length > 128) throw new Error("historical_flight_read_capacity");
+    if (this.closed || this.options.disabled) throw new Error("Historical flight storage is unavailable.");
+    await this.flush();
+    const store = await this.ensureStore();
+    if (!store) throw new Error("Historical flight storage is unavailable.");
+    return store.readFlights([...ids]);
   }
 
   async readInvocationSnapshot(id: string): Promise<ReturnType<SQLiteControlPlaneStore["readInvocationSnapshot"]>> {

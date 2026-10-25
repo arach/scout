@@ -41,14 +41,12 @@ if (missing.length > 0) {
 
 const manifests = [
   "package.json",
-  "apps/desktop/package.json",
   "packages/agent-sessions/package.json",
   "packages/cli/package.json",
   "packages/protocol/package.json",
   "packages/runtime/package.json",
   "packages/session-trace/package.json",
-  "packages/session-trace-react/package.json",
-  "packages/web/package.json",
+  "packages/pairing/package.json",
 ];
 const versions = new Map(
   manifests.map((path) => [path, JSON.parse(read(path)).version]),
@@ -165,10 +163,10 @@ if (
 }
 const sourceBoundary = read("docs/public-source-boundary.md");
 if (
-  !sourceBoundary.includes("## Broker-owned working set")
-  || !/bounded, coherent working[\s\S]*rehydrated from the broker/i.test(sourceBoundary)
+  !sourceBoundary.includes("## Runtime-owned working set")
+  || !/bounded, coherent working[\s\S]*rehydrated from the runtime/i.test(sourceBoundary)
 ) {
-  throw new Error("Public source boundary must keep registry state broker-owned and bounded");
+  throw new Error("Public source boundary must keep registry state runtime-owned and bounded");
 }
 
 const diagram = JSON.parse(read(".github/diagrams/control-plane.arc.json"));

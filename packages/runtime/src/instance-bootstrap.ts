@@ -1,3 +1,4 @@
+import "./bun-bootstrap.js";
 // Side-effect module: import FIRST in a process entrypoint so OPENSCOUT_INSTANCE
 // is materialized into process.env before any other module evaluates its
 // module-level paths, ports or identity. Children inherit the result.

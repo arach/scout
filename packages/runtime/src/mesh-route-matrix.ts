@@ -141,6 +141,7 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "GET /v1/machines/:id": "local",
   "GET /v1/message-reactions": "local",
   "GET /v1/messages": "local",
+  "GET /v1/messages/:id": "local",
   "GET /v1/missions/:id/log": "local",
   "GET /v1/terminal-hosts/herdr/workspaces": "local",
   "GET /v1/observed-sessions": "local",
@@ -263,6 +264,7 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "POST /v1/guest/sessions/reply": "guest",
 
   // guest grant administration is a local owner act (loopback only)
+  "GET /v1/flights/:id": "local",
   "GET /v1/guest-grants": "local",
   "POST /v1/guest-grants": "local",
   "POST /v1/guest-grants/revoke": "local",

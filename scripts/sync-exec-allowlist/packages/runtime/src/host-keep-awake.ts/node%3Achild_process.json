@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/host-keep-awake.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "owns the macOS idle-sleep hold via fixed caffeinate -i -w runtime PID; the OS releases it on runtime exit, including SIGKILL, while grace expiry or broker shutdown sends SIGTERM and exit/error listeners retire the hold; no shell",
+  "owner": "runtime"
+}

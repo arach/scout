@@ -1,6 +1,8 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { constants, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { readMeshBridgeConfigSnapshot, validateMeshBridgeConfig } from './mesh-bridge-config.js';
+export { readMeshBridgeConfigSnapshot } from './mesh-bridge-config.js';
 import { findScoutExtension, scoutExtensionDigest, scoutExtensionEnv, type ScoutExtension } from './scout-extensions.js';
 
 /** Refused/removed primary installs block all older installs and legacy fallback. */
@@ -18,17 +20,6 @@ export function resolveMeshBridgeExtension(env: NodeJS.ProcessEnv): MeshBridgeEx
   } catch { return {state:'refused',key:'refused',reason:'untrusted-or-invalid'}; }
 }
 
-/** Bounded snapshot used for both reconciliation identity and the launch descriptor. */
-export function readMeshBridgeConfigSnapshot(path:string): { value: Record<string,unknown>; digest:string; mtimeMs:number } {
-  let fd:number|undefined;
-  try {
-    fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);const stat=fstatSync(fd);
-    if(!stat.isFile()||stat.size>64*1024||(stat.mode&0o022)||(process.getuid&&stat.uid!==process.getuid()))throw new Error();
-    const text=readFileSync(fd,'utf8');if(Buffer.byteLength(text)>64*1024)throw new Error();
-    const value:unknown=JSON.parse(text);if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();
-    return {value:value as Record<string,unknown>,digest:createHash('sha256').update(text).digest('hex'),mtimeMs:stat.mtimeMs};
-  }catch{throw new Error('invalid bridge configuration');}finally{if(fd!==undefined)closeSync(fd);}
-}
 export function meshBridgeLaunchKey(config:{configDigest:string;configMtimeMs:number},extension:MeshBridgeExtension):string {
   return `${config.configDigest}:${config.configMtimeMs}:${extension.key}`;
 }
@@ -37,14 +28,9 @@ export const meshBridgeLaunchConfigPath=(supportDirectory:string)=>join(supportD
 export function writeMeshBridgeLaunchConfig(input:{supportDirectory:string;configPath:string;configDigest:string;brokerUrl:string;parentPid:number;eventsEnabled:boolean;localAdmin?:{keyFile:string;destinationKeyId:string}}):string {
   const {value:raw,digest}=readMeshBridgeConfigSnapshot(input.configPath);
   if(digest!==input.configDigest)throw new Error('bridge configuration changed during launch');
-  const relay=new URL(String(raw.relayUrl));
-  if(relay.protocol!=='https:'||relay.pathname!=='/'||relay.username||relay.password||relay.search||relay.hash||raw.dir)throw new Error('invalid bridge launch configuration');
-  const fixedToken=join(input.supportDirectory,'mcp-bridge.token');
-  if(raw.tokenFile && raw.tokenFile!==fixedToken)throw new Error('invalid bridge token location');
-  if(raw.token!==undefined && (typeof raw.token!=='string'||!/^[\x21-\x7e]{1,8192}$/.test(raw.token)))throw new Error('invalid bridge credential');
-  if(raw.tokenKeychainService!==undefined && (typeof raw.tokenKeychainService!=='string'||!/^[a-zA-Z][a-zA-Z0-9._-]{0,127}$/.test(raw.tokenKeychainService)))throw new Error('invalid bridge credential reference');
-  const token=typeof raw.token==='string'?raw.token:undefined;
-  const value={brokerUrl:input.brokerUrl,relayUrl:relay.origin,enabled:raw.enabled!==false,tools:raw.tools??'core',
+  const validated=validateMeshBridgeConfig(raw,input.supportDirectory);
+  const fixedToken=validated.tokenFile,token=validated.token;
+  const value={brokerUrl:input.brokerUrl,relayUrl:validated.relayOrigin,enabled:raw.enabled!==false,tools:raw.tools??'core',
     ...(token?{token}:raw.tokenKeychainService?{tokenKeychainService:raw.tokenKeychainService}:existsSync(fixedToken)?{tokenFile:fixedToken}:{}),
     ...(typeof raw.sender==='string'?{sender:raw.sender}:{}),dir:input.supportDirectory,
     supervisor:{parentPid:input.parentPid},eventsEnabled:input.eventsEnabled,

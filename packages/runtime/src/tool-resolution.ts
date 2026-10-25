@@ -1,3 +1,4 @@
+import { repoScoutEntrypoint } from "@openscout/agent-sessions/repo-scout-entry";
 import type { RuntimeEnv } from "./portable-types.js";
 import { accessSync, constants, existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -285,7 +286,7 @@ export function resolveOpenScoutRepoRoot(options: ResolveRepoRootOptions = {}): 
   for (const start of starts) {
     let current = resolve(start);
     while (true) {
-      const scoutEntry = join(current, "apps", "desktop", "bin", "scout.ts");
+      const scoutEntry = repoScoutEntrypoint(current);
       const runtimeEntry = join(current, "packages", "runtime", "bin", "openscout-runtime.mjs");
       if (existsSync(scoutEntry) && existsSync(runtimeEntry)) {
         return current;

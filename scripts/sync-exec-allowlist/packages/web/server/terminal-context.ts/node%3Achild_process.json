@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/terminal-context.ts",
-  "symbol": "node:child_process",
-  "category": "probe-exec",
-  "reason": "async bounded git execFile for a terminal's repo context; no sync exec",
-  "owner": "web"
-}

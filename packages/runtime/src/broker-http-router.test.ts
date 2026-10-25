@@ -1755,3 +1755,28 @@ describe("staged supervision handoff discovery", () => {
     }
   });
 });
+
+
+test("exact flight reads avoid snapshots and distinguish absence from unavailable storage", async () => {
+  const flight = { id: "flight/encoded", invocationId: "invocation", requesterId: "operator", targetAgentId: "worker", state: "completed", output: "canonical output" };
+  const h = createHarness({ readFlight: async (id: string) => { expect(id).toBe("flight/encoded"); return flight; } } as never);
+  h.deps.runtime.snapshot = () => { throw Error("must not snapshot"); };
+  const result = await requestRouter(h, "GET", "/v1/flights/flight%2Fencoded");
+  expect(result.response.status).toBe(200); expect(result.body).toEqual({ flight });
+  h.deps.readFlight = async () => undefined;
+  expect((await requestRouter(h, "GET", "/v1/flights/missing")).response.status).toBe(404);
+  h.deps.readFlight = async () => { throw Error("storage unavailable"); };
+  expect((await requestRouter(h, "GET", "/v1/flights/unavailable")).response.status).toBe(503);
+});
+
+test("exact message reads do not snapshot and preserve durable bytes, absence and storage errors", async () => {
+  const message = { id: "message/encoded", conversationId: "conversation", actorId: "operator", class: "human", body: "x".repeat(65536), metadata: { clientMessageId: "client" }, createdAt: 1 };
+  const h = createHarness({ readMessage: async (id: string) => { expect(id).toBe("message/encoded"); return message; } } as never);
+  h.deps.runtime.snapshot = () => { throw Error("must not snapshot"); };
+  const result = await requestRouter(h, "GET", "/v1/messages/message%2Fencoded");
+  expect(result.response.status).toBe(200); expect(result.body).toEqual({ message });
+  h.deps.readMessage = async () => undefined;
+  expect((await requestRouter(h, "GET", "/v1/messages/absent")).response.status).toBe(404);
+  h.deps.readMessage = async () => { throw Error("storage unavailable"); };
+  expect((await requestRouter(h, "GET", "/v1/messages/unavailable")).response.status).toBe(503);
+});

@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mesh-bridge-credential.ts",
+  "symbol": "node:child_process",
+  "category": "imperative",
+  "reason": "argv-only local security keychain lookup with a five-second SIGKILL timeout; execFile callback settles after child exit; no shell",
+  "owner": "runtime"
+}

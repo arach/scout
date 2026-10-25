@@ -156,6 +156,7 @@ import {
   RelayAgentSessionReaper,
 } from "./broker-relay-agent-reaper.js";
 import { reconcileRelayAgentProcessLeases } from "./relay-agent-process-leases.js";
+import { countWorkingLocalAgents, HostKeepAwake, hostKeepAwakeEnabled, hostKeepAwakeGraceMs } from "./host-keep-awake.js";
 import { touchBrokerRuntimeHeartbeat } from "./relay-agent-watchdog.js";
 import { tmuxSessionsProbe } from "./system-probes/index.js";
 import {
@@ -201,7 +202,6 @@ import {
   resolveBrokerUrl,
 } from "./broker-process-manager.js";
 import {
-  readMobilePairingMeshEntrypoint,
   resolveMeshRendezvousPublishConfig,
   startMeshRendezvousPublisher,
   type MeshRendezvousPublisher,
@@ -1210,11 +1210,30 @@ const presenceService = new BrokerPresenceService({
 });
 setPresenceSnapshotSource(() => presenceService.snapshotEvents());
 
+const hostKeepAwake = hostKeepAwakeEnabled()
+  ? new HostKeepAwake({
+    graceMs: hostKeepAwakeGraceMs(),
+    log: (message) => console.log(`[openscout-runtime] ${message}`),
+  })
+  : null;
+
 function samplePresenceSafely(): void {
   try {
     presenceService.sample();
   } catch (error) {
     console.warn("[openscout-runtime] presence sample failed:", error);
+  }
+  if (!hostKeepAwake || shuttingDown) return;
+  try {
+    const now = Date.now();
+    hostKeepAwake.update(countWorkingLocalAgents(
+      presenceService.snapshot(now).beats,
+      runtime.snapshot().endpoints,
+      nodeId,
+      now,
+    ));
+  } catch (error) {
+    console.warn("[openscout-runtime] keep-awake update failed:", error);
   }
 }
 
@@ -1358,23 +1377,6 @@ function localNodeWithBindState(node: NodeDefinition, state: MeshBindState): Nod
     advertiseScope: state.scope,
     brokerUrl: state.brokerUrl,
     meshEntrypoints: [...httpEntrypoints, ...otherEntrypoints],
-    lastSeenAt: Date.now(),
-  };
-}
-
-function currentRendezvousNode(): NodeDefinition {
-  const node = currentLocalNode();
-  const mobilePairingEntrypoint = readMobilePairingMeshEntrypoint();
-  if (!mobilePairingEntrypoint) {
-    return node;
-  }
-
-  return {
-    ...node,
-    meshEntrypoints: [
-      ...(node.meshEntrypoints ?? []).filter((entrypoint) => entrypoint.kind !== "mobile_pairing"),
-      mobilePairingEntrypoint,
-    ],
     lastSeenAt: Date.now(),
   };
 }
@@ -3167,6 +3169,10 @@ const routeRequest = createBrokerHttpRouter({
   },
   requestReceipts,
   deliveryReceiptsOwnedByService: true,
+  readFlight: async id => runtime.flight(id)
+    ?? (sqliteDisabled ? historicalReader.read<FlightRecord>("flight", id) : (await projection.readFlights([id])).get(id)),
+  readMessage: async id => await runtime.readMessage(id)
+    ?? (sqliteDisabled ? historicalReader.read<MessageRecord>("message", id) : (await projection.readMessages([id])).get(id)),
   readHistoricalInvocationSnapshot: id => projection.readInvocationSnapshot(id),
   historyQueries: { read: (kind, ids) => projection.readHistoricalRecords(kind, ids),
     page: options => projection.pageHistoricalRecords(options) },
@@ -3609,7 +3615,7 @@ try {
   });
   const meshRendezvousConfig = meshInstanceRefusal ? undefined : resolveMeshRendezvousPublishConfig();
   if (meshRendezvousConfig) {
-    meshRendezvousPublisher = startMeshRendezvousPublisher(currentRendezvousNode, {
+    meshRendezvousPublisher = startMeshRendezvousPublisher(currentLocalNode, {
       config: meshRendezvousConfig,
       logger: console,
     });
@@ -3891,6 +3897,7 @@ async function shutdownBroker(exitCode = 0): Promise<void> {
     return;
   }
   shuttingDown = true;
+  hostKeepAwake?.stop();
   capabilityMatrixService.stop();
   tailscaleListenerGuard.stop();
   storageMaintenance.stop();

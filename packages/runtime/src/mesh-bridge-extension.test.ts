@@ -24,6 +24,12 @@ test('artifact bytes and config contents change reconciliation identity without 
   const path=meshBridgeConfigPath(support),time=statSync(path).mtime;writeFileSync(path,JSON.stringify({relayUrl:'https://other.example.invalid'}));utimesSync(path,time,time);const b=desired();expect(b.configDigest).not.toBe(a.configDigest);expect(meshBridgeLaunchKey(b,second)).not.toBe(meshBridgeLaunchKey(a,second));
   expect(meshBridgeLaunchKey({...b,configMtimeMs:b.configMtimeMs+1},second)).not.toBe(meshBridgeLaunchKey(b,second));
 });
+test('launch uses the shared credential policy, including hidden invalid fields',()=>{
+  for(const fields of [{token:'with space'},{token:'a'.repeat(8193)},{tokenKeychainService:'bad service'},{tokenFile:'/tmp/unrelated-private-key'},{tokenFile:''},{relayUrl:'http://issuer.example.test'}]){
+    const path=config({relayUrl:'https://relay.example.invalid',token:'fixture-secret',...fields});
+    expect(()=>writeMeshBridgeLaunchConfig({supportDirectory:support,configPath:path,configDigest:desired().configDigest,brokerUrl:'http://127.0.0.1:1',parentPid:process.pid,eventsEnabled:false})).toThrow();
+  }
+});
 test('launch descriptor projects fixed paths and credential refs, never node keys or ambient secrets',async()=>{
   const path=config();const d=desired();const keyFile=join(root,'admin-key');writeFileSync(keyFile,'a'.repeat(64),{mode:0o600});
   const target=writeMeshBridgeLaunchConfig({supportDirectory:support,configPath:path,configDigest:d.configDigest,brokerUrl:'http://127.0.0.1:4800',parentPid:process.pid,eventsEnabled:true,localAdmin:{keyFile,destinationKeyId:'b'.repeat(64)}});

@@ -1,3 +1,4 @@
+import "./bun-bootstrap.js";
 import { parentPort, workerData } from "node:worker_threads";
 import { FileBackedBrokerJournal, type BrokerJournalReplayBoundary } from "./broker-journal.js";
 import { RecoverableSQLiteProjection, type SQLiteProjectionJournal } from "./sqlite-projection.js";

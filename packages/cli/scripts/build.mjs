@@ -20,15 +20,11 @@ import { stageScoutd } from "./stage-scoutd.mjs";
 import { bundleRuntimeEntrypoints } from "./runtime-entrypoints.mjs";
 
 import {
-  buildControlPlaneClientAndCopy,
-  bundleScoutWebServerBun,
-  bundleScoutControlPlaneWebServerBun,
-  bundleScoutTerminalRelayNode,
   bundleScoutKnowledgeIndexChildBun,
   getOpenScoutRepoRoot,
   REFLECT_METADATA_BANNER,
   verifyBundleStaticChecks,
-} from "../../../scripts/bundle-scout-web.mjs";
+} from "../../../scripts/bundle-core.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const packageDirectory = resolve(scriptDirectory, "..");
@@ -43,13 +39,9 @@ const nodeOutputFile = resolve(nodeOutputDirectory, "main.mjs");
 const statuslineOutput = resolve(outputDirectory, "statusline.mjs");
 const updateHelperEntry = resolve(packageDirectory, "src/update-helper.ts");
 const updateHelperOutput = resolve(outputDirectory, "update-helper.mjs");
-const webServerOutput = resolve(outputDirectory, "scout-web-server.mjs");
-const controlPlaneWebOutput = resolve(outputDirectory, "scout-control-plane-web.mjs");
 const knowledgeIndexChildOutput = resolve(outputDirectory, "knowledge-index-child.mjs");
-const terminalRelayOutput = resolve(outputDirectory, "openscout-terminal-relay.mjs");
 const pairingRuntimeControllerOutput = resolve(outputDirectory, "pairing-runtime-controller.mjs");
 const runtimeOutputDirectory = resolve(outputDirectory, "runtime");
-const clientDir = resolve(outputDirectory, "client");
 const buildManifestOutput = resolve(outputDirectory, "build-manifest.json");
 
 function gitOutput(args) {
@@ -102,9 +94,17 @@ const scoutdReleaseBinary = resolve(repoRoot, "target", "release", "scoutd");
 const scoutdPackagedBinary = resolve(packageDirectory, "bin", "scoutd");
 const scoutdSignScript = resolve(repoRoot, "scripts", "sign-scoutd.sh");
 
+// Clean the complete output tree: a reused checkout must not repack stale app files.
+rmSync(outputDirectory, { recursive: true, force: true });
 mkdirSync(outputDirectory, { recursive: true });
 stageExtensionChannel(outputDirectory, true);
 rmSync(buildManifestOutput, { force: true });
+
+// The Node-targeted CLI resolves the pairing package's closed dist exports.
+const pairingBuild = spawnSync("bun", ["run", "--cwd", resolve(repoRoot, "packages/pairing"), "build"], {
+  cwd: repoRoot, stdio: "inherit",
+});
+if ((pairingBuild.status ?? 1) !== 0) process.exit(pairingBuild.status ?? 1);
 
 const chatResult = spawnSync("bun", ["build", resolve(packageDirectory, "src/chat-main.ts"), "--target=node", "--format=esm", "--outfile", resolve(outputDirectory, "chat.mjs")], { cwd: packageDirectory, stdio: "inherit" });
 if ((chatResult.status ?? 1) !== 0) process.exit(chatResult.status ?? 1);
@@ -152,28 +152,12 @@ if ((nodeResult.status ?? 1) !== 0) {
   process.exit(nodeResult.status ?? 1);
 }
 
-if (!bundleScoutTerminalRelayNode(repoRoot, terminalRelayOutput)) {
-  process.exit(1);
-}
-
-// The control-plane web bundle boot smoke test initializes enough server
-// wiring to resolve the broker service helper. Package scoutd before that
-// smoke test so dev and release builds exercise the same packaged binary path.
 if (!buildAndPackageScoutd()) {
   process.exit(1);
 }
 
-if (!bundleScoutControlPlaneWebServerBun(repoRoot, controlPlaneWebOutput)) {
-  process.exit(1);
-}
-
-// The web server resolves this child beside its installed bundle. Building the
-// standalone web package does not put the child in the published CLI's dist.
+// Package the standalone session-indexing worker beside the CLI.
 if (!bundleScoutKnowledgeIndexChildBun(repoRoot, knowledgeIndexChildOutput)) {
-  process.exit(1);
-}
-
-if (!bundleScoutWebServerBun(repoRoot, webServerOutput)) {
   process.exit(1);
 }
 
@@ -319,7 +303,7 @@ function buildAndPackageScoutd() {
   return true;
 }
 
-const pairingRuntimeControllerEntry = resolve(repoRoot, "packages", "web", "server", "pairing-runtime-controller.ts");
+const pairingRuntimeControllerEntry = resolve(repoRoot, "packages", "pairing", "src", "pairing-runtime-controller.ts");
 const pairingRuntimeControllerResult = spawnSync(
   "bun",
   ["build", pairingRuntimeControllerEntry, "--target=bun", "--format=esm", "--outfile", pairingRuntimeControllerOutput, REFLECT_METADATA_BANNER],
@@ -328,10 +312,6 @@ const pairingRuntimeControllerResult = spawnSync(
 
 if ((pairingRuntimeControllerResult.status ?? 1) !== 0) {
   process.exit(pairingRuntimeControllerResult.status ?? 1);
-}
-
-if (!buildControlPlaneClientAndCopy(repoRoot, clientDir)) {
-  process.exit(1);
 }
 
 // bun names the entry output after the source file (main.js); rename to main.mjs
@@ -368,7 +348,7 @@ normalizeBunExecutable(outputFile);
 normalizeBunExecutable(statuslineOutput);
 normalizeNodeExecutable(nodeOutputFile);
 
-for (const built of [outputFile, statuslineOutput, nodeOutputFile, pairingRuntimeControllerOutput, terminalRelayOutput]) {
+for (const built of [outputFile, statuslineOutput, nodeOutputFile, pairingRuntimeControllerOutput]) {
   if (!verifyBundleStaticChecks(built)) {
     process.exit(1);
   }

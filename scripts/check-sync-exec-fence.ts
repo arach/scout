@@ -38,9 +38,8 @@ const ROOT = process.cwd();
 const ALLOWLIST_ROOT = "scripts/sync-exec-allowlist";
 const SCAN_ROOTS = ["packages", "apps"];
 const PHASE_B_ROOTS = [
-  "packages/web/server",
+  "packages/pairing/src",
   "packages/runtime/src",
-  "apps/desktop/src/core",
   "packages/cli/src/lib/core",
   "packages/cli/src/mcp",
 ];

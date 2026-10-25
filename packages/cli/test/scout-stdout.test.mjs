@@ -9,7 +9,7 @@ import { isolatedEnvironment, packageDirectory, temporaryDirectory } from "./hel
 const fixture = temporaryDirectory("scout-stdout-");
 mkdirSync(join(fixture, "bin"));
 mkdirSync(join(fixture, "dist", "node"), { recursive: true });
-for (const name of ["scout.mjs", "lifecycle-preflight.mjs"]) {
+for (const name of ["scout.mjs", "lifecycle-preflight.mjs", "bun-preflight.mjs"]) {
   copyFileSync(join(packageDirectory, "bin", name), join(fixture, "bin", name));
 }
 writeFileSync(join(fixture, "package.json"), '{"type":"module","version":"0.0.0"}');

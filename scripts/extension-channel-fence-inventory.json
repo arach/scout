@@ -225,6 +225,388 @@
           "reason": "New child-only regression fixture forces GC during the legacy synchronous native-call negative control; production installation does not use it."
         }
       ]
+    },
+    {
+      "id": "pr-134-host-keep-awake-and-bridge-credential",
+      "sourceHead": "6c19d6c10c2e93192a5b7b4296bbf10531a55fb8",
+      "reason": "PR #134 adds exactly two node:child_process pairs: the process-owned macOS caffeinate hold and bounded argv-only bridge keychain lookup. The delta from 6c19d6c10c2e93192a5b7b4296bbf10531a55fb8 to d07bd390bc195042493359637c2d69b6fc2bf65a changes no other policy entry; nothing is retired or edited.",
+      "fromCount": 174,
+      "toCount": 176,
+      "retired": [],
+      "added": [
+        {
+          "path": "packages/runtime/src/host-keep-awake.ts",
+          "symbol": "node:child_process",
+          "policySha256": "06f74b7439802af40e8eba323dadfca13a8fb4d345fc310dd1b7fcd2e04583aa",
+          "reason": "PR #134 owns a fixed /usr/bin/caffeinate -i -w runtime-PID hold, released on runtime exit or explicit shutdown/grace expiry; argv-only spawning, no shell."
+        },
+        {
+          "path": "packages/runtime/src/mesh-bridge-credential.ts",
+          "symbol": "node:child_process",
+          "policySha256": "d8ea676e13063f4185084b8ce0448b01ed3a7fbf7c3ff4f1875ea0cbc5b2657e",
+          "reason": "PR #134 performs an argv-only local security keychain lookup with a five-second SIGKILL timeout and child-exit settlement; no shell. Credential validation and issuer binding do not change this policy."
+        }
+      ]
+    },
+    {
+      "id": "pr-139-watch-retention-heap-probe",
+      "sourceHead": "8d0240e061d23437fca6dcef5cabfa5bf46b982a",
+      "reason": "PR #139 adds exactly one test-only Bun.spawn pair for the bounded watcher retained-heap probe. No other policy entry is added, retired or edited.",
+      "fromCount": 176,
+      "toCount": 177,
+      "retired": [],
+      "added": [
+        {
+          "path": "packages/cli/src/lib/core/broker/watch-retention.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "7770b94f9d1ae62172a7aae8bd1e6d51964f5b24fd042bec61eb925a97da04bf",
+          "reason": "PR #139 isolates the synthetic watcher heap probe in a scratch HOME, with a 15-second SIGKILL timeout and child-exit settlement; no production spawning allowance."
+        }
+      ]
+    },
+    {
+      "id": "core-pairing-package-moves",
+      "sourceHead": "fca6f26289225b399050b9662a7e2a5ef15774a0",
+      "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability.",
+      "fromCount": 177,
+      "toCount": 176,
+      "retired": [
+        {
+          "path": "apps/desktop/src/core/pairing/pairing-runtime-controller.ts",
+          "symbol": "node:child_process",
+          "policySha256": "c1246e6c2f4f2b67c2a396dcbb3e4718cce818a6cad5746c1cceec9b09a93d47",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "apps/desktop/src/core/pairing/runtime/relay-runtime.test.ts",
+          "symbol": "node:child_process",
+          "policySha256": "6dc2d503ce401e8119ab2a1e120d2f38904785faa72094b0f8e11cef8a9aa28b",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "apps/desktop/src/core/pairing/runtime/relay-runtime.test.ts",
+          "symbol": "spawnSync",
+          "policySha256": "3a854f46be1ed76c3a7074599766235c2d9a42bc6e3f1655ede63796a67876a2",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/core/broker/service.ts",
+          "symbol": "node:child_process",
+          "policySha256": "c17711c79cd52555bc8b0cbd4bc219ab5e2c7f4779d9fd35e7582e2637b79e1a",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/core/pairing/pairing-runtime-controller.ts",
+          "symbol": "node:child_process",
+          "policySha256": "0d801f67c88ff098826df32baef0f63122bfc816eb96c09f01b5dfb66552c1f5",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/pairing-bridge-client.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "fe1ab873de95de1361658cf9713115656d02e55f003666476286816c4f163cb7",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/pairing-pair-requests.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "1fed2b3173235ddb0fba1e81147dd33497677929f157890bd59467a0fc08be43",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/pairing.ts",
+          "symbol": "node:child_process",
+          "policySha256": "bdb759ebf1f6c4daedfa948a691330ab9b2f357d761cb50cabc14c8c064a4368",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/terminal-hosts/herdr.ts",
+          "symbol": "node:child_process",
+          "policySha256": "9415a0afc0dffebc58433ab7226d4c9532faa983c0e6cc54aeefdf1474bca8a9",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        }
+      ],
+      "added": [
+        {
+          "path": "packages/pairing/src/core/broker/service.ts",
+          "symbol": "node:child_process",
+          "policySha256": "90fe9f58e9af476ce96e0655fb7ad1a04a054ec8106744b37b14a6ba1ef543f4",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/core/pairing/pairing-runtime-controller.ts",
+          "symbol": "node:child_process",
+          "policySha256": "8318b4006ea960ef5697536cdb97231c29c3621d46c888bd1a746e5afe3d2ad1",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/core/pairing/runtime/relay-runtime.test.ts",
+          "symbol": "node:child_process",
+          "policySha256": "00b9c00dc8be552e509a10ded52e1c77f8ac8251013b13c5e3158d4f03858011",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/core/pairing/runtime/relay-runtime.test.ts",
+          "symbol": "spawnSync",
+          "policySha256": "2a54e00b5d07b5888b61f943db0085f7df63546e5b114a41d2bbf0f51c70bb5d",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/pairing-bridge-client.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "7191e3e9a911eb4114aa4e6a517a6a8ecf89cf324cfdcbf5a5af56733871d577",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/pairing.ts",
+          "symbol": "node:child_process",
+          "policySha256": "c4b2a5f3c95cc517e85b9a0c2c4453e47adb481704fa9152e2ebbdf66409e588",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/pairing/src/terminal-hosts/herdr.ts",
+          "symbol": "node:child_process",
+          "policySha256": "fc3a9bfcca6accfb778777d9e064d7863fbaed3d229867f7c30233e1834a06fd",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        },
+        {
+          "path": "packages/web/server/pairing-pair-requests.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "01d573415874451d0268f59d0148702f168c147e7b4dc5d6b8366b963ae542c2",
+          "reason": "Move existing host pairing execution policies to their core package; collapse the duplicate controller policy without widening capability."
+        }
+      ]
+    },
+    {
+      "id": "core-only-app-tree-retirements",
+      "sourceHead": "bd5eee3b053e249f8e699a0ec3a72bd5a2e24da6",
+      "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes. The inherited host-keep-awake.ts and mesh-bridge-credential.ts policies stay in retained packages/runtime source; neither is retired with app trees. The inherited PR #139 watch-retention.test.ts Bun.spawn heap-probe policy stays in retained packages/cli source; it is not retired with app trees.",
+      "fromCount": 176,
+      "toCount": 147,
+      "retired": [
+        {
+          "path": "apps/desktop/src/app/desktop/shell-utils.ts",
+          "symbol": "execFileSync",
+          "policySha256": "13427e0aba629e49f6ab3f5723fb80dc77136e9ca75f64bbb262b1384c669786",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "apps/desktop/src/app/host/agent-session.ts",
+          "symbol": "execFileSync",
+          "policySha256": "6df35f7d2ddc301704ab6dff534c54a1bc2da55989ee265cac5ffd29a536022e",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "apps/desktop/src/app/host/diagnostics.ts",
+          "symbol": "execFileSync",
+          "policySha256": "a50ebf655c844053b635dfe3b3447aa6d2770caf2e527a7945e0fc2ab69b8de8",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "apps/desktop/src/core/setup/local-edge-dependencies.ts",
+          "symbol": "node:child_process",
+          "policySha256": "82f9c6dcc08193a755dc65c929d753ac9e26fb77954ea7636ec15e6b5289b1c9",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "apps/desktop/src/core/setup/local-edge-dependencies.ts",
+          "symbol": "spawnSync",
+          "policySha256": "063ea3412f9fcf6cafb54ab0c5a2d64f65e37ccf23f807098755b381675435e9",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "apps/desktop/src/core/setup/terminal-pty-dependencies.ts",
+          "symbol": "node:child_process",
+          "policySha256": "57f4fad883356a674d6a7013a61616fd27ce57c1341fe5055f3b51cc86217b90",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "apps/desktop/src/core/setup/terminal-pty-dependencies.ts",
+          "symbol": "spawnSync",
+          "policySha256": "46bc6a82c1463422f15b28196ec87fc317e4dfb223e28feb25d35746da10f01c",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/core/attention/herdr-continuation-host.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "5e84ba570c1ce027dcb7f2eb50b3ed759dc78ba14277d5309cd8cd1787aedf4d",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/core/repo-identity.test.ts",
+          "symbol": "execFileSync",
+          "policySha256": "f05daeda2708dd3d8de6e7786852df282f1208e5101cb1871d7f0ad95ad8837d",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/core/repo-identity.test.ts",
+          "symbol": "node:child_process",
+          "policySha256": "19bffcb84f8070016a4be4c0e44b82eb944e0b79544415e0147e260b4195c937",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/harness-completion.ts",
+          "symbol": "node:child_process",
+          "policySha256": "15e3f92abd99c9639044e0e5dad8a7622ab6be798e242e21eaffb11b8a932aae",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/local-terminal-open.ts",
+          "symbol": "node:child_process",
+          "policySha256": "e26e9551edfd0138f96b6a6b65d1c8bfde0389b0adf862d24d862a5817002558",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/managed-terminal-relay.ts",
+          "symbol": "node:child_process",
+          "policySha256": "e3abbd54adcfe4417e3e5c939972f6974b0c336ef433ab9ed5eb99eaa586d8ed",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/pairing-lan-beacon.ts",
+          "symbol": "node:child_process",
+          "policySha256": "213bef8c55aa167fc89940c73b9fd6e341664c71275b58bb6f6bbeea6beec7ce",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/pairing-pair-requests.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "01d573415874451d0268f59d0148702f168c147e7b4dc5d6b8366b963ae542c2",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/routes/knowledge.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "8d7e14e4d801b2e571a2f97c9006821dfff2b60b15abd48516a108c55c221d7e",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/routes/world.ts",
+          "symbol": "node:child_process",
+          "policySha256": "e1d2afd9ce2bb913084f0bfa4cde3b1be1ef8fecb0e6cdc9d5b8e945c35cc5f2",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/scoutbot-file-lookup.ts",
+          "symbol": "node:child_process",
+          "policySha256": "d3f9638ee66be50816f6eabfef52ec46b71c0787e890bb0488420f704e38f99e",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/scoutbot/process/dispatch.test.ts",
+          "symbol": "node:child_process",
+          "policySha256": "26b95590d7f54e3939575a2eea9a5c160eef771ade69102a166d97f2e2611a76",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/terminal-context.test.ts",
+          "symbol": "execFileSync",
+          "policySha256": "95a4609058406a638ca766d6a392f861bc9bc9ebdc75ef00e71a3e176d5f3b72",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/terminal-context.test.ts",
+          "symbol": "node:child_process",
+          "policySha256": "0df52f62f2da16b2e48ed02cc4afdaf15efe3dfadd1c65ce202ceb9ceb9a71f3",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/terminal-context.ts",
+          "symbol": "node:child_process",
+          "policySha256": "1f8986a85810d37c3bfd1902be09c735781e422d9e417fbd066dce81de56f77d",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/web-server-test-harness.ts",
+          "symbol": "execFileSync",
+          "policySha256": "b9b6f6198da1e95097c175ef358edff9540d8292a957b7f27d9cb23218f80285",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/web-server-test-harness.ts",
+          "symbol": "node:child_process",
+          "policySha256": "8a2ea98a78134bebe2b19ee353474d4abfc22cd4fae7f944446b01bd435e6243",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/work-materials.test.ts",
+          "symbol": "execFileSync",
+          "policySha256": "ccb4c54f851d0033a3969bc0f8a5b0e5069e7407094ed8739059119322718f70",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/work-materials.test.ts",
+          "symbol": "node:child_process",
+          "policySha256": "2677a2cd20384fd9500e34f2b7688a4e8973d735125d6cf572fdfcf08df0be2e",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/world-hosts.ts",
+          "symbol": "node:child_process",
+          "policySha256": "05c135a5604f42eb56c0e0fb9a09c14687aec5aa017c2e90cac8c32b3f2076da",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/world-live.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "476ab64c07e3e20c77e0c65d87e32f7b3d35408d32863e61a42984014bb2ec15",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/world-team.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "8807c354ca1ea20598e74e5c2da22d02a27f9b0fba6f28fbd5904e63e12a201e",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/server/world-week.ts",
+          "symbol": "node:child_process",
+          "policySha256": "15ca792601bc141b94339bc9499e0a2ef083cfde25911b0b52bbd131f048cccb",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/web/vite.config.ts",
+          "symbol": "execSync",
+          "policySha256": "fa29d9b3bca94a0f3a58af48f8731d5a3582713a87d1d5f0d33e8e234b869cf6",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        }
+      ],
+      "added": [
+        {
+          "path": "packages/pairing/src/pairing-lan-beacon.ts",
+          "symbol": "node:child_process",
+          "policySha256": "aa1fda364eff3b54e2d561c3558606ed608d1ac220056dc995eb33d1cf5f0d3e",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        },
+        {
+          "path": "packages/pairing/src/pairing-pair-requests.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "5e189fc01d14a727f159641b78b73ca507fd3511be2ec05c85111eeadf5b5c53",
+          "reason": "Retire app-only execution policies with their deleted trees and complete the remaining host pairing policy rehomes."
+        }
+      ]
+    },
+    {
+      "id": "pr-143-mcp-pending-notification-soak",
+      "sourceHead": "4311278ef75a719896932b497eea410b8c35a558",
+      "reason": "Account for the two owned MCP pending-notification soak/probe test subprocess policies; no production execution allowances change.",
+      "fromCount": 147,
+      "toCount": 149,
+      "retired": [],
+      "added": [
+        {
+          "path": "packages/cli/src/mcp/fixtures/pending-memory-probe.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "9c31eaacaf0cdf57224813ad1ca39510db85f614903aaf3a4e937a33c0a226df",
+          "reason": "owned MCP test child reads disk capacity and its own vmmap footprint; never a live server"
+        },
+        {
+          "path": "packages/cli/src/mcp/scout-mcp.pending-soak.test.ts",
+          "symbol": "Bun.spawn",
+          "policySha256": "8724f54d091db319cdf0c99c53151033a5c417db806194a2fb9728ed8c108387",
+          "reason": "opt-in test starts only its scrubbed owned test child and reads disk capacity"
+        }
+      ]
     }
   ]
 }

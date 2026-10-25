@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/lib/core/broker/watch-retention.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "probe-exec",
+  "reason": "runs an owned synthetic watcher heap fixture under a scratch HOME with a 15-second SIGKILL timeout and child-exit settlement; argv-only spawning, no shell",
+  "owner": "cli"
+}

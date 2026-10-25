@@ -42,7 +42,8 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=18",
+    "bun": ">=1.4.3"
   },
   "scripts": {
     "prebuild": "bun ../../scripts/generate-runtime-catalog.ts",

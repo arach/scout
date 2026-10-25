@@ -1,5 +1,10 @@
+import { createScoutCommandContext } from "./context.ts";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { DEFAULT_OPENSCOUT_MESH_RELAY_URL, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL } from "@openscout/protocol";
 import { expect, test } from "bun:test";
-import { doctorBrokerCheck, doctorNativeCheck, doctorWorkerCommand, renderDoctorAssessment, renderDoctorCheck, runDoctorCheck } from "./doctor-checks.ts";
+import { collectDoctorCheck, doctorBunReport, doctorMeshBridgeCheck, doctorBrokerCheck, doctorNativeCheck, doctorWorkerCommand, renderDoctorAssessment, renderDoctorCheck, runDoctorCheck } from "./doctor-checks.ts";
 import type { BrokerServiceStatus } from "@openscout/runtime/broker-process-manager";
 
 const input = { cwd: process.cwd(), env: process.env };
@@ -92,4 +97,90 @@ test("native connected timeout remains inconclusive, while observed failure and 
   expect(doctorNativeCheck(report).state).toBe("inconclusive");
   expect(doctorNativeCheck({ ...report, status: { ...report.status!, healthState: "degraded" } }).state).toBe("impaired");
   expect(doctorNativeCheck({ ...report, status: { ...report.status!, runtimeFreshness: { ...report.status!.runtimeFreshness!, state: "stale" } } }).state).toBe("impaired");
+});
+
+test("bridge doctor names dir and the rejected pair together without resolving or printing credentials", () => {
+  const support = mkdtempSync(join(tmpdir(), "doctor-bridge-"));
+  const config = join(support, "mcp-bridge.json");
+  try {
+    expect(doctorMeshBridgeCheck(support, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).state).toBe("working");
+    const original = JSON.stringify({ relayUrl: "https://issuer.example.test", dir: "/private/secret-directory",
+      token: "DO-NOT-PRINT", tokenKeychainService: "NeverResolveThisService", tokenFile: "/private/secret-file" });
+    writeFileSync(config, original);
+    const result = doctorMeshBridgeCheck(support, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL);
+    expect(result.state).toBe("impaired");
+    expect(renderDoctorCheck(result)).toBe(`FAIL mesh-bridge: Stored bridge config: unsupported dir field; relay/rendezvous pair outside issuer audience (relay=https://issuer.example.test; rendezvous=${new URL(DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).origin}).`);
+    expect(JSON.stringify(result)).not.toContain("DO-NOT-PRINT");
+    expect(JSON.stringify(result)).not.toContain("/private/");
+    expect(JSON.stringify(result)).not.toContain("NeverResolveThisService");
+    expect(readFileSync(config, "utf8")).toBe(original);
+    // The amended default pair is valid; a legacy dir still blocks it.
+    writeFileSync(config, JSON.stringify({ relayUrl: DEFAULT_OPENSCOUT_MESH_RELAY_URL, dir: "/legacy" }));
+    expect(doctorMeshBridgeCheck(support, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).detail).toBe("Stored bridge config: unsupported dir field.");
+    writeFileSync(config, JSON.stringify({ relayUrl: DEFAULT_OPENSCOUT_MESH_RELAY_URL }));
+    expect(doctorMeshBridgeCheck(support, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).state).toBe("working");
+    writeFileSync(config, "broken JSON");
+    expect(doctorMeshBridgeCheck(support, DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL).state).toBe("impaired");
+  } finally { rmSync(support, { recursive: true, force: true }); }
+});
+
+test("bridge doctor follows publisher env auth, anonymous mode and disable selection without secret resolution", async () => {
+  const support = mkdtempSync(join(tmpdir(), "doctor-selection-"));
+  const previous = process.env.OPENSCOUT_SUPPORT_DIRECTORY;
+  process.env.OPENSCOUT_SUPPORT_DIRECTORY = support;
+  const configPath = join(support, "mcp-bridge.json");
+  const original = JSON.stringify({ relayUrl: "https://issuer.example.test", token: "STORED-SECRET",
+    tokenKeychainService: "NeverResolveThisService", tokenFile: join(support, "mcp-bridge.token") });
+  const inspect = (env: NodeJS.ProcessEnv) => collectDoctorCheck("mesh-bridge", createScoutCommandContext({ env, cwd: support }));
+  try {
+    writeFileSync(configPath, original);
+    for (const auth of [
+      { OPENSCOUT_MESH_RENDEZVOUS_TOKEN: " ENV-TOKEN-SECRET " },
+      { OPENSCOUT_MESH_RENDEZVOUS_SESSION: " ENV-SESSION-SECRET " },
+      { OPENSCOUT_MESH_RENDEZVOUS_ALLOW_ANONYMOUS: "true" },
+    ]) {
+      const result = await inspect({ OPENSCOUT_MESH_RENDEZVOUS_URL: "http://other.example.test", ...auth });
+      expect(result.state).toBe("working");
+      expect(result.detail).toContain("host credential audience not checked");
+      expect(result.detail).not.toContain("outside issuer audience");
+      expect(JSON.stringify(result)).not.toMatch(/STORED-SECRET|ENV-TOKEN-SECRET|ENV-SESSION-SECRET|NeverResolveThisService/);
+      expect(readFileSync(configPath, "utf8")).toBe(original);
+    }
+    for (const disabled of ["false", "FALSE", " false ", "0", " 0 "]) {
+      const result = await inspect({ OPENSCOUT_MESH_RENDEZVOUS_URL: disabled, OPENSCOUT_MESH_RENDEZVOUS_TOKEN: "ENV-TOKEN-SECRET" });
+      expect(result.state).toBe("working");
+      expect(result.detail).toContain("Rendezvous publishing disabled.");
+      expect(result.detail).not.toContain("invalid relay/rendezvous");
+      expect(readFileSync(configPath, "utf8")).toBe(original);
+    }
+    // Off settings with no explicit URL also mean no publication; enabled settings select host auth.
+    expect((await inspect({})).detail).toContain("Rendezvous publishing disabled.");
+    writeFileSync(join(support, "settings.json"), JSON.stringify({ network: { openScoutNetwork: {
+      discoveryEnabled: true, rendezvousUrl: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
+    } } }));
+    expect((await inspect({})).detail).toContain("outside issuer audience");
+    expect((await inspect({ OPENSCOUT_MESH_RENDEZVOUS_URL: DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL,
+      OPENSCOUT_MESH_RENDEZVOUS_TOKEN: "  ", OPENSCOUT_MESH_RENDEZVOUS_SESSION: " " })).state).toBe("impaired");
+    // An env token bypasses only the host audience, not the core bridge's existing launch validation.
+    writeFileSync(configPath, JSON.stringify({ relayUrl: DEFAULT_OPENSCOUT_MESH_RELAY_URL, dir: "/legacy" }));
+    const legacy = await inspect({ OPENSCOUT_MESH_RENDEZVOUS_URL: "https://other.example.test", OPENSCOUT_MESH_RENDEZVOUS_TOKEN: "ENV-TOKEN-SECRET" });
+    expect(legacy.state).toBe("impaired");
+    expect(legacy.detail).toContain("unsupported dir field");
+    expect(legacy.detail).not.toContain("outside issuer audience");
+    const paused = await inspect({ OPENSCOUT_MESH_RENDEZVOUS_URL: "0" });
+    expect(paused.state).toBe("impaired");
+    expect(paused.detail).toContain("Rendezvous publishing disabled.");
+    expect(paused.detail).toContain("unsupported dir field");
+    expect(paused.detail).not.toContain("invalid relay/rendezvous");
+  } finally {
+    if (previous === undefined) delete process.env.OPENSCOUT_SUPPORT_DIRECTORY; else process.env.OPENSCOUT_SUPPORT_DIRECTORY = previous;
+    rmSync(support, { recursive: true, force: true });
+  }
+});
+
+test("doctor reports the executing Bun against the hard floor", () => {
+  expect(doctorBunReport("1.4.3")).toEqual({ version: "1.4.3", minimum: "1.4.3", supported: true, upgrade: "bun upgrade" });
+  expect(doctorBunReport("1.4.2").supported).toBe(false);
+  expect(doctorBunReport("1.3.14").supported).toBe(false);
+  expect(doctorBunReport("1.4.4").supported).toBe(true);
 });

@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@openscout/scout"><img alt="npm version" src="https://img.shields.io/npm/v/@openscout/scout?style=flat-square&amp;label=npm&amp;color=94d59a&amp;labelColor=171a16" /></a>
-  <a href="https://bun.sh"><img alt="Bun 1.3 or newer" src="https://img.shields.io/badge/runtime-Bun_%E2%89%A5_1.3-f7f4ea?style=flat-square&amp;labelColor=171a16&amp;logo=bun" /></a>
+  <a href="https://bun.sh"><img alt="Bun 1.4.3 or newer" src="https://img.shields.io/badge/runtime-Bun_%E2%89%A5_1.4.3-f7f4ea?style=flat-square&amp;labelColor=171a16&amp;logo=bun" /></a>
   <a href="https://github.com/oscout/scout/blob/main/LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-f7f4ea?style=flat-square&amp;labelColor=171a16" /></a>
   <a href="https://openscout.app"><img alt="OpenScout project homepage" src="https://img.shields.io/badge/project-openscout.app-dde6d8?style=flat-square&amp;labelColor=171a16" /></a>
 </p>
@@ -33,8 +33,9 @@ or the [discovery manifest](https://openscout.app/.well-known/scout.json).
 
 ## Start here
 
-Local agent coordination requires [Bun 1.3 or newer](https://bun.sh). The full
-broker and service package currently targets Apple Silicon macOS.
+Local agent coordination requires [Bun 1.4.3 or newer](https://bun.sh). The full
+runtime runs on Apple-silicon macOS and Linux. On Linux, run the foreground
+runtime under your process manager; see the [install guide](../../install.md).
 
 ```bash
 npm install -g @openscout/scout
@@ -272,21 +273,25 @@ Agent-card targets start fresh sessions.
 
 ```text
 Claude Code  ─┐
-Codex        ─┼── local Scout broker ── CLI · Web
+Codex        ─┼── local Scout runtime ── CLI · MCP · JSON
 Other agents ─┘   messages · work · routing
                          │
-                         └── optional surfaces: Rust TUI · macOS · iOS
+                         ├── core terminal interface: Rust TUI
+                         └── separate clients: Mac · iOS · Android · web
 ```
 
 `@openscout/scout` installs:
 
 - the `scout` command;
-- the bundled local broker and runtime;
-- the local web control surface opened by `scout server open`.
+- the bundled local runtime, harness adapters, and host-side phone pairing;
+- JSON output and the stdio MCP server.
 
-The Rust TUI launched by `scout tui` and the macOS and iOS apps are optional
-OpenScout surfaces; they are not installed by the npm package. They read and
-write the same coordination state when present.
+The Rust TUI launched by `scout tui` is part of the core. Its native binary is
+not installed by `npm install -g @openscout/scout`; the command resolves or
+downloads it separately. The Mac, iOS, Android, and web apps are separate clients
+built on the core; none ships in this package.
+`scout server` and `scout web` use a web client only when the apps layer supplies
+one. See the [source boundary](../../docs/public-source-boundary.md).
 
 ## CLI at a glance
 
@@ -447,9 +452,9 @@ scout ask --to <agent-from-scout-who> --prompt-file ./review-request.md
 scout send --channel triage --message-file ./status-update.md
 ```
 
-`scout server open` reuses or starts the bundled local web UI. `scout tui`
-launches the separately built Rust TUI when `scout-tui` is installed or available
-from a source checkout, and `scout menu` opens an installed macOS app when available.
+`scout server open` requires a separately supplied web client. `scout tui`
+launches the core Rust TUI. `scout menu` opens a separately installed macOS app
+when available; it does not install an app as part of the core.
 
 The legacy `scout monitor` console has been retired; use `scout tui` after
 installing the optional Rust TUI.

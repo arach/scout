@@ -1,7 +1,7 @@
 import { loadScoutCoreReport, resolveScoutCoreReportTarget } from "../../lib/core/setup/readiness.ts";
 import { loadHarnessCatalogSnapshot } from "@openscout/runtime/harness-catalog";
 import { DOCTOR_HELP } from "../../../bin/lifecycle-preflight.mjs";
-import { DOCTOR_CHECK_NAMES, runDoctorCheck, renderDoctorCheck, renderDoctorAssessment } from "../doctor-checks.ts";
+import { collectDoctorCheck, doctorBunReport, DOCTOR_CHECK_NAMES, runDoctorCheck, renderDoctorCheck, renderDoctorAssessment } from "../doctor-checks.ts";
 import type { ScoutCommandContext } from "../context.ts";
 import { defaultScoutContextDirectory } from "../context.ts";
 import { parseDoctorCommandOptions } from "../options.ts";
@@ -25,7 +25,7 @@ import { resolveBrokerControlUrl } from "@openscout/runtime/local-config";
 const DOCTOR_JSON_SCHEMA = "scout.doctor.core/v1" as const;
 
 function writeDoctorJsonLine(context: ScoutCommandContext, payload: Record<string, unknown>): void {
-  context.output.writeText(`${JSON.stringify({ schema: DOCTOR_JSON_SCHEMA, scope: "core", instance: doctorInstanceSummary(), ...payload })}\n`);
+  context.output.writeText(`${JSON.stringify({ schema: DOCTOR_JSON_SCHEMA, scope: "core", instance: doctorInstanceSummary(), bun: doctorBunReport(), ...payload })}\n`);
 }
 
 /** Which OpenScout instance (OPENSCOUT_INSTANCE / --instance) doctor is checking. */
@@ -50,6 +50,10 @@ export async function runDoctorCommand(context: ScoutCommandContext, args: strin
   }
   const options = parseDoctorCommandOptions(args, defaultScoutContextDirectory(context));
   const outputJson = context.output.mode === "json" || options.json;
+  if (!outputJson) {
+    const bun = doctorBunReport();
+    context.output.writeText(`${bun.supported ? "OK" : "FAIL"} Bun: ${bun.version ?? "not running"} (required >=${bun.minimum})${bun.supported ? "" : `; upgrade: ${bun.upgrade}`}`);
+  }
   if (!outputJson && !options.detail && !options.fix) {
     context.output.writeText("Scout doctor — checking core readiness (6s per check)…");
     context.output.writeText(renderDoctorInstanceLine());
@@ -103,6 +107,7 @@ export async function runDoctorCommand(context: ScoutCommandContext, args: strin
       context.output.writeText("  No projects discovered yet.\n");
     }
     context.output.writeText(renderScoutDoctorTailAfterStream(report));
+    context.output.writeText(renderDoctorCheck(await collectDoctorCheck("mesh-bridge", context)));
     const nativeSection = renderNativeScoutdDoctorSection(native);
     if (nativeSection) {
       context.output.writeText(nativeSection);
@@ -114,5 +119,5 @@ export async function runDoctorCommand(context: ScoutCommandContext, args: strin
   const catalog = await loadHarnessCatalogSnapshot({ localOnly: true });
   const report = await loadScoutCoreReport({ env: context.env, catalog });
   const native = options.fix ? await loadNativeScoutdDoctorReport({ fix: true, yes: options.yes, env: context.env }) : null;
-  writeDoctorJsonLine(context, { phase: "complete", report, ...(native ? { nativeDaemon: native } : {}) });
+  writeDoctorJsonLine(context, { phase: "complete", report, meshBridge: await collectDoctorCheck("mesh-bridge", context), ...(native ? { nativeDaemon: native } : {}) });
 }

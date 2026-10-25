@@ -1,7 +1,0 @@
-{
-  "path": "apps/desktop/src/core/setup/local-edge-dependencies.ts",
-  "symbol": "spawnSync",
-  "category": "boot",
-  "reason": "setup dependency probe runs during explicit setup/doctor flow",
-  "owner": "desktop"
-}

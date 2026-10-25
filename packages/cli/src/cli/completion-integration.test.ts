@@ -101,7 +101,7 @@ test("packaged Node launcher reaches data-only help and completion", async () =>
     if (!await runScoutDiscovery(process.argv.slice(2), 'test')) throw Error('not a discovery command');`);
   const built = await Bun.build({ entrypoints: [fixture], target: "node", conditions: ["bun"], format: "esm", outdir: dist, naming: "main.mjs" });
   expect(built.success).toBe(true);
-  for (const name of ["scout.mjs", "lifecycle-preflight.mjs"]) copyFileSync(resolve(import.meta.dir, "../../bin", name), join(packaged, "bin", name));
+  for (const name of ["scout.mjs", "lifecycle-preflight.mjs", "bun-preflight.mjs"]) copyFileSync(resolve(import.meta.dir, "../../bin", name), join(packaged, "bin", name));
   writeFileSync(join(packaged, "package.json"), JSON.stringify({ version: "test" }));
   const artifact = join(extensions, "packaged"); mkdirSync(artifact);
   writeFileSync(join(artifact, "extension.json"), JSON.stringify({ api: 1, command: "run", docs: "README.md", completion: ["hello"] }));

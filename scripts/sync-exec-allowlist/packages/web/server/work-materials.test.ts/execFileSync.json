@@ -1,7 +1,0 @@
-{
-  "path": "packages/web/server/work-materials.test.ts",
-  "symbol": "execFileSync",
-  "category": "test",
-  "reason": "git fixture setup",
-  "owner": "tests"
-}

@@ -51,3 +51,33 @@ migration are separate work.
 `{kind:"oauth"|"agent_token", id, ownerKey, node, agentId, userId?}`. The full authenticated principal must match. This is not an account-wide or
 blanket remote permission. The feedback collection API uses these identities to gate remote
 collection, and rechecks consent before uploading diagnostic reports.
+
+## Host credential audience
+
+Automatic rendezvous publication uses the bridge's approved host credential.
+Each publication revalidates the stored bridge config and binds the credential
+to its relay origin. HTTPS is required; HTTP is allowed only for exact-origin
+loopback fixtures. Redirects are refused.
+
+The credential audience contains the relay origin itself. Only the default
+relay also permits the default rendezvous origin. Both defaults are exported
+by `packages/protocol` as `DEFAULT_OPENSCOUT_MESH_RELAY_URL` and
+`DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL`; the bridge CLI uses the same relay
+default. Custom split-host pairs and domain-wide matches are not permitted.
+Explicit environment token and session routing is unchanged.
+
+`scout doctor` checks the stored config without resolving its credentials.
+It names an unsupported legacy `dir` field and a relay/rendezvous pair outside
+the audience in one diagnostic when both are present. Remove `dir` from the
+stored config, preserving other fields. The default pair itself is valid;
+a default-pair config with legacy `dir` is still refused until that field is
+removed. Doctor reports problems but does not migrate the config.
+
+Doctor uses the publisher's selection rules. It checks the host credential's
+relay/rendezvous audience only when that credential would be selected. An
+environment token/session or explicit anonymous mode does not require that
+pair to match. A disabled publisher (including `false` or `0` environment URL sentinels)
+is reported as publishing disabled, not an invalid URL. The stored bridge
+launch config is still validated in these modes; this does not hide an
+unsupported `dir` or relax the bridge's own launch policy. Doctor never
+resolves the credential source returned by the publisher's config resolver.

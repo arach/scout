@@ -76,9 +76,9 @@ loaders ignore these fields and do not provide the new help or completion.
 
 The command registry can reserve a verb for an extension. A reserved verb
 never becomes an implicit ask or a `scout-<verb>` executable from PATH. Its
-registration remains reserved after removal. The six app verbs (`app`, `menu`,
-`server`, `web`, `pair` and `install`) remain built-ins until their separate
-cutover changes their registrations.
+registration remains reserved after removal. `scout pair` is a core command,
+not an app extension. A command that connects to an app does not make that app
+part of the core. See the [source boundary](./public-source-boundary.md).
 
 If a reserved extension is unavailable, Scout exits with **69**
 (`EX_UNAVAILABLE`). With `--json`, Scout writes exactly one JSON object and a

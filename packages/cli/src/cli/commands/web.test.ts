@@ -214,11 +214,11 @@ describe("scout web", () => {
     await expect(runWebCommand(unpublished.context, ["install"], unpublished.deps)).rejects.toThrow(`isn't published for Scout ${VERSION}`);
   });
 
-  test("status reports what is served; uninstall goes back to basic", async () => {
+  test("status reports what is served; uninstall leaves no bundled app", async () => {
     const tarball = await packClient(VERSION);
     const run = harness({ tarball, env: { SCOUT_DIST_KEY: KEY } });
     await runWebCommand(run.context, ["status"], run.deps);
-    expect(run.lines.join("\n")).toContain("serves     the basic web app");
+    expect(run.lines.join("\n")).toContain("serves     no bundled web app");
 
     await runWebCommand(run.context, ["install", "--no-restart"], run.deps);
     run.lines.length = 0;
@@ -239,7 +239,7 @@ describe("scout web", () => {
     const run = harness({ json: true });
     await runWebCommand(run.context, ["status"], run.deps);
     expect(JSON.parse(run.lines[0]!)).toMatchObject({
-      serves: "basic", reason: "not-installed", installed: null, installedVersions: [],
+      serves: "none", reason: "not-installed", installed: null, installedVersions: [],
       nextSteps: ["Create a download key at https://console.openscout.app/#downloads", "scout web login", "scout web install"],
     });
     expect(run.requests).toHaveLength(0);
@@ -254,7 +254,7 @@ describe("scout web", () => {
     const current = harness({ tarball: await packClient(VERSION), json: true });
     await runWebCommand(current.context, ["status"], current.deps);
     expect(JSON.parse(current.lines[0]!)).toMatchObject({
-      version: VERSION, serves: "basic", reason: "version-mismatch", installed: null,
+      version: VERSION, serves: "none", reason: "version-mismatch", installed: null,
       installedVersions: [previousVersion], nextSteps: ["scout web install"],
     });
     expect(current.lines[0]).not.toContain(KEY);
@@ -313,7 +313,7 @@ describe("scout web", () => {
     await runWebCommand(run.context, ["status"], run.deps);
     const status = JSON.parse(run.lines[0]!);
     expect(status).toMatchObject({
-      serves: "basic", reason: "basic-forced", installed: join(support, "web", "full", VERSION),
+      serves: "none", reason: "basic-forced", installed: join(support, "web", "full", VERSION),
       installedVersions: [VERSION],
     });
     expect(status.nextSteps[0]).toContain("remove OPENSCOUT_WEB_CLIENT_PROFILE=basic");
@@ -362,7 +362,7 @@ describe("scout web", () => {
     expect(resolveInstalledWebFullClient(previousVersion, { env: {}, supportDirectory: support })).not.toBeNull();
     await runWebCommand(current.context, ["status"], current.deps);
     expect(JSON.parse(current.lines[0]!)).toMatchObject({
-      serves: "basic", reason: "version-mismatch", installedVersions: [previousVersion], nextSteps: ["scout web install"],
+      serves: "none", reason: "version-mismatch", installedVersions: [previousVersion], nextSteps: ["scout web install"],
     });
   });
 

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readinessBootstrapImports, readinessWarmupExit, warmReadinessFixture } from "./test-fixtures/warm-readiness-fixture.ts";
 
-const entry = fileURLToPath(new URL("../../../../apps/desktop/bin/scout.ts", import.meta.url));
+const entry = fileURLToPath(new URL("../main.ts", import.meta.url));
 
 // File creation and import-only warming are fixture setup, not the behavior
 // under test. Each argv still invokes the real entry once with the throwing
@@ -119,7 +119,7 @@ describe("streamed doctor fixture", () => {
     expect(stdout).toContain("FAIL probes: Probe observation failed.");
     expect(stdout).toContain("? native: No result within 1s");
     expect(stdout.indexOf("OK broker:")).toBeLessThan(stdout.indexOf("? native:"));
-    expect(stdout).toContain("2 working, 1 impaired, 1 inconclusive");
+    expect(stdout).toContain("3 working, 1 impaired, 1 inconclusive");
     expect(stdout).toContain("Next: scout doctor --detail");
     expect(stdout.split("\n").length).toBeLessThan(17);
     expect(stdout).not.toContain("Discovering projects");
