@@ -1,3 +1,4 @@
+import "./bun-bootstrap.ts";
 // Must stay first: the Claude statusline targets the prod instance unless
 // asked otherwise (`scout --instance <name>` or OPENSCOUT_STATUSLINE_INSTANCE).
 import { applyOpenScoutInstanceEnvironment, selectStatuslineOpenScoutInstance } from "@openscout/runtime/instance";

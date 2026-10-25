@@ -664,6 +664,7 @@
     "typescript"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "bun": ">=1.4.3"
   }
 }

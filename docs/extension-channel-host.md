@@ -9,7 +9,13 @@ single-owner adapter and fixed asset verification, not a raw close function,
 injected driver or compiler-release witness hook. See its module documentation
 for the SIGPIPE lifetime and Darwin fork/exec constraints.
 
-The facade requires Bun 1.3.14 and full revision
+Scout requires Bun 1.4.3 or newer. The native facade is **unavailable** on that
+supported range until a separate exact-revision review qualifies it. CI checks
+refusal on 1.4.3 and 1.4.4 on both platforms; this is not positive qualification.
+The historical positive checkpoint runner remains unchanged and cannot pass on
+the new floor. Do not broaden its allowlist just to make CI green.
+
+The historical facade qualification required Bun 1.3.14 and full revision
 `0d9b296af33f2b851fcbf4df3e9ec89751734ba4`, Darwin arm64 or Linux glibc x64.
 Linux requires a positive `glibcVersionRuntime` from an in-memory process report.
 Missing, malformed or unavailable reports refuse. No report is logged or

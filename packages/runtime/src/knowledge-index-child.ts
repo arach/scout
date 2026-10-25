@@ -1,3 +1,4 @@
+import "./bun-bootstrap.ts";
 import { indexRecentSessionKnowledge, SQLiteKnowledgeStore } from "./index.js";
 
 /**

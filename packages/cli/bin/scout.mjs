@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { enforceBunVersion } from "./bun-preflight.mjs";
+enforceBunVersion();
+
 import { constants, existsSync, readFileSync, accessSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { delimiter, dirname, join, resolve } from "node:path";

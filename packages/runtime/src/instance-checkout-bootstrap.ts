@@ -1,3 +1,4 @@
+import "./bun-bootstrap.js";
 // Side-effect module for entrypoints a developer runs from a source checkout
 // (`bun packages/runtime/src/broker-daemon.ts`, the pairing controller). An
 // unset OPENSCOUT_INSTANCE defaults to `dev` (main checkout) or
