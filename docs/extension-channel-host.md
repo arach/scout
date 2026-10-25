@@ -21,8 +21,8 @@ Linux requires a positive `glibcVersionRuntime` from an in-memory process report
 Missing, malformed or unavailable reports refuse. No report is logged or
 written. Unsupported hosts refuse before native loading and allocation.
 
-The source adapter and shim remain byte-identical to the qualified tuple at
-`ffd214f22afd10e505d316d57634ef1111d0773b`. Build staging rejects any other input
+The candidate adapter adds a compile-only witness seam. Its source tuple is at
+`895291e4356268172367fae036eb516f747a92fa`. Build staging rejects any other input
 hash. Runtime ESM and the CLI sidecar carry a fixed-file artifact manifest.
 Missing, altered or unexpected assets refuse. This is trusted-build integrity,
 not isolation against same-user mutation of the program and its verifier.
@@ -36,7 +36,13 @@ Compiler/header availability remains a deployment prerequisite. There is no
 compiler download or alternate-library fallback.
 
 Run `bun run test:extension-channel:qualification` at an explicit checkpoint.
-The independent macOS/Linux jobs retain the cold no-DFG read-timeout process,
+The independent macOS/Linux jobs retain the cold no-DFG read-timeout process.
+For the candidate `fable-a-reuse-compile-isolation/v1` tuple, compilation stays
+in that cold process but is separated from the allocation window. A post-prepare
+prefix audit precedes the single genuine allocation; no throwaway pair is made.
+The seam creates no endpoint and is not part of the host facade or a CLI/env path.
+This candidate requires a fresh two-platform qualification ruling, not an old
+receipt. The jobs also retain
 the warm full-JIT matrix, pure/pressure tests, context companion/sentinel,
 artifact tests and fences. Positive skips refuse qualification. The existing
 manual/callable CI model is unchanged. The per-key cc allowance must keep its

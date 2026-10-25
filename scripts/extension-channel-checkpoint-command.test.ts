@@ -123,3 +123,95 @@ test("checkpoint uses the fixed expected ledger rather than deriving approval fr
   const count=readFenceInventory(process.cwd()).size;
   expect(verifyFenceInventory(`Sync exec fence passed (${count} allowlisted symbol/file pairs).`)).toBe(count);
 });
+
+test("preloaded proof tests select the test command, never the package test script",async()=>{
+  const root=mkdtempSync(join(tmpdir(),"checkpoint-preload-"));
+  try {
+    writeFileSync(join(root,"package.json"),JSON.stringify({scripts:{test:"echo WRONG_PACKAGE_SCRIPT; exit 9"}}));
+    writeFileSync(join(root,"preload.ts"),"globalThis.__checkpointPreloaded=true;");
+    writeFileSync(join(root,"selected.test.ts"),"import {test,expect} from 'bun:test'; test('explicit-preload-selection',()=>expect(globalThis.__checkpointPreloaded).toBe(true));");
+    writeFileSync(join(root,"unselected.test.ts"),"throw Error('WRONG_UNSELECTED_FILE');");
+    const child=Bun.spawn([process.execPath,"test","--preload","./preload.ts","./selected.test.ts"],{cwd:root,env:{...process.env,CLAUDECODE:undefined,FORCE_COLOR:undefined},stdout:"pipe",stderr:"pipe"});
+    const [code,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
+    expect(code).toBe(0);expect(out+err).toContain("explicit-preload-selection");
+    expect(out+err).not.toContain("WRONG_");expect(out+err).toMatch(/1 pass/);
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test("nonzero command drains both piped output tails before its parent exits", async () => {
+  const root = mkdtempSync(join(tmpdir(), "checkpoint-output-tail-"));
+  let child: ReturnType<typeof Bun.spawn> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const bytes = 2 * 1024 * 1024;
+    const stdout = "o".repeat(bytes) + "\nLAST_STDOUT_REFUSAL_LINE\n";
+    const stderr = "e".repeat(bytes) + "\nLAST_STDERR_REFUSAL_LINE\n";
+    const writer = join(root, "writer.ts"), parent = join(root, "parent.ts");
+    writeFileSync(writer, `import {writeSync} from "node:fs";
+      const writeAll=(fd,text)=>{const bytes=Buffer.from(text);let offset=0;while(offset<bytes.length)offset+=writeSync(fd,bytes,offset,bytes.length-offset);};
+      writeAll(1,"o".repeat(${bytes})+"\\nLAST_STDOUT_REFUSAL_LINE\\n");
+      writeAll(2,"e".repeat(${bytes})+"\\nLAST_STDERR_REFUSAL_LINE\\n");
+      process.exit(1);`);
+    writeFileSync(parent, `import {command} from ${JSON.stringify(join(import.meta.dir,"extension-channel-checkpoint-command.ts"))};
+      try {await command([process.execPath,${JSON.stringify(writer)}]);}
+      catch(error) {process.exit(String(error).includes("qualification command failed:")?1:2);}
+      process.exit(3);`);
+    child = Bun.spawn([process.execPath, parent], {stdout: "pipe", stderr: "pipe"});
+    timer = setTimeout(() => child?.kill("SIGKILL"), 10000);
+    // Let the parent's pipes fill before consuming them, rather than relying
+    // on the platform's pipe capacity or the scheduler to expose the bug.
+    await Bun.sleep(100);
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+    ]);
+    expect(code).toBe(1);
+    expect(out).toBe(stdout);
+    expect(err).toBe(stderr);
+  } finally {
+    clearTimeout(timer);
+    if (child) {if (child.exitCode === null) child.kill("SIGKILL"); await child.exited;}
+    rmSync(root, {recursive: true, force: true});
+  }
+}, 15000);
+
+
+import { Writable } from "node:stream";
+for (const code of [0, 7]) {
+  test(`output drain write failure preserves child status ${code}`, async () => {
+    const broken = new Writable({write(_chunk, _encoding, done) {done(Error("synthetic write failure"));}});
+    const sink = new Writable({write(_chunk, _encoding, done) {done();}});
+    const args = [process.execPath, "--eval", `console.log("output");process.exit(${code})`];
+    try {
+      await command(args, process.env, {stdout: broken, stderr: sink, timeoutMs: 1000});
+      throw Error("unexpected success");
+    } catch (error) {
+      expect((error as Error).message).toBe(code ? `qualification command failed: ${args.join(" ")}` : "qualification output drain failed");
+      expect(String((error as Error).cause)).toContain("synthetic write failure");
+    } finally {broken.destroy(); sink.destroy();}
+  });
+  test(`output drain shares one bounded budget and preserves child status ${code}`, async () => {
+    const held = new Writable({write() {}}), sink = new Writable({write() {}});
+    const args = [process.execPath, "--eval", `console.log("output");console.error("error");process.exit(${code})`];
+    const start = performance.now();
+    try {
+      await command(args, process.env, {stdout: held, stderr: sink, timeoutMs: 25});
+      throw Error("unexpected success");
+    } catch (error) {
+      expect((error as Error).message).toBe(code ? `qualification command failed: ${args.join(" ")}` : "qualification output drain failed");
+      expect(String((error as Error).cause)).toContain("timed out after 25 ms");
+      expect(performance.now() - start).toBeLessThan(2000);
+    } finally {held.destroy(); sink.destroy();}
+  });
+}
+
+test("apparatus imports perform no descriptor I/O or exit-listener registration", async () => {
+  const child = Bun.spawn([process.execPath, join(import.meta.dir,"extension-numeric-spike/inert-import.ts")], {stdout:"pipe", stderr:"pipe"});
+  const timer = setTimeout(() => child.kill("SIGKILL"), 10000);
+  try {
+    const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    expect(err).toBe(""); expect(code).toBe(0);
+    const receipt = JSON.parse(out);
+    expect(receipt).toMatchObject({event:"apparatus-import-inert", identical:true, readerRefused:true, exitListenerDelta:0});
+    expect(receipt.before).toBe(receipt.after);
+  } finally {clearTimeout(timer); if(child.exitCode===null) child.kill("SIGKILL"); await child.exited;}
+}, 15000);
