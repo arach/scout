@@ -5,6 +5,7 @@ import {currentExtensionChannelCoordinate, EXTENSION_CHANNEL_QUALIFICATION as Q}
 if (!currentExtensionChannelCoordinate()) throw Error("qualification job requires the exact supported host; skips are not evidence");
 console.log(JSON.stringify({event:"qualification-host",coordinate:currentExtensionChannelCoordinate(),version:Bun.version,revision:Bun.revision,ruling:Q.ruling,sourceHead:Q.head,adapter:Q.adapter,shim:Q.shim}));
 await command([process.execPath,"test",...checkpointFiles("scripts/extension-channel-checkpoint-command.test.ts")]);
+await command([process.execPath,...checkpointFiles("scripts/extension-numeric-spike/host-detector-witness.ts"),"positive"]);
 const cold = await command([process.execPath,...checkpointFiles("scripts/extension-numeric-spike/witness.ts"),"credential","none","async","read-timeout"],{...process.env,BUN_JSC_useDFGJIT:"0"});
 const events = cold.trim().split("\n").filter(line=>line.startsWith("{")).map(line=>JSON.parse(line));
 if (events.filter(e=>e.event==="native-collected").length !== 9 || events.filter(e=>e.event==="reclaim-check").length < 160
@@ -25,6 +26,21 @@ for(const form of ["context","credential"]) {
 for(const name of ["compiled helper collection refuses retained wrapper","compiled helper collection cannot close reclaimed endpoint numbers"]) if(!matrix.includes(`(pass) ${name}`)) throw Error("compiler collection control missing");
 const cohort = await command([process.execPath,"test",...checkpointFiles("packages/runtime/src/extension-channel-io.test.ts","packages/runtime/src/extension-channel-qualification.test.ts","scripts/extension-numeric-spike/pipe-pressure.test.ts","scripts/check-native-compile-fence.test.ts","packages/runtime/src/supervision-handoff/native-load-fence.test.ts","packages/cli/src/cli/extension-context.test.ts")],warmEnv);
 if (!/Ran \d+ tests across 6 files\./.test(cohort) || /\b[1-9]\d* skip\b/.test(cohort)) throw Error("pure/pressure/fence cohort incomplete/skipped");
+for (const name of [
+  "public API2 install, binary stdin, argv, context EOF, cwd, output and descendant closure",
+  "public context dispatch: eight qualified invocations or zero-spawn unsupported refusals",
+  "independent credential guard refuses through public dispatch before native load/allocation or provider spawn",
+  "unsupported runtime coordinates refuse public dispatch before native load or spawn",
+  "selection changed during fixed host loading refuses before allocation",
+  "after-context sentinel keeps fresh descriptor identities through repeated GC",
+]) if (!cohort.includes(`(pass) ${name}`)) throw Error("context activation case missing");
+const inputs = await command([process.execPath,"test",...checkpointFiles("packages/cli/src/cli/extension-inputs.test.ts")],warmEnv);
+for (const name of [
+  "dormant input metadata freezes presence without exposing a value or reading policy",
+  "dormant input model never returns a value even with an exact grant, revocation or repeated request",
+  "unqualified input transport refuses a valid granted declaration before any provider execution",
+]) if (!inputs.includes(`(pass) ${name}`)) throw Error("independent input refusal case missing");
+if (/\b[1-9]\d* skip\b/.test(inputs)) throw Error("input refusal cohort skipped");
 const runner = await command([process.execPath,"test",...checkpointFiles("packages/cli/src/cli/extension-context-executor.test.ts","packages/cli/src/cli/extension-context-reclaim.test.ts")],warmEnv);
 if (Number(runner.match(/\b(\d+) pass\b/)?.[1]??0)<25 || /\b[1-9]\d* skip\b/.test(runner)) throw Error("actual-runner positive cohort incomplete/skipped");
 await command(["node","--test",...checkpointFiles("packages/cli/test/extension-channel-package.test.mjs")],warmEnv);

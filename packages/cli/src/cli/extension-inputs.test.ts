@@ -126,8 +126,8 @@ test("dormant input metadata freezes presence without exposing a value or readin
   }
 });
 test("dormant input model never returns a value even with an exact grant, revocation or repeated request", () => {
-  expect(scoutExtensionContextBackend()).toBe(false);
   const f = fixture(), grant = grantScoutExtensionInput(f.env, f.binding()), { session, request } = sessionFor(f);
+  expect(session.metadata.present).toBe(true); // Context activation must not open this independent input gate.
   for (const value of [request, request, {}, { schema: "unknown" }]) expect(() => session.request(value)).toThrow("input_backend_unproven");
   revokeScoutExtensionInputGrant(f.env, grant.id);
   expect(() => session.request(request)).toThrow("input_backend_unproven");
@@ -146,7 +146,7 @@ test("unqualified input transport refuses a valid granted declaration before any
   const child = spawn(process.execPath, ["--preload", preload, join(import.meta.dir, "main.ts"), "--json", "input-fixture"], { env: f.env, cwd: f.base, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = ""; child.stdout.on("data", data => stdout += data); child.stderr.on("data", data => stderr += data);
   const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
-  try { const code = await new Promise<number | null>(done => child.once("close", done)); refused({ code, stdout, stderr }, "context_backend_unproven"); expect(existsSync(marker)).toBe(false); }
+  try { const code = await new Promise<number | null>(done => child.once("close", done)); refused({ code, stdout, stderr }, scoutExtensionContextBackend() ? "input_backend_unproven" : "context_backend_unproven"); expect(existsSync(marker)).toBe(false); }
   finally { clearTimeout(timer); }
 }, 15_000);
 

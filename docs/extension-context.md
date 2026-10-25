@@ -31,8 +31,10 @@ candidate. `credentialInputs` can be omitted or empty for context-only operation
 [declared-input draft](./extension-inputs.md) additionally recognizes one exact
 credential declaration and its schemas/destination. Its transport is held; a
 recognized nonempty declaration cannot run without a qualified channel.
-Currently every API 2 invocation refuses `context_backend_unproven` before
-spawn; its independent input gate remains closed as well. Executable
+Context-only invocations run only on the exact [qualified host](./extension-channel-host.md)
+coordinates. Other hosts refuse `context_backend_unproven` before spawn.
+On supported hosts, nonempty credential declarations still refuse
+`input_backend_unproven` before either channel or child is created. Executable
 completion also refuses under API 2; static completion and Markdown help remain
 read-only. No declaration grants inputs or service authority.
 
@@ -121,10 +123,11 @@ command work or launching descendants. It must not print command output before
 that validation. These are trusted-provider obligations, not confinement of a
 malicious executable.
 
-**No context host is approved for activation. API 2 is dormant:** every dispatch
-refuses with `context_backend_unproven` before spawning a provider or creating
-a channel. API 1 is unchanged. The frame and lifecycle above describe the
-held contract, not an enabled delivery capability.
+**Context-only activation is restricted to the exact qualified host tuple.**
+The [host contract](./extension-channel-host.md) specifies the runtime revision,
+platforms, fixed asset checks and refusal behavior. Activation remains a separate
+host-review and operator checkpoint; it does not approve a provider verb flip,
+credential delivery, a new runtime coordinate or an installed package release.
 
 The former Node-extra-pipe qualification is withdrawn on both macOS and Linux.
 The Node wrapper and native subprocess retain ownership of the same extra-pipe
@@ -144,7 +147,7 @@ fresh regular files reclaiming each released parent number, identity checks
 reuses the first exchange's number without a stale close. The in-tree
 post-context sentinel opens fresh files after context tests, not before them.
 Stale-second-close controls must demonstrate sensitivity to that same failure.
-With the product dormant, standard-stdio controls validate only the instrument;
+Standard-stdio controls validate only the instrument;
 they do not qualify an API 2 backend. No known-broken extra-pipe mechanism runs
 as a passing product test.
 
@@ -152,7 +155,7 @@ W5 delivery requires a corrected-witness-qualified transport on its CI's exact
 pinned revision and platform. A pin move alone buys no capability. Any later Bun
 revision is subject to that same rule; there is no semver-based qualification.
 
-The dormant executor instead uses the qualified numeric transport through the
+The context executor instead uses the qualified numeric transport through the
 [host facade](./extension-channel-host.md). The source adapter closes in the
 synchronous spawn scope, before any await. The parent adapter alone closes its
 endpoint after the frame to produce EOF. The parent never wraps either number
@@ -168,8 +171,8 @@ closes pending work through its adapter. Failure cleanup sends TERM to only the 
 then escalates to KILL after 250 ms if needed, and reaps it. Process listeners
 are removed. No service tree or unrelated descendants are guessed or swept.
 API 2 dispatch never performs automatic broker upkeep. Static JSON help never
-executes the provider; direct provider help currently refuses with
-`context_backend_unproven`, as does every other API 2 invocation.
+executes the provider. Direct provider help uses context delivery on supported
+hosts and refuses `context_backend_unproven` on unsupported hosts.
 
 Pre-spawn/context failures use #66's raw-stderr
 `scout.cli.command-unavailable/v1` envelope and exit 69, with reasons
