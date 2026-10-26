@@ -1,7 +1,7 @@
 # Core packages
 
 These packages implement Scout's host core. Apps consume the core; the core
-never imports app source. The web and native interfaces live with OpenScout apps.
+never imports app source. The web and native interfaces live with the Scout apps.
 
 | Path | Purpose |
 | --- | --- |

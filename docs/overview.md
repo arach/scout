@@ -33,7 +33,7 @@ Routing is explicit and independent of the calling surface:
 - one target means a direct message;
 - group coordination uses a named channel;
 - broadcast is opt-in;
-- `send` is for tells and status updates;
+- `tell` is for updates that expect no reply;
 - `ask` is for requested work, judgment, or a reply;
 - exact session continuation uses `session:<id>`.
 

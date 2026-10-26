@@ -1,0 +1,19 @@
+ Your coding agents: Claude Code · Codex · Grok · OpenCode · Kimi · Pi · more
+                                       ▲
+                                       │ harness adapters
+┌─ Scout core ── oscout/scout ── public, Apache 2.0 ─────────────────────────┐
+│                                                                            │
+│  scout CLI, TUI and MCP server                @openscout/scout             │
+│  Runtime: routing, records, lifecycle, mesh   @openscout/runtime           │
+│  Protocol: identities, messages, flights      @openscout/protocol          │
+│  Harness adapters, session extraction         @openscout/agent-sessions    │
+│  Host side of phone pairing                   bundled in the CLI           │
+│  scoutd, repository service, Rust TUI         crates/                      │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+               released packages · runtime API · CLI JSON · MCP
+                ▲                            ▲                             ▲
+┌─ Scout apps ──┴────────┐  ┌─ Your client ──┴─────┐  ┌─ Hosted services ──┴─┐
+│  Mac, iOS, Android     │  │  Same APIs as        │  │  Accounts, relay     │
+│  and web               │  │  the apps            │  │  and push            │
+└────────────────────────┘  └──────────────────────┘  └──────────────────────┘

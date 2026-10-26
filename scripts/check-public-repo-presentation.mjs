@@ -19,6 +19,7 @@ const required = [
   "docs/public-source-boundary.md",
   "docs/releases.md",
   ".github/diagrams/control-plane.arc.json",
+  ".github/diagrams/layers.txt",
   ".github/diagrams/README.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/ISSUE_TEMPLATE/bug.yml",
@@ -204,6 +205,15 @@ for (const surface of linkedSurfaces) {
 }
 if (brokenTargets.length > 0) {
   throw new Error(`Broken local README targets:\n${brokenTargets.map((target) => `  - ${target}`).join("\n")}`);
+}
+
+const layerMap = read(".github/diagrams/layers.txt").trimEnd();
+const staleLayerMaps = ["README.md", "packages/cli/README.md", "docs/public-source-boundary.md"].filter((path) => {
+  const block = /<!-- diagram:layers:start -->([\s\S]*?)<!-- diagram:layers:end -->/.exec(read(path))?.[1];
+  return !block?.includes(`\`\`\`text\n${layerMap}\n\`\`\``);
+});
+if (staleLayerMaps.length > 0) {
+  throw new Error(`Layer diagram is missing or stale; run bun run diagram:readme:\n${staleLayerMaps.map((path) => `  - ${path}`).join("\n")}`);
 }
 
 const forbiddenPlaceholder = /A great project|Feature 1|Describe what your project does|TODO: replace/i;
