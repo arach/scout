@@ -1,4 +1,4 @@
-// The download key `scout web login` saves, and the one question Scout can ask
+// The download key `scout auth login` saves, and the one question Scout can ask
 // the download host with it: does this account have the full web app?
 //
 // The CLI (`scout web`) and the web server's Scout Pro read model share this so
@@ -46,7 +46,7 @@ export type DistKeyStore = {
 export type SpawnText = (command: string, args: string[], input?: string) => Promise<{ status: number | null; stdout: string }>;
 
 /**
- * Long enough to answer a Keychain prompt from `scout web login` or the
+ * Long enough to answer a Keychain prompt from `scout auth login` or the
  * explicit access check; short enough that a stuck store gives up.
  */
 export const DIST_KEY_STORE_TIMEOUT_MS = 60_000;

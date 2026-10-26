@@ -208,7 +208,8 @@ describe("scout web", () => {
 
   test("install explains a missing key and an unpublished version", async () => {
     const none = harness();
-    await expect(runWebCommand(none.context, ["install"], none.deps)).rejects.toThrow("No download key");
+    await expect(runWebCommand(none.context, ["install"], none.deps)).rejects.toThrow("No download key. Sign in first: scout auth login");
+    expect(none.requests).toHaveLength(0);
 
     const unpublished = harness({ env: { SCOUT_DIST_KEY: KEY } });
     await expect(runWebCommand(unpublished.context, ["install"], unpublished.deps)).rejects.toThrow(`isn't published for Scout ${VERSION}`);
@@ -240,7 +241,7 @@ describe("scout web", () => {
     await runWebCommand(run.context, ["status"], run.deps);
     expect(JSON.parse(run.lines[0]!)).toMatchObject({
       serves: "none", reason: "not-installed", installed: null, installedVersions: [],
-      nextSteps: ["Create a download key at https://console.openscout.app/#downloads", "scout web login", "scout web install"],
+      nextSteps: ["scout auth login", "scout web install"],
     });
     expect(run.requests).toHaveLength(0);
   });
@@ -344,7 +345,7 @@ describe("scout web", () => {
     await runWebCommand(run.context, ["status"], run.deps);
     const status = JSON.parse(run.lines[0]!);
     expect(status.reason).toBe("basic-forced");
-    expect(status.nextSteps).toContain("scout web login");
+    expect(status.nextSteps).toContain("scout auth login");
     expect(status.nextSteps).toContain("scout web install");
     expect(status.nextSteps.at(-1)).toContain("remove OPENSCOUT_WEB_CLIENT_PROFILE=basic");
   });

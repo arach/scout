@@ -2,18 +2,14 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { promisify } from "node:util";
-import { Writable } from "node:stream";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 
 import {
   DIST_KEY_KEYCHAIN_SERVICE,
-  DIST_KEY_PREFIX,
   SCOUT_DIST_DEFAULT_URL,
-  defaultDistKeyStores,
   distBaseUrl,
   distKeyPath,
   fileDistKeyStore,
@@ -22,7 +18,6 @@ import {
   secretServiceDistKeyStore,
   type DistKeyStore,
 } from "@openscout/runtime/dist-access";
-import { resolveOpenScoutSupportPaths } from "@openscout/runtime/support-paths";
 import {
   readWebFullClientProfile,
   resolveInstalledWebFullClient,
@@ -33,21 +28,25 @@ import {
 import type { ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
 import { SCOUT_APP_VERSION } from "../../lib/shared/product.ts";
+import {
+  distKeyStores,
+  distRequest,
+  explainFailure,
+  isInteractive,
+  readFlagValue,
+  runAuthLogin,
+  runAuthLogout,
+  supportDirectoryOf,
+  type ScoutAuthDeps,
+} from "./auth.ts";
 import { requestScoutWebControl } from "./server.ts";
 
 export { DIST_KEY_KEYCHAIN_SERVICE, SCOUT_DIST_DEFAULT_URL, distKeyPath, fileDistKeyStore, keychainDistKeyStore, secretServiceDistKeyStore };
 export type { DistKeyStore };
 const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 
-type ScoutFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
-
-export type ScoutWebCommandDeps = {
-  fetchImpl?: ScoutFetch;
-  supportDirectory?: string;
+export type ScoutWebCommandDeps = ScoutAuthDeps & {
   version?: string;
-  readStdin?: () => Promise<string>;
-  keyStores?: DistKeyStore[];
-  promptKey?: () => Promise<string>;
   restartWeb?: () => Promise<string>;
   /** May shorten the complete download budget; never extends the production cap. */
   downloadTimeoutMs?: number;
@@ -57,135 +56,24 @@ export function renderWebCommandHelp(): string {
   return [
     "scout web — the full Scout web app",
     "",
-    "The Scout core contains no web app. The Scout apps supply the web server; accounts with",
-    "access download the full app for this Scout version from console.openscout.app.",
+    "The Scout core contains no web app. The Scout apps supply the web server; signed-in",
+    "accounts download the full app for this Scout version from console.openscout.app.",
     "",
     "Usage:",
-    "  scout web login                 Paste a download key (asked for, not echoed)",
-    "  scout web login --key <key|->   Pass the key directly, or - to read stdin",
-    "  scout web install [--version <x.y.z>] [--no-restart]",
-    "                                  Download, verify and install the full web app",
+    "  scout web install [--version <x.y.z>] [--no-restart] [--no-browser]",
+    "                                  Download, verify and install the full web app;",
+    "                                  signs in first when there is no saved key",
     "  scout web status                Show installed versions, client selection, and next step",
     "  scout web uninstall             Remove installed web clients",
-    "  scout web logout                Forget the saved download key",
+    "  scout web login                 Same as scout auth login (a piped key is saved as is)",
+    "  scout web logout                Same as scout auth logout",
     "",
-    "Create a key at https://console.openscout.app/#downloads. SCOUT_DIST_KEY",
-    "overrides the saved key (handy for VMs and CI). OPENSCOUT_DIST_URL points",
-    "at another download host.",
+    "Sign in with scout auth login. SCOUT_DIST_KEY overrides the saved key (handy for",
+    "VMs and CI). OPENSCOUT_DIST_URL points at another download host.",
   ].join("\n");
 }
 
-function supportDirectoryOf(deps: ScoutWebCommandDeps): string {
-  return deps.supportDirectory ?? resolveOpenScoutSupportPaths().supportDirectory;
-}
-
-async function distKeyStores(deps: ScoutWebCommandDeps, env: NodeJS.ProcessEnv): Promise<DistKeyStore[]> {
-  return deps.keyStores ?? await defaultDistKeyStores(supportDirectoryOf(deps), env);
-}
-
-async function resolveKey(context: ScoutCommandContext, stores: DistKeyStore[]): Promise<{ key: string; where: string } | null> {
-  return await resolveDistKey(context.env, stores);
-}
-
-function readFlagValue(args: string[], name: string): string | undefined {
-  const index = args.indexOf(name);
-  if (index >= 0) {
-    const value = args[index + 1];
-    if (value === undefined || (value.startsWith("--") && value !== "-")) {
-      throw new ScoutCliError(`${name} needs a value`);
-    }
-    return value;
-  }
-  const inline = args.find((arg) => arg.startsWith(`${name}=`));
-  return inline ? inline.slice(name.length + 1) : undefined;
-}
-
-async function readAllStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-// Asks for the key without echoing it, so it stays out of shell history and
-// off the screen.
-async function promptHiddenKey(): Promise<string> {
-  process.stderr.write("Download key: ");
-  const silent = new Writable({ write: (_chunk, _encoding, done) => done() });
-  const rl = createInterface({ input: process.stdin, output: silent, terminal: true });
-  try {
-    return await new Promise<string>((resolve) => rl.once("line", resolve));
-  } finally {
-    rl.close();
-    process.stderr.write("\n");
-  }
-}
-
-async function distRequest(
-  context: ScoutCommandContext,
-  deps: ScoutWebCommandDeps,
-  key: string,
-  path: string,
-  timeoutMs = 15_000,
-  signal = AbortSignal.timeout(timeoutMs),
-): Promise<Response> {
-  const fetchImpl = deps.fetchImpl ?? fetch;
-  const url = `${distBaseUrl(context.env)}${path}`;
-  try {
-    return await fetchImpl(url, {
-      headers: { authorization: `Bearer ${key}`, accept: "application/json, application/gzip" },
-      signal,
-    });
-  } catch (error) {
-    throw new ScoutCliError(`Couldn't reach ${distBaseUrl(context.env)}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-function explainFailure(status: number, body: { error?: string } | null): string {
-  if (status === 401) return "The download key was not accepted. It may be revoked; make a new one at https://console.openscout.app/#downloads.";
-  if (status === 403) return "This account doesn't have the full web app.";
-  if (status === 404 && body?.error === "not_published") return "not_published";
-  return `The download host answered ${status}${body?.error ? ` (${body.error})` : ""}.`;
-}
-
 /* ------------------------------------------------------------------ */
-
-async function runLogin(context: ScoutCommandContext, args: string[], deps: ScoutWebCommandDeps): Promise<void> {
-  let key = readFlagValue(args, "--key");
-  if (key === "-" || (key === undefined && !(context.isTty && process.stdin.isTTY))) {
-    key = (await (deps.readStdin ?? readAllStdin)()).trim();
-  } else if (key === undefined) {
-    key = (await (deps.promptKey ?? promptHiddenKey)()).trim();
-  }
-  if (!key) throw new ScoutCliError("No key given. Make one at https://console.openscout.app/#downloads, then: scout web login");
-  if (!key.startsWith(DIST_KEY_PREFIX)) throw new ScoutCliError(`That isn't a download key; they start with ${DIST_KEY_PREFIX}.`);
-
-  const response = await distRequest(context, deps, key, "/v1/dist/whoami");
-  const body = await response.json().catch(() => null) as { login?: string | null; label?: string | null; error?: string } | null;
-  if (!response.ok) throw new ScoutCliError(explainFailure(response.status, body));
-
-  // Save to the first store that takes it, then clear the rest so no stale
-  // copy outlives a logout.
-  const stores = await distKeyStores(deps, context.env);
-  let saved: DistKeyStore | undefined;
-  for (const store of stores) {
-    if (await store.write(key)) {
-      saved = store;
-      break;
-    }
-  }
-  if (!saved) throw new ScoutCliError("Couldn't save the download key.");
-  for (const store of stores) if (store !== saved) await store.remove();
-  const who = body?.login ? ` as ${body.login}` : "";
-  const label = body?.label ? ` (key "${body.label}")` : "";
-  context.output.writeText(`Signed in${who}${label}. Key saved in ${saved.where}.\nNext: scout web install`);
-}
-
-async function runLogout(context: ScoutCommandContext, deps: ScoutWebCommandDeps): Promise<void> {
-  let removed = false;
-  // Every store, in order, so no copy outlives a logout.
-  for (const store of await distKeyStores(deps, context.env)) removed = (await store.remove()) || removed;
-  context.output.writeText(removed ? "Download key removed." : "No saved download key.");
-}
 
 async function defaultRestartWeb(): Promise<string> {
   const status = await requestScoutWebControl("restart");
@@ -195,15 +83,21 @@ async function defaultRestartWeb(): Promise<string> {
 async function runInstall(context: ScoutCommandContext, args: string[], deps: ScoutWebCommandDeps): Promise<void> {
   const supportDirectory = supportDirectoryOf(deps);
   const version = readFlagValue(args, "--version") ?? deps.version ?? SCOUT_APP_VERSION;
-  const resolved = await resolveKey(context, await distKeyStores(deps, context.env));
-  if (!resolved) {
-    throw new ScoutCliError("No download key. Make one at https://console.openscout.app/#downloads, then: scout web login");
-  }
-
   const target = webFullClientDirectory(version, supportDirectory);
   if (!args.includes("--force") && resolveInstalledWebFullClient(version, { env: {}, supportDirectory })) {
     context.output.writeText(`The full web app ${version} is already installed. --force reinstalls it.`);
     return;
+  }
+
+  const stores = await distKeyStores(deps, context.env);
+  let resolved = await resolveDistKey(context.env, stores);
+  if (!resolved) {
+    // Someone at a terminal signs in here and the install carries on; scripts get the command to run.
+    if (!isInteractive(context, deps)) throw new ScoutCliError("No download key. Sign in first: scout auth login");
+    context.stderr("Signing in first…");
+    await runAuthLogin(context, args.includes("--no-browser") ? ["--no-browser"] : [], deps, { next: null });
+    resolved = await resolveDistKey(context.env, stores);
+    if (!resolved) throw new ScoutCliError("Signed in, but the saved key couldn't be read back. Run: scout auth status");
   }
 
   const timeoutMs = Number.isFinite(deps.downloadTimeoutMs)
@@ -310,7 +204,7 @@ function installedFullVersions(supportDirectory: string): string[] {
 async function runStatus(context: ScoutCommandContext, deps: ScoutWebCommandDeps): Promise<void> {
   const supportDirectory = supportDirectoryOf(deps);
   const version = deps.version ?? SCOUT_APP_VERSION;
-  const key = await resolveKey(context, await distKeyStores(deps, context.env));
+  const key = await resolveDistKey(context.env, await distKeyStores(deps, context.env));
   // Installation and selection are separate: forcing Basic does not uninstall
   // Full, and upgrading the CLI does not remove a Full client for an older version.
   const installed = resolveInstalledWebFullClient(version, { env: {}, supportDirectory });
@@ -322,7 +216,7 @@ async function runStatus(context: ScoutCommandContext, deps: ScoutWebCommandDeps
     : installedVersions.length ? "version-mismatch" : "not-installed";
   const nextSteps = installed ? []
     : key ? ["scout web install"]
-    : ["Create a download key at https://console.openscout.app/#downloads", "scout web login", "scout web install"];
+    : ["scout auth login", "scout web install"];
   if (basicForced) {
     nextSteps.push("To use Full, remove OPENSCOUT_WEB_CLIENT_PROFILE=basic from the web server's environment and restart it.");
   }
@@ -338,7 +232,7 @@ async function runStatus(context: ScoutCommandContext, deps: ScoutWebCommandDeps
   };
   context.output.writeValue(status, (value) => [
     `Scout ${value.version}`,
-    `key        ${value.key ?? "none (scout web login)"}`,
+    `key        ${value.key ?? "none (scout auth login)"}`,
     `installed  ${value.installed ?? "no"}`,
     ...(value.installedVersions.length ? [`versions   ${value.installedVersions.join(", ")}`] : []),
     `serves     ${value.serves === "full" ? "the full web app" : "no bundled web app (install the Scout apps)"}`,
@@ -362,9 +256,10 @@ export async function runWebCommand(
   }
   switch (subcommand) {
     case "login":
-      return runLogin(context, rest, deps);
+      await runAuthLogin(context, rest, deps, { readPipedKey: true });
+      return;
     case "logout":
-      return runLogout(context, deps);
+      return runAuthLogout(context, deps);
     case "install":
       return runInstall(context, rest, deps);
     case "uninstall":
