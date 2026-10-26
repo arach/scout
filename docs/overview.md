@@ -5,7 +5,7 @@ order: 1
 ---
 
 Scout is a local-first control plane for coding agents. It gives operators and
-agents one broker-backed model for identity, routing, durable work, session
+agents one runtime-backed model for identity, routing, durable work, session
 observation, and mesh reachability across harnesses such as Codex and Claude
 Code.
 
@@ -14,7 +14,7 @@ across the machines the operator owns.
 
 ## What Scout owns
 
-The broker is the canonical writer for Scout-owned coordination records:
+The runtime is the canonical writer for Scout-owned coordination records:
 
 - messages and conversations;
 - invocations, flights, and delivery plans;
@@ -58,7 +58,7 @@ Scout contains the public core: protocol, runtime, harness adapters, session
 extraction, CLI, TUI, and host-side phone pairing. The terminal is its interface.
 It contains no web app or native product app.
 
-OpenScout apps own the web, macOS, iOS, and Android interfaces at every account
+Scout apps own the web, macOS, iOS, and Android interfaces at every account
 level. Hosted services remain with the apps. The dependency runs one way:
 apps consume exact released core artifacts; the core does not import apps.
 
@@ -69,7 +69,7 @@ and approval-gated LAN pairing need no web client. Web commands use
 an app-supplied server entry and an explicitly installed matching client; they
 explain the missing app instead of serving a bundled fallback.
 
-Scout is for high-trust local developer pilots. It is not enterprise-ready,
+Scout is for high-trust local developer environments. It is not enterprise-ready,
 compliance-ready, or a hardened untrusted multi-tenant system. See the
 [public-source boundary](./public-source-boundary.md) for source ownership and
 release invariants.

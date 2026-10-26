@@ -16,11 +16,11 @@ Scout comms are protocol-shaped but not a standalone wire protocol.
 | headers | explicit routing/reply/work context fields |
 | body | message/task payload |
 | response | broker receipt, flight state, reply message, work transition |
-| authority | local broker canonical writes |
+| authority | local runtime canonical writes |
 
 ## Integration Rule
 
-External clients submit structured intent to the broker and render broker-owned
+External clients submit structured intent to the runtime and render runtime-owned
 records. They do not infer routing from body mentions or external harness
 transcripts.
 
@@ -52,7 +52,7 @@ transcripts.
 | exact runtime ask | exact harness/model/effort required; creates an isolated session | `scout ask --project ../x --runtime codex/gpt-5.6-sol/xhigh`, or separate `--harness --model --effort` fields |
 | situated target follow-up | saved project/profile/harness situation | `scout ask --to target:<name>`, compact `⌖name` in agent/UI text |
 | exact session ask | continue one concrete prior harness session | canonical `scout ask --to session:sess.<token>` or `ask({ targetSessionId })`; native-id forms are compatibility inputs |
-| reserved runtime profile | fresh current-project session with broker-owned harness/model defaults | `scout ask Fable to review this`, `scout ask --profile fable "review this"` |
+| reserved runtime profile | fresh current-project session with runtime-owned harness/model defaults | `scout ask Fable to review this`, `scout ask --profile fable "review this"` |
 | exact natural existing handle | one already-known live agent/session; no locality/fuzzy tiebreak | `scout ask agent Composer Review to fix this` → exact `@composer-review` |
 | threaded reply | continue an existing broker conversation or ask reply context | final response or `messages_reply` depending on `replyPath` |
 | durable work | progress/waiting/review/done lifecycle | `work_update` |
@@ -146,7 +146,7 @@ handoff.
   `projectPath` / `--project` plus optional `harness` / `--harness` instead of
   running discovery first or guessing names like `claude.main`
 - follow-up uses returned `ref`, flight, conversation, work, or session handles;
-  naming/pinning comes after a broker-routed worker is known good
+  naming/pinning comes after a runtime-routed worker is known good
 - group -> explicit channel
 - shared broadcast -> opt-in
 - body text is payload, not routing metadata
@@ -198,7 +198,7 @@ Supported route target forms: agent labels, `agent:<label>`, `alias:<name>`, `ta
 `ref:<id>`, `project:<path>`, `id:<agentId>`, `channel:<name>`, and
 `broadcast`. `@agent` remains compatibility syntax, but new Scout-aware
 composers should prefer `>>` and strip the route operator from payload before
-calling the broker. Agent-authored prompts and compact UI may render
+calling the runtime. Agent-authored prompts and compact UI may render
 `target:<handle>` as `⌖handle`.
 
 CLI composer routing currently uses labels, refs, and project paths for asks;
@@ -355,6 +355,6 @@ its exact thread id instead of guessing from transcript text.
 
 Before drafting a reply that was already queued for app release, cancel its
 flight to avoid a duplicate later: `scout flight cancel <flight-id>` or MCP
-`flight_cancel { flightId }`. The broker refuses once submission has started.
+`flight_cancel { flightId }`. The runtime refuses once submission has started.
 Only `state: cancelled` confirms cancellation; completed/failed means it already
 finished, and an error means do not assume the queued reply was removed.

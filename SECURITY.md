@@ -35,7 +35,7 @@ Useful reports include:
 
 ## Scope and posture
 
-Scout is currently designed for high-trust local developer pilots. It is not a
+Scout is currently designed for high-trust local developer environments. It is not a
 hardened untrusted multi-tenant runtime, a compliance boundary, or a globally
 consistent distributed system. Reports that break the documented local trust
 model are still welcome; describe the assumed attacker and boundary clearly.

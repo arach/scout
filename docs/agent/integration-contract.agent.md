@@ -1,6 +1,6 @@
 # Agent Integration Contract Notes
 
-Sources: `docs/agent-integration-contract.md`, `docs/interaction-model.md`.
+Sources: `docs/agent-integration-contract.md`.
 
 Status: v0 integration guidance. Use this as the current Scout-native target, not as a frozen public API guarantee.
 
@@ -33,7 +33,7 @@ session. Remote service targets describe their actual execution lifecycle.
 
 ## Shared Interaction Design
 
-The adopted [interaction model](../interaction-model.md) defines these
+The adopted interaction model defines these
 requirements. Its coverage table is authoritative about implementation gaps;
 this digest does not add wire fields or assert Poppy compatibility.
 
@@ -94,7 +94,7 @@ mandatory preflight.
   use `projectPath` plus optional `harness` instead of discovery-first routing
   or generic guesses such as `claude.main`
 - continue with returned `ref`, flight, conversation, work, or session handles;
-  pin/name a sibling only after the broker-routed worker is known good
+  pin/name a sibling only after the runtime-routed worker is known good
 - group -> explicit channel
 - everyone -> shared broadcast
 - body text is payload, not routing metadata

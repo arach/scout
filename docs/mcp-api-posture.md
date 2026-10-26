@@ -55,7 +55,7 @@ These are the tools normal agents should learn first:
 | `consult_operator` | Ask for optional advice, declare the safe default, and keep working. |
 
 `ask` may create message, invocation, flight, delivery, card, session, and work
-records as side effects. Those records are broker-owned implementation details
+records as side effects. Those records are runtime-owned implementation details
 unless the caller is explicitly observing or managing them.
 
 Timeout-style fields on MCP tools are caller wait budgets only. They protect a
@@ -73,7 +73,7 @@ not task state.
   later work.
 - Neither tool creates an invocation, flight, question, waiting state, or work
   transition.
-- The broker writes a durable operator message and uses its `messageId` as the
+- The runtime writes a durable operator message and uses its `messageId` as the
   signal correlation id. A reply stays in that conversation and points back to
   the signal message.
 - The wire contract is discriminated: notify declares no reply expectation;
@@ -139,7 +139,7 @@ as a side effect; invocation records then have observation handlers.
 
 ## Routing Helpers
 
-Routing helpers are optional. They are useful when the broker reports ambiguity
+Routing helpers are optional. They are useful when the runtime reports ambiguity
 or when a user is inspecting available agents, but they are not mandatory
 preflight steps:
 
@@ -167,13 +167,13 @@ layer:
 
 These are real and useful tools, but they should not be the default way to talk
 to another agent. Core agents should use `ask({ projectPath, harness })` for
-capability requests and let the broker create or bind cards and sessions when
+capability requests and let the runtime create or bind cards and sessions when
 needed. Pro tools are for deliberate promotion, pinning, or lifecycle
 management after the routed worker is known good.
 
 `ask` and `messages_send` accept `alias:<name>` or a structured `route_alias`
 target directly; callers do not preflight every dispatch with
-`aliases_resolve`. The broker dereferences once and returns the pinned binding
+`aliases_resolve`. The runtime dereferences once and returns the pinned binding
 revision/canonical target proof.
 
 ## Identity Model

@@ -36,7 +36,7 @@ after the root has migrated. This ID is separate from trust-mutation IDs.
    core host runtime, CLI and separately built app processes. Use each program's normal stop mechanism.
    Prevent old binaries, raw editors and pre-owner projection writers from
    resuming. This is a one-time drain/restart, not zero-interruption migration.
-5. Keep at least 3 GiB free for pilot qualification. This observation is separate
+5. Keep at least 3 GiB free for qualification. This observation is separate
    from the migration's real 320 MiB reservation. Preserve a diagnostic backup
    under quiescence if historical peer snapshots are needed. Backups are not
    live authority and cannot simply be loaded at another device/inode.

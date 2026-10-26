@@ -71,7 +71,7 @@ with no shared read-modify-write:
   the rest.
 - A legacy `.ledger.json` is imported once into slots and claims and renamed
   `.ledger.json.migrated` (an unreadable one is moved aside).
-- A broker whose port already answers with a different node id refuses to
+- A runtime whose port already answers with a different node id refuses to
   start and names the other node.
 
 Instance port blocks sit in 24400–30399: below the Linux (32768–60999) and
@@ -112,7 +112,7 @@ only a client pointer; the checkout default applies only when unset.**
    - Never reads `OPENSCOUT_CLIENT_INSTANCE`.
 3. **Supervisors pin:** scoutd (base spawn and the launchd plist always carry
    `OPENSCOUT_INSTANCE`, prod by default), `nativeServiceEnvironment`, every
-   systemd unit that runs checkout code, the macOS app and menu helper
+   systemd unit that runs checkout code, the separate macOS app and menu helper
    (`OpenScoutToolchain.defaultEnvironment`), and base/broker/web/CLI children
    (inherited from the pinned env). The installed-shim prod unit is the only
    unpinned case; installed packages never take a checkout default.
@@ -155,7 +155,7 @@ only a client pointer; the checkout default applies only when unset.**
 6. Central resolvers (`resolveOpenScoutSupportPaths`, `resolveOpenScoutHome`,
    `resolveOpenScoutPairingHome`, `resolveOpenScoutScoutHome`, local-config
    port defaults incl. the registry) are instance-aware even without step 2.
-7. Rails: `enforceOpenScoutInstanceIsolation(surface)` runs before the broker,
+7. Rails: `enforceOpenScoutInstanceIsolation(surface)` runs before the runtime,
    web server, pairing controllers, CLI and every systemd command except
    status. After step 2 they catch `OPENSCOUT_INSTANCE_*` knobs or service
    configs that land on prod. Mesh discovery (startup, interval,
@@ -192,7 +192,7 @@ only a client pointer; the checkout default applies only when unset.**
 ## External readers of instance state
 
 Tools outside this repo that read pairing state directly (for example
-`oscout/scout-android`'s `scripts/pair-emulator.sh` and `tools/bridge-probe.ts`,
+the Android client's pairing scripts,
 which read `~/.scout/pairing/runtime.json`) should read
 `${OPENSCOUT_PAIRING_HOME:-$HOME/.scout/pairing}/runtime.json`. A dev
 instance's file is `~/.openscout/instances/dev/pairing/runtime.json`; its

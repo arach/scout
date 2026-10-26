@@ -1,14 +1,14 @@
-# OpenScout Runtime
+# Scout Runtime
 
-`@openscout/runtime` is the local runtime foundation for OpenScout: the broker,
+`@openscout/runtime` is the local runtime foundation for Scout: the runtime daemon,
 SQLite store, service lifecycle, local discovery, system probes, and host-side
 adapters that make the protocol durable on a developer machine.
 
 Use [`@openscout/protocol`](../protocol) when you only need the data contract.
-Use this package when you are building a local OpenScout surface, service, CLI,
-or integration that needs to talk to or embed the broker/runtime layer.
+Use this package when you are building a local Scout surface, service, CLI,
+or integration that needs to talk to or embed the runtime layer.
 
-> Current posture: OpenScout is for high-trust local developer pilots. This
+> Current posture: Scout is for high-trust local developer environments. This
 > package is not a hardened multi-tenant runtime or a compliance boundary.
 
 ## Install
@@ -58,7 +58,7 @@ const message: MessageRecord = {
   actorId: "operator",
   originNodeId: "local-demo",
   class: "agent",
-  body: "Hello from a local OpenScout integration.",
+  body: "Hello from a local Scout integration.",
   visibility: "workspace",
   policy: "best_effort",
   createdAt: Date.now(),
@@ -80,7 +80,7 @@ openscout-runtime broker
 
 ## What this package owns
 
-The runtime is the operational layer beneath OpenScout surfaces:
+The runtime is the operational layer beneath Scout surfaces:
 
 - canonical local SQLite schema and stores
 - broker daemon, HTTP, SSE, and routing services
@@ -88,11 +88,11 @@ The runtime is the operational layer beneath OpenScout surfaces:
 - local agent and harness endpoint discovery
 - service install/status/start/stop helpers
 - repo watch and repo diff snapshots
-- system probes for host state used by the broker and web UI
+- system probes for host state used by the runtime and the separate apps
 - optional mesh helpers through Tailscale and Iroh bridge processes
-- mobile push relay records for local broker notifications
+- mobile push relay records for local runtime notifications
 
-The broker remains the canonical writer for Scout-owned coordination records.
+The runtime remains the canonical writer for Scout-owned coordination records.
 External harness transcripts are observed source material; they are not bulk
 imported as first-party Scout messages.
 
@@ -104,7 +104,7 @@ imported as first-party Scout messages.
 | `@openscout/runtime/host-attention` | Pure tmux dialog detector and injected machine-local collector; see [the read contract](./HOST-ATTENTION.md). |
 | `@openscout/runtime/core-report` | Pure core-service observations, optional capability availability and core-only completion; see [the contract](./CORE-REPORT.md). |
 | `@openscout/runtime/onboarding` | Setup/onboarding and the staged pure [core acquisition observation contract](./CORE-ACQUISITION.md); no lifecycle authority is granted by assessment. |
-| `@openscout/runtime/broker-api` | HTTP client helpers for talking to an active local broker. |
+| `@openscout/runtime/broker-api` | HTTP client helpers for talking to an active local runtime. |
 | `@openscout/runtime/broker-core-service` | Broker service composition boundary for embedding/testing. |
 | `@openscout/runtime/broker-process-manager` | Service config, status, install/start/stop/restart helpers. |
 | `@openscout/runtime/broker-trpc-router` | tRPC router surface for broker-adjacent hosts. |
@@ -184,11 +184,11 @@ an exact native Claude or Codex session target, a stable requester-scoped
 clients must freshly read `/v1/node` and require the
 `session-input-receipts/1` capability. Older brokers may ignore unknown request
 fields, so clients must fail closed when that capability is absent. The new
-wire intent also makes an older broker reject the request if a broker is
+wire intent also makes an older runtime reject the request if a runtime is
 replaced between the capability read and submission. The current boundary
 normalizes it to consult intent before the existing durable command executes.
 
-The broker durably reserves the request before submitting input. Only an
+The runtime durably reserves the request before submitting input. Only an
 explicit `not_live` result continues ordinary exact-session acceptance inside
 that same request. This fallback relies on live-host probes and the normal
 exact-session resolver's live-owner checks. An unobserved or ambiguous Herdr
@@ -222,10 +222,10 @@ scout ask --to id:<local-agent-id> --request-id review-42 --completion explicit 
 
 This first version supports exact existing local agent or session identities.
 Project/profile launches, aliases, remote targets, external endpoints, forks,
-and the session-input delivery option are unsupported. Clients and the broker refuse
+and the session-input delivery option are unsupported. Clients and the runtime refuse
 explicit runtime overrides for this contract. A local agent ask may create its
 normal fresh execution session. Clients require the capability on `/v1/node`
-and send `intent: "explicit_consult"` to `/v1/deliver`; an older broker rejects
+and send `intent: "explicit_consult"` to `/v1/deliver`; an older runtime rejects
 that discriminant before execution. The current broker normalizes it to the
 existing consult command.
 
@@ -242,7 +242,7 @@ A worker can opt a child ask into its parent with
 `relation: { parentFlightId, kind: "joined" }` (CLI `--join-to <flight>`).
 A requester or worker can admit an exact same-session continuation with
 `kind: "continuation"` (CLI `--continue-for <flight>`). Admission requires a
-stable child request id and a current nonterminal explicit parent. The broker
+stable child request id and a current nonterminal explicit parent. The runtime
 commits the child and the parent's new obligation/revision together; retries
 reuse that child and never increment the revision twice. Each parent accepts
 at most 64 obligations. Work without a relation stays independent.
@@ -335,7 +335,7 @@ wire fences, uncertainty handling, and embedded-broker requirements.
 
 ## Resident assistant ownership
 
-The broker requires an exclusive claim for Scoutbot registration and answers.
+The runtime requires an exclusive claim for Scoutbot registration and answers.
 See [assistant answerer claims](./ASSISTANT-CLAIMS.md) for the API, expiry rules
 and the paired app/runtime adoption gate. Operator asks do not require a claim.
 

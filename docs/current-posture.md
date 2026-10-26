@@ -1,23 +1,23 @@
 # Current Posture
 
-This page is the plain-language maturity, trust, and scope statement for OpenScout. It should keep product claims, docs, and package metadata honest while the system is still moving quickly.
+This page is the plain-language maturity, trust, and scope statement for Scout. It should keep product claims, docs, and package metadata honest while the system is still moving quickly.
 
 ## Short Version
 
-OpenScout is pilot-worthy for high-trust local developer environments. It is not enterprise-ready, compliance-ready, or sponsor-review-ready yet.
+Scout is for high-trust local developer environments. It is not enterprise-ready, compliance-ready, or sponsor-review-ready yet.
 
-The useful promise today is narrow and concrete: run a local broker, make agents addressable, keep Scout-owned coordination records durable, and let humans and agents communicate through the same state model across CLI, desktop, mobile, and mesh-aware peers.
+The useful promise today is narrow and concrete: run a local runtime, make agents addressable, keep Scout-owned coordination records durable, and let humans and agents communicate through the same state model across CLI, desktop, mobile, and mesh-aware peers.
 
 ## Who It Is For Right Now
 
-OpenScout is currently for:
+Scout is currently for:
 
 - solo developers coordinating multiple local agents or harnesses
 - small, trusted teams experimenting with agent-to-agent workflows
 - coding agents that need a durable route to other agents or to the human operator
-- platform reviewers evaluating whether the control-plane model is worth piloting
+- platform reviewers evaluating whether the control-plane model is worth adopting
 
-OpenScout is not currently for:
+Scout is not currently for:
 
 - untrusted multi-tenant execution
 - regulated enterprise rollout
@@ -28,7 +28,7 @@ OpenScout is not currently for:
 
 The default trust model is local-first and high-trust:
 
-- The broker and Scout-owned state run on the user's machine.
+- The runtime and Scout-owned state run on the user's machine.
 - Scout does not require a hosted control plane for the ordinary local path.
 - Pairing and mesh forwarding are explicit actions, not implicit cloud sync.
 - Local agents and harnesses often run with meaningful machine access. Treat them as trusted local automation unless a stricter permission profile is explicitly configured.
@@ -38,7 +38,7 @@ This is not yet a hardened security perimeter:
 - no enterprise SSO/RBAC policy layer
 - no tenant isolation model
 - no formal audit/compliance story
-- no guarantee that every harness permission prompt is broker-owned yet
+- no guarantee that every harness permission prompt is runtime-owned yet
 - no universal sandbox contract across Codex, Claude, and future harnesses
 
 The privileged web server is loopback-only by default. A non-loopback bind must
@@ -57,11 +57,11 @@ For the data boundary, read the [data model section of `architecture.md`](./arch
 
 ## Mesh Means Reachability
 
-In OpenScout docs, "mesh" means machines and agents can discover, address, message, wake, and inspect each other through broker-owned routes.
+In Scout docs, "mesh" means machines and agents can discover, address, message, wake, and inspect each other through runtime-owned routes.
 
 It does not currently mean a distributed-systems guarantee layer. Do not read "mesh" as a promise of exactly-once delivery, at-most-once delivery, global consensus, CRDT-style convergence, or replicated external transcript storage.
 
-The design center is: "I can talk to that agent over there, ask it to do work, check back later, and see the broker-owned records of that coordination."
+The design center is: "I can talk to that agent over there, ask it to do work, check back later, and see the runtime-owned records of that coordination."
 
 ## Data Ownership
 
@@ -87,18 +87,18 @@ Observed harness material can be tailed, linked, summarized, or lightly indexed.
 A realistic local install can involve:
 
 - Bun for the CLI/runtime toolchain
-- a Scout broker service
+- a Scout runtime service
 - macOS launch agent setup
 - support files under `~/Library/Application Support/OpenScout`
 - optional Caddy for the local web edge
 - optional Tailscale or manually configured mesh seeds for multi-machine discovery
-- optional desktop and iOS apps for human surfaces
+- optional separate Mac, iOS, Android, and web apps for human surfaces
 
-That footprint is appropriate for a developer pilot. It is too much to treat as a silent, enterprise-managed install without more packaging, policy, and admin work.
+That footprint is appropriate for a developer environment. It is too much to treat as a silent, enterprise-managed install without more packaging, policy, and admin work.
 
 ## License And Package Signals
 
-OpenScout is licensed under the Apache License 2.0. The repo root carries the `LICENSE` and `NOTICE` files, and every workspace package manifest declares `Apache-2.0`. Packages already on npm pick up the new metadata on their next publish.
+Scout is licensed under the Apache License 2.0. The repo root carries the `LICENSE` and `NOTICE` files, and every workspace package manifest declares `Apache-2.0`. Packages already on npm pick up the new metadata on their next publish.
 
 The license posture should stay explicit and consistent across:
 
@@ -114,8 +114,8 @@ Reasonable to say today:
 
 - local-first control-plane prototype/product codebase
 - active v0.x development
-- useful for trusted pilots and internal dogfooding
-- clear direction around broker-owned records, agent identity, and collaboration workflows
+- useful for trusted environments and internal dogfooding
+- clear direction around runtime-owned records, agent identity, and collaboration workflows
 
 Do not say yet:
 
@@ -130,11 +130,11 @@ Do not say yet:
 
 The next maturity bar is not just more features. It is clarity and evidence:
 
-- one clean buyer/user story for the pilot
+- one clean buyer/user story for the first deployment
 - consistent license and package trust signals
 - explicit install and uninstall footprint
 - documented security/trust posture
 - stable agent integration contract
-- broader host-level permission/approval capture over broker-owned unblock requests
+- broader host-level permission/approval capture over runtime-owned unblock requests
 - clear failure, retry, and notification semantics
 - a small compatibility test suite for agent/tool integrations

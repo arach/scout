@@ -2,7 +2,7 @@
 
 ## Local search index
 
-`knowledgeIndexEnabled` in OpenScout `settings.json` is the single opt-in. Its
+`knowledgeIndexEnabled` in Scout `settings.json` is the single opt-in. Its
 UI is **Settings › System › Local search index**. It defaults to false on new
 and existing installations. Disabling it stops new collection commits and
 future CLI, MCP and web indexing jobs. Search, `scout where` and topic-based
@@ -109,7 +109,7 @@ control-plane archive policy still governs retained event history.
   fleet data on substantive changes. Roster/fleet polling (60 seconds), home
   polling (30 seconds), and independent `presence.updated` events still refresh
   liveness. Chat does not use endpoint upserts as turn progress.
-- The broker SSE feed still carries substantive registry changes. JetStream's
+- The runtime SSE feed still carries substantive registry changes. JetStream's
   message publishing is independent of these four event kinds.
 
 ## Agent stdout and stderr

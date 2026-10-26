@@ -6,7 +6,7 @@ core-only installation contract.
 
 A machine can publish its own `<name>.scout.local` address on the local network
 and serve the web app to authenticated browsers without cloud or Tailscale
-routing. This is an opt-in developer-pilot configuration. It requires Scout's
+routing. This is an opt-in developer configuration. It requires Scout's
 local Caddy edge, an active Ethernet/Wi-Fi IPv4 address, and mDNS reachability
 between the devices. It does not configure routers or cross-VLAN discovery.
 
@@ -65,7 +65,7 @@ need to sign in once after migration.
 
 LAN-only serving does not proxy another machine's doorway through a tailnet or
 cloud route. A foreign named host is rejected rather than serving local data
-under the wrong name. This option controls Scout Web, not the broker's separate
+under the wrong name. This option controls Scout Web, not the runtime's separate
 mesh listeners or other applications on the machine.
 
 ## Verification

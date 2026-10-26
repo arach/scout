@@ -2,13 +2,13 @@
 
 Source: `packages/runtime/**`, `packages/protocol/**`, `docs/architecture.md` (data model section).
 
-Status: canonical writer semantics for local broker. Complements `scout-comms.agent.md` (workflows).
+Status: canonical writer semantics for local runtime. Complements `scout-comms.agent.md` (workflows).
 
 Verified: 2026-06-19
 
 ## Role
 
-The broker is the local daemon that **owns, persists, routes, and streams** Scout coordination state. One broker per machine (authority node). Surfaces and agents are readers/writers through HTTP/SSE/MCP/CLI — not parallel sources of truth.
+The runtime is the local daemon that **owns, persists, routes, and streams** Scout coordination state. One runtime per machine (authority node). Surfaces and agents are readers/writers through HTTP/SSE/MCP/CLI — not parallel sources of truth.
 
 `broker-daemon.ts` is the process composition root (~1.3k lines). Write workflows live in
 `broker-*` service modules; HTTP routing lives in `broker-http-router.ts`. Full module map:
@@ -72,7 +72,7 @@ Target resolution returns one of:
 
 Broker should coach remediation in the error, not force `who`/`latest` preflight loops.
 
-Route aliases are broker-owned current rows plus immutable revisions in
+Route aliases are runtime-owned current rows plus immutable revisions in
 `route_alias_bindings` / `route_alias_revisions`; they are not
 `runtime_session_aliases`. Resolution precedence is exact typed target,
 explicit route alias, native agent identity, scoped bare route alias, then

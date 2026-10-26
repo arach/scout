@@ -1,11 +1,11 @@
 # Runtime Sessions
 
 Scout began as a local communications layer: find the other sessions already
-running, route messages between them, and preserve enough broker state that
+running, route messages between them, and preserve enough runtime state that
 humans and agents did not have to paste context by hand.
 
 That is still true, but it is no longer the whole contract. Scout also owns
-local harness orchestration for developer pilots. It can start, attach, wake,
+local harness orchestration for developer environments. It can start, attach, wake,
 and monitor Claude, Codex, and future harness sessions. This document names the
 runtime semantics that make that deterministic.
 
@@ -19,7 +19,7 @@ MCP, skill, or broker semantics around harness lifecycle.
 | Agent | Durable addressable domain identity, such as `hudson.main.air-local` |
 | Session | An opaque broker handle resolving to one concrete harness context |
 | Endpoint | The routable attachment between one agent identity and one session |
-| Invocation | A broker-owned request for an agent to do something |
+| Invocation | A runtime-owned request for an agent to do something |
 | Flight | The lifecycle state for an invocation |
 | Card | A shareable identity and return address; not by itself a running session |
 
@@ -36,7 +36,7 @@ into Scout session metadata instead.
 3. An endpoint must declare `agentId`, `harness`, `transport`, `sessionId`,
    `state`, wake policy, and whether it is the preferred endpoint for that
    agent/harness pair.
-4. A broker receipt means the broker accepted and recorded the request. It does
+4. A broker receipt means the runtime accepted and recorded the request. It does
    not mean a harness session has completed the work.
 5. Every user-visible delivery or invocation should return durable ids that can
    be referenced later. A message receipt returns `conversationId` and
@@ -45,7 +45,7 @@ into Scout session metadata instead.
 6. If Scout cannot start, attach, wake, or route to a compatible session, it
    must fail with a specific reason and a concrete remediation. Silent parked
    limbo is a product bug.
-7. The broker should do the routing work or coach the sender toward the next
+7. The runtime should do the routing work or coach the sender toward the next
    viable action. Do not make agents run a long orientation ritual just to
    discover that a target needs a session, a qualifier, or an attach operation.
 8. Canonical session addresses use `session:sess.<token>`. The token carries no
@@ -59,9 +59,9 @@ into Scout session metadata instead.
 
 ## Broker Coaching
 
-Scout should lean on the broker, not the sender, to explain runtime and routing
+Scout should lean on the runtime, not the sender, to explain runtime and routing
 state. The product assumes abundant local cognitive capacity; spending extra
-reasoning in the broker is preferable to making every user or agent rediscover
+reasoning in the runtime is preferable to making every user or agent rediscover
 topology by hand.
 
 When a sender tries a reasonable capability command such as:
@@ -70,7 +70,7 @@ When a sender tries a reasonable capability command such as:
 scout ask --project ../talkie --harness codex "Review this."
 ```
 
-the broker should infer the likely intent, inspect identity/session/endpoint
+the runtime should infer the likely intent, inspect identity/session/endpoint
 state, and return one of:
 
 - accepted receipt with ids and the active endpoint/session
@@ -95,7 +95,7 @@ communication.
 ## Published models and harness readiness
 
 Scout's versioned runtime catalog controls enabled model names, labels, ordering
-and reasoning levels. The broker reads the published JSON at
+and reasoning levels. The runtime reads the published JSON at
 `https://openscout.app/.well-known/runtime-catalog.v1.json` at most once per day
 by default. It saves the catalog, last check time and ETag, so restarting the
 broker does not trigger another normal request within that day. A failed check
@@ -103,7 +103,7 @@ also saves its attempt time and warning while keeping the last valid contents.
 If no saved data exists, the bundled catalog is available offline.
 
 Model controls offer **Refresh models** for an explicit check inside that daily
-interval. The broker's `GET /v1/runtime-catalog?force=true` route coalesces
+interval. The runtime's `GET /v1/runtime-catalog?force=true` route coalesces
 concurrent refreshes and uses the saved ETag for conditional requests. The
 snapshot reports its source, revision, last check and refresh warnings. A
 published data update can enable a new model or change its reasoning levels
@@ -127,7 +127,7 @@ it runs. Refreshing models keeps the composer draft.
 
 ## Endpoint State
 
-Endpoint state is the broker's best current view of a routable attachment. Keep
+Endpoint state is the runtime's best current view of a routable attachment. Keep
 flight state separate from endpoint state: an endpoint can be `idle` while a
 particular flight is `waiting`, or `waking` while multiple queued flights are
 pending.
@@ -139,7 +139,7 @@ pending.
 | `waking` | Scout is starting or resuming a compatible harness session |
 | `idle` | attached session is reachable and ready for work |
 | `working` | attached session has claimed at least one active flight or work item |
-| `unreachable` | endpoint is known, but the broker cannot currently contact it |
+| `unreachable` | endpoint is known, but the runtime cannot currently contact it |
 | `failed` | endpoint setup or wake failed with a recorded reason |
 | `superseded` | endpoint row was replaced by a newer registration or route and should only appear in diagnostics |
 | `stopped` | endpoint was intentionally detached or stopped |
@@ -153,7 +153,7 @@ with `reason: "harness_mismatch"`.
 
 One agent identity may have multiple sessions over time and may have multiple
 endpoints when different harnesses, transports, machines, or worktrees are
-valid. The broker must not make the sender guess which one matters.
+valid. The runtime must not make the sender guess which one matters.
 
 Routing selection should prefer:
 
@@ -172,7 +172,7 @@ Session records survive broker restarts as coordination metadata, but that does
 not mean the underlying harness is still alive.
 
 - `resumable`: provider metadata says Scout can reattach or resume
-- `reachability_unknown`: a prior session exists but the broker has not
+- `reachability_unknown`: a prior session exists but the runtime has not
   confirmed it is reachable
 - `not_attachable`: the session reference cannot be loaded, parsed, or matched
   to a compatible harness/profile
@@ -184,18 +184,18 @@ until an endpoint health check, attach, or wake operation confirms reachability.
 User-facing copy should render that as "session not currently reachable"; failed
 attach resolution should render as "session reference not attachable".
 
-For ACP transports, keep the OpenScout runtime session id separate from the
+For ACP transports, keep the Scout runtime session id separate from the
 provider-native ACP session id. A live endpoint retains one ACP client and
 serializes its turns. After process loss or broker restart, a new binary must
 use the provider id with `session/resume` or `session/load`. If the agent cannot
 resume or load that exact context, fail the existing-session request rather than
-silently calling `session/new`. See [SCO-090](./eng/sco-090-acp-session-continuity.md).
+silently calling `session/new`.
 
 ## Token And Coordination Accounting
 
 Scout should track the cost of coordination, not just the state of coordination.
 This is not billing infrastructure, enterprise metering, or a user-facing
-scoreboard. It is developer-facing product telemetry for local pilots: what did
+scoreboard. It is developer-facing product telemetry for local environments: what did
 running through the Scout protocol add, and did that protocol overhead reduce
 total cognitive work elsewhere?
 
@@ -228,7 +228,7 @@ Minimum useful accounting:
 - broker-side diagnostic effort, including non-token counters such as
   `diagnosticGenerated`, `dispatchAttemptCount`, `wakeFailureCount`, and
   `orientationCommandsAvoidedEstimate`
-- avoided retry/orientation loops when the broker directly resolves or coaches
+- avoided retry/orientation loops when the runtime directly resolves or coaches
   a sender
 - ids linking usage to `sessionId`, `endpointId`, `conversationId`,
   `messageId`, `invocationId`, `flightId`, and `workId`
@@ -248,7 +248,7 @@ Internal reports should answer questions like:
 - where do harness wake failures create expensive human or agent retries?
 - when is a smarter broker response cheaper than sender-side rediscovery?
 
-Accounting records should stay lightweight, mostly internal, and broker-owned.
+Accounting records should stay lightweight, mostly internal, and runtime-owned.
 Do not bulk-import full harness transcripts to compute them; store usage
 numbers, estimates, references, summaries, and a source label such as `protocol_overhead` or
 `harness_execution`.
@@ -318,7 +318,7 @@ and max uses), are retired after a peer uses their direct conversation, and are
 pruned by retention so older disposable cards do not crowd `who`/search results.
 Manual CLI cards remain persistent unless created with `scout card create
 --one-time`; `scout card cleanup` retires expired or overflow one-time cards.
-When a caller asks a concrete `projectPath`, the broker resolves the durable
+When a caller asks a concrete `projectPath`, the runtime resolves the durable
 project/agent/profile data and creates only the execution state it needs. A new
 harness context gets a session mapping and endpoint lease, not a one-time agent
 identity. Legacy one-time/session-shaped cards remain readable during migration
@@ -332,12 +332,12 @@ the caller to pre-create or choose an execution identity.
 
 For a different repo, callers should provide `projectPath` / `--project` plus
 optional `harness` / `--harness`. This is a capability request, not an identity
-request: the broker chooses or creates a compatible worker, returns durable
+request: the runtime chooses or creates a compatible worker, returns durable
 handles (`ref`, `flightId`, `conversationId`, `workId`, `sessionId`), and may
 return a situated target handle. Follow-up uses those handles; a persistent
 name/pin is an explicit promotion after the worker is known good.
 
-When the broker exposes a friendly situated target, the human-typed form is
+When the runtime exposes a friendly situated target, the human-typed form is
 `target:<handle>`. Agent-authored prompts and compact UI may render the same
 handle as `⌖handle`. Use this for "get back to that useful situation" shorthand.
 Use `session:sess.<token>` for exact harness continuation. Legacy
@@ -346,7 +346,7 @@ the compatibility resolver but are not canonical addresses.
 
 ## Session Addresses
 
-Every session the broker knows has an automatically derived, copyable address:
+Every session the runtime knows has an automatically derived, copyable address:
 
 ```text
 sess.<token>@<host>
@@ -355,13 +355,13 @@ sess.<token>@<host>
 - The local part is the canonical broker handle for the exact harness
   conversation. It is opaque, so the address carries no agent, profile,
   project, or harness semantics.
-- The host is the stable qualifier of the broker authority that owns the
-  session: the node id minus its mesh suffix (`arts-mini-openscout` →
-  `arts-mini`). It is never an IP address or a DHCP/mDNS-drifting hostname. A
-  host also matches the node's id, name, or host name, so `mini` and
-  `mini.local` name the same machine.
+- The host is the stable qualifier of the runtime authority that owns the
+  session: the node id minus its mesh suffix (`build-host-scout` →
+  `build-host`). It is never an IP address or a DHCP/mDNS-drifting hostname. A
+  host also matches the node's id, name, or host name, so `build-host` and
+  `build-host.local` name the same machine.
 - Nothing is registered to get one. No card, alias, or setup step exists for
-  addresses; they are computed from the session mapping the broker already
+  addresses; they are computed from the session mapping the runtime already
   holds.
 
 Discover and use one:
@@ -383,10 +383,10 @@ Routing is an exact-session route scoped to the host:
 
 - The host bounds resolution. A same-token projection on another machine never
   satisfies the address.
-- A session on this broker resolves as described in
+- A session on this runtime resolves as described in
   [Ask Targets And Reply Sessions](#ask-targets-and-reply-sessions), including
   the exact-session wake for a resumable session.
-- A remote session this broker has a projection of resolves to that host's
+- A remote session this runtime has a projection of resolves to that host's
   endpoint, and dispatch forwards to its authority node.
 - Failures are reported with `sessionWakeReason` on the dispatch record and
   never fall back to a fresh session:
@@ -394,7 +394,7 @@ Routing is an exact-session route scoped to the host:
   - `session_not_on_host`: the session exists, but on a different host (the
     detail names it).
   - `session_host_not_projected`: the host is a known peer that has not shared
-    the session with this broker. The local harness store is not searched.
+    the session with this runtime. The local harness store is not searched.
 
 Addressability is separate from reachability. `scout session address` reports
 each address with one of:
@@ -461,7 +461,7 @@ The canonical session id is broker-minted and opaque. Scout resolves
 `targetSessionId` / `session:sess.<token>` through the session mapping to the
 endpoint and harness-native context. Compatibility inputs may supply endpoint
 ids, `externalSessionId`, native harness thread ids, and adapter-provided
-aliases; the broker resolves those to the canonical handle before returning a
+aliases; the runtime resolves those to the canonical handle before returning a
 receipt. When no live endpoint exists, Scout may use the mapping's native alias
 to locate the context in the harness session store (for example
 `~/.codex/sessions`) and wake a flat-dispatch endpoint that resumes that exact
@@ -477,11 +477,11 @@ should consult session reachability diagnostics only when the request names an e
 
 A Scout-provisioned session cannot report observed runtime before its first
 invocation executes — the harness process has not attached yet. During that
-narrow pending-launch window (currently two minutes), the broker trusts the
+narrow pending-launch window (currently two minutes), the runtime trusts the
 exact harness/model/effort it just provisioned on the session's own endpoint,
 so a fresh profile or exact-runtime ask can reach execution instead of failing
 `session_runtime_unobserved` on a verification that is impossible by
-construction. The trust applies only to endpoints the broker itself registered
+construction. The trust applies only to endpoints the runtime itself registered
 (`scout-cardless-session` / `scout-isolated-agent-session` sources), only to
 the endpoint matching the requested session, and only inside the window — a
 conflicting request fails `session_runtime_mismatch` on the provisioned
@@ -524,7 +524,7 @@ The fork case is intentionally different from `existing`. A fork should leave
 the source session untouched, create a new execution session, and carry only an
 excellent session state: goal, decisions, constraints, evidence, relevant
 files, and next move. If the harness has a native thread-fork primitive, Scout
-can use it. If not, Scout can synthesize a compact handoff from broker-owned
+can use it. If not, Scout can synthesize a compact handoff from runtime-owned
 records and observed harness material, with the same data-ownership boundary as
 ordinary session observation. It should not bulk import the source transcript
 into Scout messages.
@@ -646,12 +646,11 @@ onto these semantics.
 
 ## External session attachment
 
-The broker's `sessions_attach` MCP primitive binds an explicitly selected native
+The runtime's `sessions_attach` MCP primitive binds an explicitly selected native
 session to a durable, exact-session mailbox using the existing MCP connection.
 It reuses endpoints and a single integration actor, creates no per-session agent,
 and returns the same opaque handle on repeated attachment. `sessions_poll`,
 `sessions_ack`, and `sessions_reply` distinguish receipt from completed work.
 An explicit `replyToSessionId` routes the result back to the originating mailbox.
 Polling does not wake a suspended host. An optional configured Devin API transport
-can resume a suspended Devin session. See [external-sessions.md](./external-sessions.md)
-for ownership, limits, and conservative handling of interrupted sends.
+can resume a suspended Devin session.

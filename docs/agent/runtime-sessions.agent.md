@@ -60,7 +60,7 @@ scout up / session start → runtime creates or attaches context → broker mint
 
 Mismatch example: Codex-targeted ask + only Claude endpoint attached → `harness_mismatch` diagnostic, not silent routing.
 
-Fresh capability work should be project-routed first. The broker returns durable
+Fresh capability work should be project-routed first. The runtime returns durable
 follow-up handles (`ref`, flight, conversation, work, session) and may return a
 situated target handle. Humans type saved situated targets as `target:<handle>`;
 agents and compact UI may render the same target as `⌖handle`. Exact session
@@ -71,7 +71,7 @@ Session handles never encode agent, profile, project, harness, model, branch, or
 node. Native harness ids are aliases in the resolver. Creating or observing a
 session must not create an agent/actor/directory entry.
 
-Fresh broker-created Claude project sessions use `tmux` by default so operators
+Fresh runtime-created Claude project sessions use `tmux` by default so operators
 can inspect and attach to the live terminal. `claude_stream_json` remains a
 supported explicit transport for configured agents and recovery paths; it is
 not the default for a new cardless Claude task. Set
@@ -109,20 +109,20 @@ Happy path: `registered → waking → idle ↔ working → idle`.
 
 After broker restart: assume `reachability_unknown` until proven.
 
-Broker-created cardless sessions are disposable. The broker checks them every
+Runtime-created cardless sessions are disposable. The runtime checks them every
 five minutes and stops an `idle` local session after 24 hours without endpoint,
 flight, work-item, or question activity. Sessions with a nonterminal flight,
 open owned work/question, or a non-idle endpoint state are never TTL candidates.
 Set `OPENSCOUT_CARDLESS_SESSION_IDLE_TTL_MS` or
 `OPENSCOUT_CARDLESS_SESSION_SWEEP_INTERVAL_MS` to tune the policy; setting the
-sweep interval to `0` disables the broker sweep for debugging.
+sweep interval to `0` disables the runtime sweep for debugging.
 
 ## Adapter Registry (pairing/runtime)
 
 Built-in Pairing adapter keys include: `claude-code`, `codex`, `acp`,
 `grok-acp`, `kimi-acp`, `pi`, `opencode`, `opencode-v2`, `opencode-acp`, and
 `openai`. `opencode` preserves the legacy V1 server contract; `opencode-v2`
-uses the breaking product-V2 shared-service API. Broker-created OpenCode work
+uses the breaking product-V2 shared-service API. Runtime-created OpenCode work
 continues to default to `opencode_acp`; V2 server use is explicit until its
 beta contract and routing policy are promoted separately.
 
@@ -130,7 +130,7 @@ Kimi Code is a first-class cardless harness target: `--harness kimi` resolves
 through the catalog to the `kimi_acp` transport, which launches `kimi acp` and
 reuses the CLI's cached `kimi login` authentication state.
 
-Permission posture: broker-owned Kimi ACP invocations have no approval
+Permission posture: runtime-owned Kimi ACP invocations have no approval
 consumer, so their invocation wrapper explicitly selects Kimi's one-shot allow
 option for tool permission requests. The generic ACP adapter remains
 interactive by default; an absent allow option is cancelled rather than
