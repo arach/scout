@@ -110,6 +110,38 @@ Commit the source, version manifests, `packages/cli/src/lib/shared/product.ts`,
 `docs.json`, and lockfile on a review branch. Merge only after the standalone
 checks and packed artifact audit pass.
 
+## 0.4.1 sign in from the terminal
+
+`scout auth login` signs a host in to your Scout account through the browser.
+`scout web install` no longer needs a download key made by hand. Keys saved by
+0.4.0 keep working, and nothing needs to change before you upgrade.
+
+- **`scout auth login`** shows a short code and opens
+  `https://console.openscout.app/device`. Sign in or make an account there, then
+  approve the terminal. The download key that comes back is saved in the macOS
+  Keychain, in the Secret Service on Linux desktops, or otherwise in a private
+  file. Over SSH, without a terminal, or with `--no-browser`, the command prints
+  the page instead of opening it. The page must be on the host that
+  `OPENSCOUT_DIST_URL` names; a sign-in page on another site is refused.
+- **`scout auth status`** shows the signed-in account and where its key is
+  saved, never the key. **`scout auth logout`** removes the key from this host
+  and says where to revoke it.
+- **`scout auth login --key -`** saves a key you already have. At a terminal it
+  asks for the key without showing it; otherwise it reads stdin.
+  `SCOUT_DIST_KEY` still overrides the saved key for VMs and CI.
+- **`scout web install`** with no saved key signs in first when it runs at a
+  terminal. Without a terminal it stops with
+  `No download key. Sign in first: scout auth login` and does not contact the
+  host.
+- **`scout web login`** at a terminal is now the browser sign-in. A key piped to
+  it is saved as before. `scout web logout` does what `scout auth logout` does.
+- **When sign-in stops, the message says why:** the code was denied or expired,
+  it was already used, the account can't download the web app, or the account
+  holds as many keys as it can. In that last case, revoke one at
+  `https://console.openscout.app/#downloads`.
+- **No saved key:** the runtime's suggested fix is now **Sign in**, which runs
+  `scout auth login`.
+
 ## 0.4.0 terminal-only core
 
 This repository now holds the Scout core alone: the runtime, protocol, harness
