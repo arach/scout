@@ -1,4 +1,4 @@
-// OpenScout apps supply the web server and client. The core can resolve an
+// The Scout apps supply the web server and client. The core can resolve an
 // explicitly installed client for the exact running version; it bundles none.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

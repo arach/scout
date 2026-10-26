@@ -12,7 +12,7 @@ plan are superseded by the [public-source boundary](./public-source-boundary.md)
 ## Standalone Scout Tailscale client
 
 `packages/scout-tailscale` is a separately versioned MIT Python client. Its
-pilot wheels are distributed only through this repository's GitHub releases,
+wheels are distributed only through this repository's GitHub releases,
 using tags such as `scout-tailscale-v0.3.1`. They do not change Scout's shared
 npm/native version, publish to PyPI, or claim GitHub Latest.
 
@@ -109,6 +109,172 @@ bash scripts/ship-npm.sh --dry-run
 Commit the source, version manifests, `packages/cli/src/lib/shared/product.ts`,
 `docs.json`, and lockfile on a review branch. Merge only after the standalone
 checks and packed artifact audit pass.
+
+## 0.4.0 terminal-only core
+
+This repository now holds the Scout core alone: the runtime, protocol, harness
+adapters, session observation and extraction, CLI, TUI, and the host side of
+phone pairing. Host pairing is `@openscout/pairing`. The CLI bundles it, and it
+is not published separately. The Mac, iOS, Android, and web apps are the
+separate Scout apps. npm publishes `@openscout/protocol` and `@openscout/scout`.
+The [public-source boundary](./public-source-boundary.md) states the ownership
+rules.
+
+### Before you upgrade
+
+- **Keep 0.3.9 while you use Mac app 0.3.9.** That app loads its views and
+  sends messages through the web server that the 0.3.9 npm package starts on
+  port 43120. 0.4.0 does not include that server. Upgrade the CLI together with
+  a Mac app release that supplies its own web server. Until then, install
+  `@openscout/scout@0.3.9`.
+- **Bun 1.4.4 or newer is required.** `scout`, `openscout-runtime`, the update
+  helper and the runtime's child processes check the version before they load
+  workspace code. An older Bun exits 1 with
+  `Scout requires Bun 1.4.4 or newer; installed: <version>. Upgrade: bun upgrade`.
+  A remote host with an older Bun refuses `scout update` before it reads or
+  installs anything, and its existing installation stays in place. The remote
+  tail client drops its legacy WebSocket fallback for Bun 1.3: on Bun 1.4 and
+  Node it reads the failed-upgrade HTTP status directly.
+- **The npm package contains no web app.** `scout server` and `scout web` serve
+  a web client only when the separate Scout apps supply one, through
+  `OPENSCOUT_WEB_SERVER_ENTRY` or the runtime's app service configuration.
+  Without one, `scout server start` explains that the web app comes from the
+  apps, and `scout web status` reports that no web app is bundled. The runtime
+  starts the web server and Scoutbot only from an explicit entry. A configured
+  entry that is missing fails closed.
+- **`scout setup` and `scout doctor` check the core only.** They report runtime
+  liveness, startup, projection, journal writes and storage. They do not check
+  app health, the local-edge certificate authority or terminal PTY readiness.
+  JSON output uses new schema names: `scout.setup.v2`, `scout.doctor.core/v1`
+  (an NDJSON stream on Bun) and `scout.doctor.core.node/v1` (Node). See
+  [Core setup and readiness](./core-readiness.md).
+- **The journal format moves forward.** The runtime writes a generation header
+  when it creates or compacts its journal. Earlier runtimes refuse that
+  header, so after that point a downgrade cannot load the journal. The first
+  start also runs migration `0028_attachment_message_keys` (schema v19).
+- **Hosts with the mesh bridge enabled need a preflight.** The bridge runs only
+  from the installed `mesh` extension or an explicit `OPENSCOUT_MESH_BRIDGE_BIN`.
+  Run `openscout-runtime mesh-bridge-preflight` from 0.4.0 as the service user,
+  before the service restarts on 0.4.0. Exit 0 is required. Exit 78 names the
+  `reason` and the `fix`. The
+  [bridge cutover guide](../packages/runtime/MESH-BRIDGE-CUTOVER.md) gives the
+  full procedure.
+- **Serve and Funnel in front of the runtime lose local trust.** If a Tailscale
+  Serve or Funnel handler forwards to the runtime's loopback port or socket,
+  local-tier requests on that listener are refused with
+  `tailscale_runtime_listener_guarded` until the handler is removed. Local
+  requests that carry proxy headers are refused with `loopback_proxy_refused`.
+  Connect remote clients to the authenticated mesh TLS listener.
+- **Some CLI and API output changed.** `scout session touched` and
+  `scout diff session` take the exact session tuple
+  `<native-session-id> --node <node-id> --harness <claude|codex|pi>`.
+  `scout providers` JSON is `scout.provider-usage/v1`, one row per observed
+  quota pool, and a missing observation reads `unknown`, not zero. A Scoutbot
+  answerer must hold the runtime's answerer claim, or it is refused with
+  `assistant_claim_required`.
+
+### Run the core on its own
+
+`scout runtimes`, `scout role`, the mission log, `scout diff`,
+`scout session touched` and `scout providers` read the runtime's `/v1` routes.
+The MCP session inventory, attachment reader and `herdr_workspaces` tool do the
+same. None of them needs a web server or sends a browser cookie.
+`scout completion zsh|bash|fish` prints tab completion from the live command
+registry, installed extensions included.
+
+On macOS, the runtime keeps the host from idle sleep while a local agent works,
+and for 10 minutes after. The `caffeinate -i` hold ends with the runtime
+process. Set `OPENSCOUT_KEEP_AWAKE=0` to turn it off.
+
+### Give a tailnet guest access
+
+`scout mesh guests list|grant|revoke` manages key-bound guest grants on the
+runtime's host, through its local HTTP API. A grant names exact agent IDs and
+expires within 30 days. `grant --json` prints the bootstrap file that
+`scout-tailscale connect` imports. See [Direct guest grants](./mesh-guests.md)
+and [Connect a Linux guest](./linux-tailnet-guest.md).
+
+### Manage the mesh
+
+Local-tier runtime APIs configure approval sharing, read cached Tailscale
+diagnostics, ping a pinned peer, configure the bridge, and collect
+consent-gated diagnostic reports. Revoking a peer's trust also withdraws its
+approval sharing. See the [mesh management API](./mesh-management-api.md).
+
+`scout mesh enroll ssh://host --tier observe` applies the tier on both hosts and
+confirms it in the receipt. Hosts unseen for 7 days are dormant: `scout mesh`
+status, doctor and nodes hide them, and `--all` includes them. Mesh calls
+without a caller deadline time out after 2.5 s to connect, 10 s to response
+headers and 12.5 s for a card probe. `scout mesh enroll --confirm-sas` accepts
+a code that contains `yo-yo`.
+
+### Extend the CLI
+
+`scout` runs explicitly installed, trusted extensions. Built-in commands always
+win, and a PATH executable never claims a verb.
+`scout extensions install|update|remove` installs local prebuilt artifacts as
+staged generations, with a prior generation kept for rollback. Conditional
+flags such as `--expect-absent` and `--expect-tree-digest` fence concurrent
+installers. `scout help <verb>` shows an extension's docs without running it.
+The mesh bridge ships as the installable `mesh` extension. Installing it does
+not replace the built-in `scout mesh` command. See [Extensions](./extensions.md).
+
+### Pair a phone
+
+A relay handshake no longer grants trust. A phone pairs only in an explicit,
+single-use window that Show code, Start pairing or `scout pair` opens for at
+most five minutes. A revoked phone that retries reaches only the reconnect room
+and is refused. Approving a pairing request opens a private window bound to
+that request, and to the phone's Noise key when the phone sends one. A
+cancelled request stays spent, and a poll for a spent window gets HTTP 410.
+
+A phone that finds the host through your account waits for the host owner's
+decision. `scout pair requests list|show|approve|deny` shows and answers those
+requests. Until approval, the phone gets no RPC, subscriptions or events.
+
+Pairing trust has one owner. Pairing authority can move to a verified capsule
+store whose reads stay fast on hosts with long pairing histories. The move is
+an explicit local cutover, and normal startup does not migrate. See the
+[pairing capsule cutover](./pairing-capsule-cutover.md) runbook. Revoking a
+phone does not close a session that is already connected.
+
+### Ask agents and follow replies
+
+- ACP agents (Grok, Kimi, Cursor, Devin, OpenClaw and OpenCode) keep their
+  messages apart. Narration before a tool call or plan update and the answer
+  after it arrive as separate paragraphs.
+- A Codex turn that fails, for example at model capacity, fails its flight but
+  leaves a live session ready for the next ask. A session that an earlier
+  failure marked offline returns to idle on its next ask when its app server
+  is still alive. Codex input keeps flowing when its diagnostic log cannot be
+  written.
+- Blocked asks fail promptly. Asks that are still working stay alive after the
+  requester's wait times out.
+- The MCP server keeps one reply waiter per flight when a client retries an ask
+  with the same request ID, and releases it on completion, failure or
+  disconnect. A single-flight wait reads that flight through
+  `GET /v1/flights/:id`, not the whole registry.
+- `scout watch` keeps bounded correlation IDs instead of message bodies, so a
+  long watch does not grow with traffic. Exact flight and message reads fall
+  back to archived storage when the SQLite projection is disabled.
+- Codex Tail finds history outside the discovery window, including Scout's
+  background Codex store. Tail events can carry a classified `prompt`, redacted
+  like summaries. Tail subscriptions keep every publication across the handoff
+  from replay to live.
+
+### Send images to the operator
+
+`scout notify --image` and `scout operator --image` store the image as a
+runtime blob bound to its message. The receipt no longer expires after six
+hours; availability follows blob and message retention. An earlier runtime
+refuses the write, and clients that display these images need blob support.
+Authorized image reads accept up to 25 MiB.
+
+### Runtime reliability
+
+A retired SQLite projection worker can no longer crash the runtime. The
+knowledge index publishes its schema in one transaction, and readers treat an
+incomplete cache as empty until a writer upgrades it.
 
 ## 0.3.7 natural-language recipient discovery
 

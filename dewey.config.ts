@@ -14,14 +14,14 @@ export default {
 
   agent: {
     criticalContext: [
-      "Public Scout work belongs in the Scout checkout and pull requests target oscout/scout. Keep private OpenScout product code, assets, credentials, and internal material in the private workspace; inspect mixed changes before copying or publishing.",
-      "Use Bun for JavaScript and TypeScript workflows.",
-      "The broker is the canonical writer for Scout-owned coordination records.",
+      "This repository is the Scout core: runtime, protocol, harness adapters, session extraction, CLI, TUI, MCP server, native services, and the host side of phone pairing. The Mac, iOS, Android, and web apps and the hosted services are separate; never add app or UI source here. See docs/public-source-boundary.md.",
+      "Use Bun 1.4.4 or newer for JavaScript and TypeScript workflows.",
+      "The runtime is the canonical writer for Scout-owned coordination records; clients submit commands through its APIs.",
       "External harness transcripts are observed source material; never bulk-import them as Scout messages.",
       "One explicit target is a DM; group coordination requires an explicit channel; broadcast is opt-in.",
-      "Use scout send for tells and scout ask for requested work or replies.",
+      "Use scout tell for updates and scout ask for requested work or replies.",
       "Mesh means reachability and coordination, not exactly-once delivery or global consensus.",
-      "Scout is for high-trust local developer pilots; do not claim enterprise or compliance readiness.",
+      "Scout assumes trusted local users and agents; do not claim enterprise or compliance readiness.",
       "Use gitmoji commit subjects and never add AI co-authoring footers.",
     ],
 

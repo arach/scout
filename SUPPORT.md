@@ -15,7 +15,7 @@ command, expected result, and sanitized output.
 
 ## Product and hosted-service questions
 
-The OpenScout native applications and hosted services are maintained outside
+The Scout native applications and hosted services are maintained outside
 this public core repository. Use [oscout.net](https://oscout.net) for product
 context and contact routes.
 

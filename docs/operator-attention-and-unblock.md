@@ -1,6 +1,6 @@
 # Operator Attention And Unblock
 
-OpenScout should treat "needs the human" as a first-class product state, not as a side effect of whichever harness happened to print the prompt.
+Scout should treat "needs the human" as a first-class product state, not as a side effect of whichever harness happened to print the prompt.
 
 This doc records the current posture and the next implementation steps for approvals, questions, waiting states, permission prompts, and notifications.
 
@@ -13,9 +13,9 @@ The operator-attention model should make that boundary explicit:
 - Project attention from first-party session state when Scout already sees the event.
 - Ingest host-level permission prompts through a host integration, not by pretending the MCP server can see a request that the host intercepted before the server was called.
 - Record durable broker unblock requests for anything that can outlive a single session frame.
-- Route notifications from the broker/session attention model, with dedupe and clear ownership.
+- Route notifications from the runtime/session attention model, with dedupe and clear ownership.
 
-The [Shared Interaction Model](./interaction-model.md#human-handoffs) defines
+The Shared Interaction Model defines
 the target handoff contract across Scout and external personal-agent interfaces:
 one decision reference, an explicit next actor, action or artifact revision
 binding, verified response authority, and a result returned to the waiting work.
@@ -34,7 +34,7 @@ block. Scout exposes two MCP tools for that attention-plane traffic:
   continues with the declared default unless the operator replies soon enough
   to influence later work.
 
-Both are broker-backed durable messages to the operator. The broker message id
+Both are runtime-backed durable messages to the operator. The runtime message id
 is also the signal id, so ordinary threaded replies provide correlation without
 creating a second consultation state machine. Neither tool creates a flight,
 changes a work item, or marks the agent waiting. The tool confirms when that
@@ -80,10 +80,10 @@ was alertable at some point in its history. The web fleet projection therefore
 retires collaboration-record attention when the record has not moved for seven
 days (`ATTENTION_STALE_AFTER_MS`). A retired record keeps its state, history,
 and conversation link and remains available through work and follow surfaces;
-retirement neither deletes it nor changes a broker-owned record.
+retirement neither deletes it nor changes a runtime-owned record.
 
 The projection applies this age bound to every eligible collaboration state,
-including `waiting` and `review`. Any later broker-owned movement updates the
+including `waiting` and `review`. Any later runtime-owned movement updates the
 record and, if it remains otherwise alertable, makes it eligible for attention
 again. Rows with the same title and owner are collapsed after the age bound,
 keeping the most recently updated live row, so an old duplicate cannot hide a
@@ -94,7 +94,7 @@ current handback.
 Implemented now:
 
 - Runtime session attention projection exists in `packages/runtime/src/session-attention.ts`.
-- Broker-owned durable `unblock_request` records and events remain a planned
+- Runtime-owned durable `unblock_request` records and events remain a planned
   integration boundary. The current protocol/runtime source does not expose
   that lifecycle; MCP feed schemas mentioning the kind are not an implementation.
 - Mobile bridge inbox now uses session attention instead of approvals only.
@@ -111,7 +111,7 @@ Implemented now:
   It has separate inbound/outbound, attention, scope, and preview controls.
 - Scout MCP exposes `notify_operator` and `consult_operator`; the latter
   requires a safe default. Both write operator messages without creating a
-  flight, and the broker can fan out a generic APNs alert without putting agent
+  flight, and the runtime can fan out a generic APNs alert without putting agent
   content in the push payload. The relay preserves opaque conversation/message
   correlation and keeps these non-blocking alerts quiet.
 - Web operator attention reads pairing-session approvals and collaboration
@@ -151,7 +151,7 @@ When an operator prompt appears stuck, first classify where the prompt lives:
 
 ## Durable Unblock Model
 
-Planned: broker-owned unblock records for human actions that may outlive a
+Planned: runtime-owned unblock records for human actions that may outlive a
 single websocket frame. This record lifecycle is not implemented in the current
 protocol/runtime. Existing session attention and collaboration records remain
 the implemented foundations; the fields below describe the target model.
@@ -193,7 +193,7 @@ The session inbox can continue projecting lightweight items, but durable host an
 
 ## Managed permission requests
 
-Scout-driven Claude tmux and owned Codex app-server invocations have a broker
+Scout-driven Claude tmux and owned Codex app-server invocations have a runtime
 permission bridge. `BrokerPermissionService` writes a durable `question` record
 with `metadata.permissionRequest`, containing the exact visible prompt or native
 request parameters, project root, live session, invocation, flight, version and
@@ -203,11 +203,11 @@ paired-device notification; APNs alert text and custom payload remain generic.
 
 `POST /api/operator-attention/permissions/decide` forwards
 `{ requestId, version, decision: "once" | "project" | "deny" }` to the
-machine-local broker route `POST /v1/permissions/decide`. The broker owns the
+machine-local runtime route `POST /v1/permissions/decide`. The runtime owns the
 pending live callback, records an actuation attempt, rejects duplicate/stale
 answers, and sends only to that process. The Requests page and Scoutbot share
 this API through `useRequestActions`. No background resume, fork, or project hook
-is installed. A broker restart loses the live callback: surviving records cannot
+is installed. A runtime restart loses the live callback: surviving records cannot
 be actuated and return a conflict requiring the operator to open the session.
 
 Permission scope is not invented:
@@ -227,7 +227,7 @@ Permission scope is not invented:
 | --- | --- | --- |
 | Claude folder trust, managed tmux | `local-agents.ts`: `waitForReadyComposer`, `tmuxPaneTailBlockingHarnessDialog`; `tmux-permission.ts`: `parseTmuxPermission`. Human wait does not spend the boot deadline. | Re-read the bound pane, select the visible trust/exit choice, `tmux send-keys`; confirm the prompt leaves before continuing startup. |
 | Claude tool approvals, managed tmux | `parseTmuxPermission` uses `continuation/dialog.ts`; capture during dispatch verification and reply polling. Unparsed dialogs stay native. | Revalidate the visible dialog fingerprint, send its offered choice to the bound live pane, verify disappearance. |
-| Claude, Herdr | Web `herdr-host-attention.ts` and `herdr-continuation.ts` already parse blocked panes. Not ingested by this broker permission bridge. | Existing `herdr-permission-answer.ts`: `answerHerdrPermission`, audited/revalidated `herdr agent send-keys`; currently a separate path. |
+| Claude, Herdr | Web `herdr-host-attention.ts` and `herdr-continuation.ts` already parse blocked panes. Not ingested by this runtime permission bridge. | Existing `herdr-permission-answer.ts`: `answerHerdrPermission`, audited/revalidated `herdr agent send-keys`; currently a separate path. |
 | Claude stream JSON / pairing adapter | Runtime `claude-stream-json.ts` observes result `permission_denials`; Claude adapter spec declares no normalized approval decision channel. Not an interactive permission bridge. | Needs a native bidirectional control channel; cannot turn a terminal denial/result into a live grant. |
 | Codex, Scout-owned app-server | Agent-sessions `local/transports/codex-app-server.ts`: `handleServerRequest`, runtime `codex-app-server.ts`: bound `onPermissionRequest`. Command/file approval requests are held instead of receiving an unsupported-request error. | Reply to the same JSON-RPC request id on the existing stdio transport; bind thread/turn/request identity. Attached foreign app-servers are excluded. |
 | ACP: Grok / OpenCode / Kimi / Devin / Cursor | Agent-sessions `adapters/acp/adapter.ts`: `handlePermissionRequest` supports interactive, safe-reject, and auto-approve policies. Kimi/Devin broker invocations currently auto-approve; Cursor safe-rejects. Grok/OpenCode use adapter defaults. No new bridge in this slice. | Adapter `decide` answers `session/request_permission` on the existing ACP process. Policy changes and attention ingestion remain separate work. |

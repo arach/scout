@@ -8,7 +8,7 @@ Verified: 2026-07-14
 
 ## Role
 
-`scoutd` is the Rust local daemon at the root of the Scout process tree. It installs launchd, supervises the Bun base composer, exposes doctor/status JSON, repairs stale process ownership, and hosts read-only native projections outside the broker/web request queues.
+`scoutd` is the Rust local daemon at the root of the Scout process tree. It installs launchd, supervises the Bun base composer, exposes doctor/status JSON, repairs stale process ownership, and hosts read-only native projections outside the runtime/web request queues.
 
 | Owns | Does not own |
 |---|---|
@@ -29,7 +29,7 @@ Legacy binary name `openscout-supervisor` is compatibility-only; doctor still re
 | `scoutd` | Rust CLI + long-running supervisor |
 | `scout-base` | Bun process composer (`openscout-runtime.mjs base`) |
 | `scout-broker` | broker child started by base |
-| `scout-web` / `scout-edge` / `OpenScoutMenu` | optional children under base |
+| `scout-web` / `scout-edge` / `OpenScoutMenu` | optional children under base, supplied by the separate apps |
 | `launchd` | macOS service keeper for `scoutd supervise` |
 | `daemon_state` | `scoutd-state.json` in runtime directory |
 | `service_status` | merged launchd + health + process-tree view |
@@ -97,7 +97,7 @@ Snapshot mode returns one bounded frame. Subscribe mode keeps the socket open,
 returns an initial `openscout.native.read.snapshot/v1` frame, then pushes another
 sequenced bounded snapshot only when the material agent projection changes.
 `openscout.native.read.event/v1` heartbeat frames detect dead connections without
-polling the broker. Requests and frames are newline-delimited JSON.
+polling the runtime. Requests and frames are newline-delimited JSON.
 
 The projection is disposable and stale-while-revalidate. The broker journal remains
 canonical. Projection parsing, persistence, or a slow native client must never block
@@ -164,11 +164,11 @@ Output schema: `scout.doctor.v1` phases (CLI wraps same config).
 
 `doctor --fix` remains conservative and opt-in. The always-on process sweep is
 narrower still: it terminates only an expired leased process group whose live
-command matches the lease's isolated profile marker, or an orphaned OpenScout
+command matches the lease's isolated profile marker, or an orphaned Scout
 pairing advertisement when the same identity and port have a live replacement.
-Harness/session retirement remains broker-owned and must use broker lifecycle
+Harness/session retirement remains runtime-owned and must use broker lifecycle
 state; scoutd must not infer that an agent is stale from process age alone.
-The broker rechecks cardless-session eligibility immediately before stopping a
+The runtime rechecks cardless-session eligibility immediately before stopping a
 harness, and only retires an `idle` session with no nonterminal flight and no
 open work/question ownership.
 
@@ -188,7 +188,7 @@ open work/question ownership.
 - Write broker records or treat a native projection/cache as canonical.
 - Turn the native read service into a synchronous proxy for `/v1/snapshot` or `/api/agents`.
 - Replace `scout-base` child composition with Rust reimplementation.
-- Treat `scoutd` as the broker canonical writer.
+- Treat `scoutd` as the runtime canonical writer.
 - Require `scoutd` for dev-only `bun ... server open` paths (optional acceleration).
 
 ## Code Map
@@ -205,7 +205,7 @@ open work/question ownership.
 
 ## Transcript Firehose Boundary
 
-`scoutd` does not parse harness transcripts. The supervised Bun broker owns the
+`scoutd` does not parse harness transcripts. The supervised Bun runtime owns the
 single runtime tail service, discovers harness-owned logs, and publishes bounded
 `TailEvent` observations through broker HTTP reads and the `tail.events` tRPC
 subscription. This keeps transcript parsing out of the Rust service kernel and

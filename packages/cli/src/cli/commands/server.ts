@@ -126,7 +126,7 @@ export function resolveScoutControlPlaneWebServerEntry(): string {
   const selected = resolveLegacyWebEntry(process.env, dirname(fileURLToPath(import.meta.url)));
   if (selected) return selected;
   throw new ScoutCliError(
-    "The web app is supplied by OpenScout apps, not the Scout core. Install the apps and configure OPENSCOUT_WEB_SERVER_ENTRY.",
+    "The web app is supplied by the Scout apps, not the Scout core. Install the apps and configure OPENSCOUT_WEB_SERVER_ENTRY.",
   );
 }
 

@@ -1,6 +1,6 @@
 # Architecture
 
-This document is the system-level map for OpenScout: what the system is made of, and how it treats data. If you are new, read it as a guide to four things: what the broker is, what the runtime does, what the protocol defines, and which records Scout owns versus observes.
+This document is the system-level map for Scout: what the system is made of, and how it treats data. If you are new, read it as a guide to three things: what the runtime does, what the protocol defines, and which records Scout owns versus observes.
 
 Read this after the repo [`README.md`](../README.md) if you are orienting to the project for the first time. If you want the command-first ramp first, read [`quickstart.md`](./quickstart.md) before this page. For the precise meaning of Scout's core nouns and how they map onto external agent protocols, read [`concepts.md`](./concepts.md). For the question, work-item, and delegation semantics between agents, read [`agents-and-collaboration.md`](./agents-and-collaboration.md). License is Apache-2.0; see the repo [`LICENSE`](../LICENSE) and [`NOTICE`](../NOTICE).
 
@@ -28,12 +28,12 @@ coordination model. Each interface presents the view and actions its participant
 is authorized to access; changing interfaces does not create a separate work
 history or grant broader permission.
 
-The broker, runtime, and transport implementations support this enduring product
+The runtime and transport implementations support this enduring product
 role and may evolve or be replaced as external standards mature. Standardized
 communication makes mediation easier to provide; Scout still organizes which
 capabilities to use, how work continues, and what needs a person. Preserve
 interaction meaning and authority boundaries when replacing machinery.
-The [Shared Interaction Model](./interaction-model.md) is the adopted design
+The Shared Interaction Model is the adopted design
 contract; its coverage table identifies behavior that remains unimplemented.
 
 Remember these three things:
@@ -46,13 +46,13 @@ Scout does not replace Claude Code, Codex, or any other agent tool. It handles d
 
 In practice, the architecture is aiming for three stable outcomes:
 
-- `packages/runtime`: clients and adapters submit commands to the local broker instead of writing Scout-owned records directly
+- `packages/runtime`: clients and adapters submit commands to the local runtime instead of writing Scout-owned records directly
 - `packages/protocol`: one shared model for messages, invocations, flights, identities, and collaboration records
 - `packages/agent-sessions`: many operator surfaces and harness adapters can observe sessions around that core
 
 Platform Scout is distinct from the conversational assistant handle
-`@scoutbot`. The product, broker, CLI, protocol, and coordination model remain
-Scout/OpenScout. `@scoutbot` is the routeable assistant identity that may appear
+`@scoutbot`. The product, runtime, CLI, protocol, and coordination model are
+all Scout. `@scoutbot` is the routeable assistant identity that may appear
 in operator chrome, mentions, chips, and broker logs when the human is talking to
 the assistant. Friendly UI may call that assistant Scout, but use `@scoutbot`
 where the handle matters.
@@ -63,9 +63,9 @@ That framing matters because most of the design choices below are about protecti
 
 A small set of constraints shape every design decision.
 
-**Local-first, not cloud-first.** The broker, agent registry, and Scout-owned state live on your machine. Nothing phones home by default. Local files and databases are the source of truth, not a hosted API. The privileged web server is loopback-only by default; a non-loopback bind must be explicitly enabled with `OPENSCOUT_WEB_ALLOW_LAN=1`. Privileged HTTP and WebSocket routes require the per-process web credential in addition to host, origin, and socket-peer checks. Set `OPENSCOUT_WEB_AUTH_TOKEN` when an authenticated LAN client or reverse proxy needs a stable secret; otherwise the server generates an ephemeral credential and issues its HttpOnly session cookie only to direct loopback browser bootstrap requests. Trusted mDNS names and origins are defense-in-depth, never authorization credentials.
+**Local-first, not cloud-first.** The runtime, agent registry, and Scout-owned state live on your machine. Nothing phones home by default. Local files and databases are the source of truth, not a hosted API. The privileged web server is loopback-only by default; a non-loopback bind must be explicitly enabled with `OPENSCOUT_WEB_ALLOW_LAN=1`. Privileged HTTP and WebSocket routes require the per-process web credential in addition to host, origin, and socket-peer checks. Set `OPENSCOUT_WEB_AUTH_TOKEN` when an authenticated LAN client or reverse proxy needs a stable secret; otherwise the server generates an ephemeral credential and issues its HttpOnly session cookie only to direct loopback browser bootstrap requests. Trusted mDNS names and origins are defense-in-depth, never authorization credentials.
 
-**High-trust local pilot, not hardened enterprise perimeter.** Scout assumes trusted local users, trusted local agents, and explicit pairing/mesh choices; it is not yet a multi-tenant, compliance-ready system.
+**High-trust local environment, not hardened enterprise perimeter.** Scout assumes trusted local users, trusted local agents, and explicit pairing/mesh choices; it is not yet a multi-tenant, compliance-ready system.
 
 **Observe, don't absorb.** Harnesses own their primary transcripts and logs. Scout observes them through adapters and tail views, then stores links, metadata, and Scout-owned coordination records without importing external turns wholesale. This boundary is central enough to have its own section below; see [The Data Model](#the-data-model).
 
@@ -85,7 +85,7 @@ and acts on the same authorized work rather than owning competing state.
 
 ![Scout communication flow](arc:communication-flow)
 
-Agent sessions connect to a single Scout broker over HTTP and SSE. The broker owns the agent registry and routes messages between sessions. Each harness uses its own transport -- `stream-JSON` for Claude Code, `app-server` for Codex -- but the protocol layer above is shared.
+Agent sessions connect to a single Scout runtime over HTTP and SSE. The runtime owns the agent registry and routes messages between sessions. Each harness uses its own transport -- `stream-JSON` for Claude Code, `app-server` for Codex -- but the protocol layer above is shared.
 
 A typical exchange looks like this:
 
@@ -98,7 +98,7 @@ codex     →  broker (post reply)
 broker    →  operator (deliver reply via SSE)
 ```
 
-One concrete example: `scout ask --project ../talkie --harness claude "review the auth module"` sends a capability request to the broker. The broker resolves the project/harness constraint to an existing or newly created worker, forwards the request to a compatible session, records the target acknowledgement, and tracks the later completion as a flight. A flight is the broker's tracked record for an ask-style request, including retry, acknowledgement, and completion state. Caller wait budgets may stop a CLI or MCP call from waiting, but they do not cancel or fail the broker flight.
+One concrete example: `scout ask --project ../talkie --harness claude "review the auth module"` sends a capability request to the runtime. The runtime resolves the project/harness constraint to an existing or newly created worker, forwards the request to a compatible session, records the target acknowledgement, and tracks the later completion as a flight. A flight is the runtime's tracked record for an ask-style request, including retry, acknowledgement, and completion state. Caller wait budgets may stop a CLI or MCP call from waiting, but they do not cancel or fail the runtime flight.
 
 ## Core Moving Parts
 
@@ -106,10 +106,10 @@ One concrete example: `scout ask --project ../talkie --harness claude "review th
 |-------|------|------------|
 | **Protocol** | Shared type system and address grammar | Defines the agent identity grammar, message records, invocation requests, flight records, collaboration contracts, and bindings |
 | **Broker** | Local message bus and state store | SQLite-backed daemon that owns registration, routing, threading, dispatch, HTTP reads/writes, and SSE updates |
-| **Native read projection** | Low-latency local surface reads | Rust journal consumer in `scoutd` that serves bounded, persisted projections over a Unix socket without entering the broker or web request queues |
+| **Native read projection** | Low-latency local surface reads | Rust journal consumer in `scoutd` that serves bounded, persisted projections over a Unix socket without entering the runtime or web request queues |
 | **Runtime** | Session and runtime lifecycle management | Starts, resumes, stops, and health-checks sessions across harnesses. Manages tmux sessions, system prompts, and transport adapters |
-| **CLI** | Operator interface | `scout up`, `scout send`, `scout ask`, `scout who` -- passes structured route intent to the broker and keeps bootstrap/orientation cheap |
-| **Surfaces** | Views into broker state | Desktop, web, iOS, terminal, and pi. They read from the broker; none of them own agent state |
+| **CLI** | Operator interface | `scout up`, `scout send`, `scout ask`, `scout who` -- passes structured route intent to the runtime and keeps bootstrap/orientation cheap |
+| **Surfaces** | Views into runtime state | Terminal and pi here; the Mac, iOS, Android, and web apps are separate clients. They read from the runtime; none of them own agent state |
 
 ### Protocol
 
@@ -130,7 +130,7 @@ scout watch                              # → SSE stream of all events
 
 #### Broker module map
 
-The broker implementation lives in `packages/runtime/src/`. `broker-daemon.ts` is the
+The runtime implementation lives in `packages/runtime/src/`. `broker-daemon.ts` is the
 process composition root: it wires dependencies, starts TCP/Unix/WebSocket listeners,
 and runs background loops. Business workflows live in `broker-*` service modules;
 HTTP route dispatch lives in `broker-http-router.ts`.
@@ -184,13 +184,13 @@ why the Rust binary is named `scoutd`, while the Bun orchestrator keeps the
 
 ### CLI
 
-The operator's main interface. It sends route intent such as `--to hudson` or `--channel triage` to the broker and renders broker receipts, remediation actions, and orientation views. Target metadata belongs in structured command fields, not in the message body.
+The operator's main interface. It sends route intent such as `--to hudson` or `--channel triage` to the runtime and renders broker receipts, remediation actions, and orientation views. Target metadata belongs in structured command fields, not in the message body.
 
 ### Surfaces
 
-Desktop host, web dashboard, iOS companion, terminal UI, and pi. These are views into broker-owned control-plane state and observed harness activity. None of them own agent state; the broker does.
+Terminal UI and pi in this repository, plus the separate Mac, iOS, Android, and web apps. These are views into runtime-owned control-plane state and observed harness activity. None of them own agent state; the runtime does.
 
-The pi extension (see the [archived integration proposal](./archive/eng/founding-proposals/sco-015-pi-scout-integration.md)) runs Scout coordination as a native pi extension, letting pi sessions send and receive messages via the broker alongside other harnesses.
+The pi extension runs Scout coordination as a native pi extension, letting pi sessions send and receive messages via the runtime alongside other harnesses.
 
 ## Performance Direction
 
@@ -198,7 +198,7 @@ Operator commands and surfaces need to stay cheap. They should not repeatedly sc
 the machine, serialize the full broker registry, or queue presentation reads behind
 routing work.
 
-The broker is the canonical writer and communications fast lane. Its hot path owns
+The runtime is the canonical writer and communications fast lane. Its hot path owns
 identity, reachability, routing metadata, messages, invocations, deliveries, and
 flights. Rich cards, UI ordering, and other presentation joins are derived read
 models rather than synchronous broker work.
@@ -211,12 +211,12 @@ it does not require the web app or a broker snapshot request. The web endpoint r
 a compatibility fallback while other surfaces migrate.
 
 The read service may lag briefly and must be stale-while-revalidate. It cannot write
-Scout-owned records, synchronously proxy the broker, inspect private in-memory broker
+Scout-owned records, synchronously proxy the runtime, inspect private in-memory broker
 state, or make routing wait for projection work.
 
 ## The Data Model
 
-Scout is a control plane, not a transcript warehouse. Its storage model starts from one boundary: Scout owns the records it creates or routes, and observes external harness records without importing them wholesale. This matters for product scope, operator trust, and system design. The broker should make agent coordination durable without pretending to become the canonical database for every model turn written by Claude Code, Codex, or another harness.
+Scout is a control plane, not a transcript warehouse. Its storage model starts from one boundary: Scout owns the records it creates or routes, and observes external harness records without importing them wholesale. This matters for product scope, operator trust, and system design. The runtime should make agent coordination durable without pretending to become the canonical database for every model turn written by Claude Code, Codex, or another harness.
 
 Scout's coordination vocabulary is small. A **conversation** groups related turns; a **message** is a durable "say this" record; an **invocation** is a request for work; a **flight** is the lifecycle record attached to an invocation; a **delivery** is one routed attempt to reach a target; a **binding** maps a project path and branch to an addressable target; a **question** asks for an answer; and a **work item** owns a durable piece of execution. [`concepts.md`](./concepts.md) defines each precisely and maps them onto external protocols. This section is about who owns them.
 
@@ -251,13 +251,13 @@ ids and session-shaped agent records, but new writes must not create them.
 
 Scout owns first-party control-plane records:
 
-- nodes, actors, agents, endpoints, and bindings registered with the broker
+- nodes, actors, agents, endpoints, and bindings registered with the runtime
 - conversations, messages, forwards, and replies created through Scout
 - invocations, flights, deliveries, delivery attempts, and dispatch records
 - collaboration records such as questions and work items when created through Scout
 - local read models and activity projections derived from those first-party records
 
-These records are broker-owned facts. They can be persisted, replayed, projected into SQLite, forwarded across mesh peers, and shown consistently across CLI, desktop, mobile, and agent tools.
+These records are runtime-owned facts. They can be persisted, replayed, projected into SQLite, forwarded across mesh peers, and shown consistently across CLI, desktop, mobile, and agent tools.
 
 ### What Scout Observes
 
@@ -334,7 +334,7 @@ while the journal's device/inode and rewrite-generation identity match. Atomic
 replacement causes a barrier-based rescan even if the filesystem reuses an inode. Flush captures one revision, so continuous new traffic
 cannot prevent that boundary from completing. Worker requests and waiting reads
 have fixed admission limits. SQLite and artifact CPU work, historical
-publication, and event compression stay off the broker's command loop.
+publication, and event compression stay off the runtime's command loop.
 The default worker request deadline is 30 seconds. Advancing replay progress
 extends that deadline; an unchanged heartbeat does not. A stalled worker rejects
 its waiters and restarts against the same database. Canonical event replay writes
@@ -528,7 +528,7 @@ names a role or definition, `#ops` names a channel, and
 can resolve through current broker records to the right ref, session, or
 binding, but it is not itself a raw harness session id.
 
-A **route alias** is separate broker-owned pointer state attached after creation
+A **route alias** is separate runtime-owned pointer state attached after creation
 to one durable agent id or one exact broker-known session. `alias:review`
 selects it explicitly; a bare `review` consults it only after native agent
 names/selectors fail. Aliases are scoped by owner realm, canonical project, and
@@ -553,13 +553,12 @@ not the default routing model.
 Runtime launch profiles are a separate concept from the `profile:` identity
 qualifier. Leading reserved names `Fable`, `Kimi`, `Grok`, and `Opus` in CLI
 natural-language asks produce a structured `runtime_profile` route for a fresh
-current-project session. The broker owns the harness/model/default mapping.
+current-project session. The runtime owns the harness/model/default mapping.
 Fable and Opus accept broker-validated effort overrides. Kimi and Grok reject
 effort overrides until their ACP transports expose a corresponding control.
 Likewise, `agent Composer Review to ...` produces an `existing_handle` route
 for exact `@composer-review` lookup. It does not create a session, choose a
-local duplicate, or consult fuzzy aliases. See
-[`runtime-profile-and-existing-handle-routing.md`](./eng/runtime-profile-and-existing-handle-routing.md).
+local duplicate, or consult fuzzy aliases.
 
 Neither route is a post-hoc alias: runtime profiles are launch presets and
 existing handles name already-known live targets. Mutable route aliases retain
@@ -618,13 +617,13 @@ reserved name; Scout does not silently rename production identities.
 
 Scout separates identity into three layers, each serving a different audience:
 
-- **Canonical identity** is exact, stable, and system-owned. It includes every dimension needed to distinguish one agent from all others. Humans rarely type it, but the broker always stores it.
+- **Canonical identity** is exact, stable, and system-owned. It includes every dimension needed to distinguish one agent from all others. Humans rarely type it, but the runtime always stores it.
 
 - **Minimal unique identity** is the shortest address that still resolves to exactly one agent. Scout computes it automatically from the current set of online agents. When there is only one `hudson`, `@hudson` is enough. When two exist on different machines, `@hudson.node:mini` disambiguates.
 
 - **Configured identity alias** is an input declared on an agent definition and participates in native identity resolution.
 
-- **Route alias** is mutable broker state over an already-existing agent or exact session. It has its own binding id, revision, owner/project/node scope, authorization, expiry, and audit history. It does not mutate identity.
+- **Route alias** is mutable runtime state over an already-existing agent or exact session. It has its own binding id, revision, owner/project/node scope, authorization, expiry, and audit history. It does not mutate identity.
 
 ### The Six Dimensions
 
@@ -707,7 +706,7 @@ If a configured alias is shorter than the minimal canonical form and resolves un
 
 **Example:**
 
-- Canonical: `@hudson.hudson-main-8012ac.node:arachs-mac-mini-local`
+- Canonical: `@hudson.hudson-main-8012ac.node:build-host-local`
 - Minimal unique: `@hudson` (if only one hudson is online)
 - Alias: `@huddy`
 
@@ -724,21 +723,21 @@ For a **harness-backed execution target**, the data-level contract has three
 pieces: register an **identity**, expose a reachable **endpoint**, and attach a
 **session**.
 
-- **Identity** is the stable Scout address for the agent, built from the dimensions above (`definitionId`, `workspaceQualifier`, `harness`, `model`, `node`). Human text uses a short handle; the broker resolves it to one exact target.
-- **Endpoint** is how the broker reaches the agent: an agent id, an authority node, a harness, a transport, a session reference, and current reachability. The endpoint is a route, not the agent's personality — an agent can move between sessions or machines while keeping a stable identity.
+- **Identity** is the stable Scout address for the agent, built from the dimensions above (`definitionId`, `workspaceQualifier`, `harness`, `model`, `node`). Human text uses a short handle; the runtime resolves it to one exact target.
+- **Endpoint** is how the runtime reaches the agent: an agent id, an authority node, a harness, a transport, a session reference, and current reachability. The endpoint is a route, not the agent's personality — an agent can move between sessions or machines while keeping a stable identity.
 - **Session** is the concrete harness conversation, process, or thread that receives work. Sessions are harness-specific: a request for a Codex harness must not bind to a Claude session, or the reverse, without an explicit adapter.
 
-Once attached, an integration speaks two paths through the broker:
+Once attached, an integration speaks two paths through the runtime:
 
 - the **message path** (`send`) for durable "say this" updates that return a broker receipt but no tracked work lifecycle
 - the **invocation path** (`ask`) for work, where the ask creates an invocation, the invocation creates a flight, and the flight tracks queued, running, waiting, completed, failed, or cancelled state
 
-Two rules hold across both paths. Do not hide routing instructions in the message body when structured target fields exist — the broker should know the target as metadata, not by parsing prose. And never write harness-owned files: adapters observe `.claude` and Codex state, they do not author or repair it.
+Two rules hold across both paths. Do not hide routing instructions in the message body when structured target fields exist — the runtime should know the target as metadata, not by parsing prose. And never write harness-owned files: adapters observe `.claude` and Codex state, they do not author or repair it.
 
 That is the shape of the boundary. For the full adapter contract — endpoint states, session invariants, broker-guided routing, preferred MCP tools, human-input and permission handling, and the compatibility checklist — read [`agent-integration-contract.md`](./agent-integration-contract.md). For the wire-level message and invocation workflows, read [`scout-comms.md`](./scout-comms.md).
 
 For represented authority, cross-interface continuity, and human handoffs, use
-the [Shared Interaction Model](./interaction-model.md). Authorization context,
+the Shared Interaction Model. Authorization context,
 chat, work item, invocation/flight, and runtime session have separate lifetimes.
 Existing actor and requester ids are coordination facts, not proof of a
 delegated permission. New adapters must not infer authority from body text or
@@ -752,9 +751,9 @@ silently substitute the local operator's privileges.
 
 2. **Start or attach.** `scout up` launches or resumes the harness session Scout should use for that target, with a generated system prompt that includes the collaboration contract when Scout owns the launch path.
 
-3. **Route.** Messages with explicit target intent hit the broker, which resolves the name, finds the endpoint, and dispatches.
+3. **Route.** Messages with explicit target intent hit the runtime, which resolves the name, finds the endpoint, and dispatches.
 
-4. **Invoke.** For ask-style interactions, the broker creates a flight record -- tracking the request-response lifecycle with acknowledgement, retry, and durable completion semantics.
+4. **Invoke.** For ask-style interactions, the runtime creates a flight record -- tracking the request-response lifecycle with acknowledgement, retry, and durable completion semantics.
 
 5. **Stop.** `scout down` terminates the local session and marks the endpoint offline.
 
@@ -770,7 +769,7 @@ scout down hudson        # stop
 
 ![Mesh topology](arc:mesh-topology)
 
-Agents on different machines discover each other through mesh forwarding. Each broker advertises its local agents to peer brokers, which sync endpoint tables so `@agent.other-machine` resolves across the network. In Scout, mesh means reachability and coordination, not global consensus, exactly-once delivery, or replicated external transcript storage.
+Agents on different machines discover each other through mesh forwarding. Each runtime advertises its local agents to peer runtimes, which sync endpoint tables so `@agent.other-machine` resolves across the network. In Scout, mesh means reachability and coordination, not global consensus, exactly-once delivery, or replicated external transcript storage.
 
 ### Discovery
 
@@ -784,17 +783,17 @@ scout mesh discover
 OPENSCOUT_MESH_SEEDS=http://workstation-2:43110 scout mesh discover
 ```
 
-Once a peer is found, the broker fetches its agent registry via `/v1/snapshot` and merges remote agents into its local database. Each agent carries an `authorityNodeId` — the node that owns it. Messages and invocations for remote agents get forwarded to the authority broker over HTTP.
+Once a peer is found, the runtime fetches its agent registry via `/v1/snapshot` and merges remote agents into its local database. Each agent carries an `authorityNodeId` — the node that owns it. Messages and invocations for remote agents get forwarded to the authority broker over HTTP.
 
 ### Forwarding
 
-When you `scout send --to hudson "..."` and hudson lives on another machine, the broker's delivery planner detects that hudson's `authorityNodeId` differs from the local node. Instead of delivering locally, it bundles the message with its full context — actors, agents, conversation, bindings — and POSTs it to the remote broker's `/v1/mesh/messages` endpoint. The remote broker commits the bundle to its own journal and delivers locally.
+When you `scout send --to hudson "..."` and hudson lives on another machine, the runtime's delivery planner detects that hudson's `authorityNodeId` differs from the local node. Instead of delivering locally, it bundles the message with its full context — actors, agents, conversation, bindings — and POSTs it to the remote broker's `/v1/mesh/messages` endpoint. The remote broker commits the bundle to its own journal and delivers locally.
 
 Invocations work the same way. Ask-style requests forward to the authority node, which executes them and returns the flight record.
 
 ### Pairing
 
-A phone or second workstation joins the mesh through `scout pair`. The local broker starts a relay (or connects to an external one), generates a QR code with a pairing payload, and waits. The remote device scans the code, connects over a Noise-protocol-encrypted channel, and becomes a full mesh peer — not just a viewer. It gets a live view of the agent graph and can send messages into any conversation.
+A phone or second workstation joins the mesh through `scout pair`. The local runtime starts a relay (or connects to an external one), generates a QR code with a pairing payload, and waits. The remote device scans the code, connects over a Noise-protocol-encrypted channel, and becomes a full mesh peer — not just a viewer. It gets a live view of the agent graph and can send messages into any conversation.
 
 ```bash
 scout pair              # show QR code, start managed relay

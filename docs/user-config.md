@@ -1,6 +1,6 @@
 # User Configuration
 
-Scout stores per-user configuration in `~/.openscout/user.json`. This config is shared between the CLI and the web UI.
+Scout stores per-user configuration in `~/.openscout/user.json`. The CLI and any separate Scout app read this file.
 
 ## Your Operator Name And Handle
 
@@ -17,9 +17,9 @@ scout config set name Alice
 scout config set handle @alice
 ```
 
-### Set via Web UI
+### Set in a Scout app
 
-Open Settings → Identity → type your name → Save.
+In a separate Scout app with a settings screen, open Settings → Identity, type your name, and save.
 
 ### View current config
 

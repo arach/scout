@@ -17,10 +17,10 @@ scout status --all --blocked --next-actor self --json
 `--blocked` selects explicit waiting/review states and unanswered questions. It
 never guesses from silence, inactivity, or words such as “blocked” in a message.
 Each result carries its stable handle, source state, reason, next actor when
-known, and a suggested next action. A broker read failure is an error, not an
+known, and a suggested next action. A runtime read failure is an error, not an
 empty list. `--all` means the current broker snapshot; it does not poll every
 remote machine, inspect uncaptured native harness prompts, or promise historical
-records beyond the broker's retained snapshot. No additional age cutoff is
+records beyond the runtime's retained snapshot. No additional age cutoff is
 applied. Related work items and flights remain separate records with their own
 handles. Reading status never acknowledges, dismisses, retries, or resumes work.
 
@@ -48,7 +48,7 @@ running, with a persisted delivery cursor; initial installation starts with new
 signals rather than replaying history. Remote iOS push carries generic text and
 opaque message/conversation references. Open Scout for the authored content.
 There is no image embedded directly in the remote push payload. PNG/JPEG/GIF/WebP
-images up to 25 MiB use the local broker's authorized message/blob binding.
+images up to 25 MiB use the local runtime's authorized message/blob binding.
 They do not require a pairing file server. Image availability follows broker
 blob retention; `imageExpiresAt` is `null`, not a six-hour promise. A protected
 broker can impose a smaller upload-request limit. Reading images requires a
@@ -73,16 +73,16 @@ Scout comms are **not an HTTP spec**, but they are not not like one:
 - it returns durable ids and state, like a receipt/status surface
 - it may create follow-on records such as flights, questions, or work items
 
-The important difference is that the local broker, not a wire format, is the
+The important difference is that the local runtime, not a wire format, is the
 canonical writer for Scout-owned coordination state. Product surfaces should
-treat a **Chat** as the user-facing place where messages live; the broker and
+treat a **Chat** as the user-facing place where messages live; the runtime and
 protocol currently store that place as a **Conversation** with a
 `conversationId`. For the Chat invariants and migration rules, read
-[`chat-model.md`](./chat-model.md).
+`concepts.md`.
 
 ## Current Posture
 
-OpenScout is for high-trust local developer pilots. Treat these docs as current
+Scout is for high-trust local developer environments. Treat these docs as current
 integration guidance, not a frozen public API guarantee. Do not build claims
 around enterprise readiness, compliance readiness, hardened multi-tenancy, or
 exactly-once distributed delivery.
@@ -95,9 +95,9 @@ Scout has three layers:
 | --- | --- |
 | Protocol | Shared TypeScript shapes for messages, invocations, conversations, delivery, reply context, and collaboration records |
 | Broker | Local source of truth that resolves targets, writes records, plans delivery, and tracks asks |
-| Surface | CLI, desktop, web, mobile, harness plugin, or external client that reads/writes through the broker |
+| Surface | CLI, desktop, web, mobile, harness plugin, or external client that reads/writes through the runtime |
 
-A client should submit structured intent to the broker and render broker-owned
+A client should submit structured intent to the runtime and render runtime-owned
 records back to the user. It should not infer routing from message body text.
 
 ## Core Records
@@ -128,7 +128,7 @@ Cards are identity and return-address records. They do not by themselves mean a
 harness session is alive. Treat card creation, registration, and explicit
 session attachment as a pro integration layer for hosts or Scout-native agents
 that intentionally manage identity infrastructure. Core agents should use
-`ask`, `send`, and `reply`; the broker can create or bind cards internally when
+`ask`, `send`, and `reply`; the runtime can create or bind cards internally when
 needed. Commands that start or attach harnesses should use the public noun
 **session** and should fail loudly when a requested harness cannot be backed by
 a compatible session.
@@ -175,7 +175,7 @@ Expected client behavior:
 - render the returned `conversationId`, `messageId`, and optional `flightId`
   when useful
 - treat one explicit target as a DM
-- let the broker decide whether a targeted DM needs a wake/start/attach turn;
+- let the runtime decide whether a targeted DM needs a wake/start/attach turn;
   callers should not need to choose wake mechanics for normal sends
 - require an explicit channel for group coordination
 - do not treat message delivery as fire-and-forget; keep the receipt available
@@ -186,7 +186,7 @@ message-only default.
 
 Tracked send is opt-in. `scout send --tracked --to hudson "..."` (MCP:
 `messages_send({ interaction: "work" })`) creates tracked work on the same
-invocation/flight lifecycle as `scout ask --notify`: it returns after the broker
+invocation/flight lifecycle as `scout ask --notify`: it returns after the runtime
 receipt with durable handles and reports completion back to the requester.
 `--no-notifs` (MCP `replyMode: "none"`) keeps the work tracked but suppresses the
 completion callback; `--wait [--timeout <s>]` waits for the result within a
@@ -202,7 +202,7 @@ suppressing notify/wake side effects where target policy allows. `ask` should
 not grow a quiet variant because it creates ownership and lifecycle state.
 
 Send is not a non-blocking Ask. If the target needs to act and report back, use
-Ask with notification semantics so the broker preserves the invocation and
+Ask with notification semantics so the runtime preserves the invocation and
 flight lifecycle.
 
 ### Ask / Requested Reply
@@ -434,14 +434,14 @@ Questions answer information. Work items carry ownership.
 - If a target is ambiguous, fail closed or ask one concise clarification.
 - If sender identity is missing, establish a stable sender binding before
   routing.
-- The broker should coach the sender with candidates, likely intent, and
+- The runtime should coach the sender with candidates, likely intent, and
   remediation commands instead of returning bare "not found" or "unavailable"
   errors when it has enough context to guide the next step.
 
 Route aliases use this precedence: exact typed routes; explicit `alias:<name>`;
 native agent id/name/selector/configured aliases; bare route alias in the
 caller's current project and local node; then legacy `target:<handle>`/`⌖`
-session-handle fallback. The broker never searches every project or node for a
+session-handle fallback. The runtime never searches every project or node for a
 bare alias. `target:<name>` consults route aliases before its legacy fallback.
 
 Alias dereference happens once at acceptance. The receipt and durable message,
@@ -468,7 +468,7 @@ messages_send({
 Human-facing composers can use `>>` as a route operator when `@` would collide
 with host autocomplete or mention systems. The operator is input sugar for
 explicit routing fields; clients should strip it from the body before handing
-the request to the broker.
+the request to the runtime.
 
 Typed:
 
@@ -516,7 +516,7 @@ composer `>>` grammar:
 | `Opus high to review this` | runtime profile plus `reasoningEffort: "high"` | fresh launch with effort override |
 | `agent Composer Review to fix this` | `{ kind: "existing_handle", handle: "composer-review" }` | exact existing agent/session handle |
 
-Reserved profile names are `Fable`, `Kimi`, `Grok`, and `Opus`. The broker,
+Reserved profile names are `Fable`, `Kimi`, `Grok`, and `Opus`. The runtime,
 not the client, owns their harness/model/fresh-session definitions. Direct
 `ask --to fable` still means existing-target routing; it must never be
 reinterpreted as a profile. The explicit profile surface is
@@ -524,7 +524,7 @@ reinterpreted as a profile. The explicit profile surface is
 and Grok reject effort until their ACP transports expose that control.
 
 `agent <name> to <request>` lowercases and dash-normalizes `<name>`, then asks
-the broker for one exact handle match. Locality and fuzzy similarity are not
+the runtime for one exact handle match. Locality and fuzzy similarity are not
 tiebreakers. Zero or multiple matches return disambiguation without delivery.
 This exact-handle route is distinct from mutable post-hoc route aliases. An
 unknown exact handle never falls through to a same-named route alias.
@@ -539,7 +539,7 @@ before broker dispatch.
 For new Scout-aware composers, prefer `>>` for target entry and render the
 resolved situated target with the Scout contact mark, such as `⌖mw-talkie`.
 
-If routing cannot complete safely, a client should render the broker's dispatch
+If routing cannot complete safely, a client should render the runtime's dispatch
 or remediation result rather than guessing. `ScoutDispatchRecord` covers
 `ambiguous`, `unknown`, `unparseable`, and `unavailable` targets, including
 candidates or wake/register/retry guidance when available.
@@ -560,8 +560,8 @@ error: no explicit destination
 
 ## Receipts And Delivery State
 
-A delivery receipt means the broker accepted the request and wrote or planned
-broker-owned records. It does not mean the target read the message, completed
+A delivery receipt means the runtime accepted the request and wrote or planned
+runtime-owned records. It does not mean the target read the message, completed
 the task, or accepted the result.
 
 Delivery state is layered:
@@ -612,7 +612,7 @@ invocation, flight, or work item. Each record should label the source as
 `protocol_overhead`, `harness_execution`, or another explicit category. Where
 exact usage is unavailable, Scout may store estimates labeled as estimates.
 
-Cost accounting should include the broker's own diagnostic/coaching work when it
+Cost accounting should include the runtime's own diagnostic/coaching work when it
 spends extra reasoning to avoid sender-side retry loops. This lets Scout compare
 one smarter broker response against repeated `who`, `latest`, `ps`, and failed
 handoff attempts across many agents.
@@ -660,7 +660,7 @@ Meanings:
 `⌖` means Scout-mediated contact. When attached directly to a name, as in
 `⌖mw-talkie`, it is the compact agent/UI shorthand for human `target:mw-talkie`.
 In a contact line, the short reference should usually be the last useful suffix
-of the broker `messageId`, with full ids available in a debug or collapsed
+of the runtime `messageId`, with full ids available in a debug or collapsed
 context view. Do not parse a full contact line for routing; use the structured
 context fields.
 
@@ -684,7 +684,7 @@ art, reference 8kj4pd."
 
 When building a Scout client or plugin:
 
-- read from broker-owned records rather than external harness transcripts
+- read from runtime-owned records rather than external harness transcripts
 - send target, channel, reply, and work ids as explicit fields
 - keep message body as payload
 - preserve `conversationId`, `messageId`, `replyToMessageId`, and `flightId`

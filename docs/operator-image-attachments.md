@@ -1,8 +1,8 @@
 # Operator image attachments
 
 `scout notify --message <text> --image <path>` and plain
-`scout operator <text> --image <path>` submit one image to the local broker.
-The broker chooses the operator DM and records one message with a canonical
+`scout operator <text> --image <path>` submit one image to the local runtime.
+The runtime chooses the operator DM and records one message with a canonical
 blob reference. No pairing store, web cookie, file-server URL, or app package
 participates in this write.
 
@@ -24,23 +24,23 @@ participates in this write.
 ```
 
 `fileName` is optional. It must contain at most 200 characters and no path
-separator or control character. The broker accepts PNG, JPEG, GIF and WebP,
+separator or control character. The runtime accepts PNG, JPEG, GIF and WebP,
 checks their magic bytes, and limits decoded bytes to 25 MiB. The JSON request
 limit is normally 36 MiB. Protected local ingress currently limits requests
 to 16 MiB, including base64 overhead. The existing
 `GET /v1/attachments/capability` exposes the effective `requestBytes` limit.
-The broker rejects oversize requests; it does not clip an image.
+The runtime rejects oversize requests; it does not clip an image.
 
 The route requires verified local transport and a locally authorized actor.
 Remote, peer, guest, scoped, origin-bearing and forwarded requests are refused.
 A mesh control grant does not authorize this operation. Local actor selection
-retains Scout's high-trust local-pilot model; this is not a new per-agent
+retains Scout's high-trust local model; this is not a new per-agent
 credential boundary. The CLI uses ordinary explicit, environment and project
 sender resolution, then the existing identity-scoped broker registration path.
 
 The body cannot select a conversation, node or recipient. It cannot contain a
 reply ID, question, permission, work item, arbitrary metadata, URL, blob hash
-or pairing key. The broker sets `operatorSignal` to
+or pairing key. The runtime sets `operatorSignal` to
 `{kind:"notify",blocking:false,replyExpectation:"none"}`. It preserves the
 sender return address and queues the existing best-effort operator signal
 after a new canonical commit. A duplicate request does not enqueue it again.
@@ -74,7 +74,7 @@ The receipt says `status: "recorded"` and
 `notificationDelivery: "unconfirmed"`. It proves neither push delivery nor
 reading. `imageExpiresAt` is `null`: the old pairing-store six-hour expiry no
 longer applies. Blob retention and message retention determine availability;
-this is not a permanent-storage guarantee. An unavailable or older broker fails
+this is not a permanent-storage guarantee. An unavailable or older runtime fails
 without a legacy write fallback. Text-only notifications keep their existing
 broker delivery path.
 

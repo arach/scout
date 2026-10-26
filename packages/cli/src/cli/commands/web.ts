@@ -57,7 +57,7 @@ export function renderWebCommandHelp(): string {
   return [
     "scout web — the full Scout web app",
     "",
-    "The Scout core contains no web app. OpenScout apps supply the web server; accounts with",
+    "The Scout core contains no web app. The Scout apps supply the web server; accounts with",
     "access download the full app for this Scout version from console.openscout.app.",
     "",
     "Usage:",
@@ -341,7 +341,7 @@ async function runStatus(context: ScoutCommandContext, deps: ScoutWebCommandDeps
     `key        ${value.key ?? "none (scout web login)"}`,
     `installed  ${value.installed ?? "no"}`,
     ...(value.installedVersions.length ? [`versions   ${value.installedVersions.join(", ")}`] : []),
-    `serves     ${value.serves === "full" ? "the full web app" : "no bundled web app (install OpenScout apps)"}`,
+    `serves     ${value.serves === "full" ? "the full web app" : "no bundled web app (install the Scout apps)"}`,
     ...(value.reason === "version-mismatch"
       ? [`The installed full web app does not match Scout ${value.version}. Install the matching version to use Full again.`]
       : value.reason === "basic-forced" ? ["Basic is selected by OPENSCOUT_WEB_CLIENT_PROFILE=basic."] : []),

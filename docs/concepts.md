@@ -31,18 +31,18 @@ term would hide a distinction Scout depends on.
 
 ### The System
 
-**Broker.** The broker is the local canonical writer for routing, durable
+**Broker.** The runtime is the local canonical writer for routing, durable
 state, and event streams. It is the single load-bearing choice the rest of the
 model follows from: because one local daemon owns the coordination records,
-every other concept here can be defined as "a record the broker writes" or "a
-request the broker resolves" rather than as a wire format that many parties
+every other concept here can be defined as "a record the runtime writes" or "a
+request the runtime resolves" rather than as a wire format that many parties
 must agree on. There is one broker per machine; agents post messages and
 invocations to it, and it resolves targets, writes records, plans delivery, and
 tracks work. See [`architecture.md`](./architecture.md) for how it sits in the
 process tree.
 
 **Runtime.** The runtime is the layer that starts, resumes, stops, and
-health-checks sessions across harnesses. Where the broker owns coordination
+health-checks sessions across harnesses. Where the runtime owns coordination
 records, the runtime owns process lifecycle: system-prompt generation, tmux
 sessions, transport adapters, and the file-based agent override registry. It is
 what makes "wake the agent" a real operation instead of an assumption.
@@ -68,20 +68,20 @@ collaboration records. Anything that crosses a boundary — between agents,
 harnesses, or machines — is described here. Human and agent surfaces use one
 interaction model. The current protocol expresses that model; its wire format
 and transports can change while preserving authority, continuity, and lifecycle
-meaning. See the [Shared Interaction Model](./interaction-model.md).
+meaning.
 
 **Mesh.** Mesh is how agents on different machines reach and coordinate with
-each other. Each broker advertises its local agents to peers and syncs endpoint
+each other. Each runtime advertises its local agents to peers and syncs endpoint
 tables, so an address on another node resolves and messages forward to the
 authority broker that owns the agent. Mesh means reachability and coordination
 — not global consensus, not exactly-once delivery, and not replicated storage
 of external transcripts. That honesty is deliberate: Scout is a coordination
-substrate for high-trust local pilots, so mesh is kept to what it can actually
+substrate for high-trust local environments, so mesh is kept to what it can actually
 guarantee.
 
-**Surface.** A surface is any view into broker state: the CLI, desktop host,
-web dashboard, iOS companion, terminal UI, or a harness plugin. Surfaces read
-and write through the broker; none of them own agent state. The distinction
+**Surface.** A surface is any view into runtime state: the CLI, terminal UI,
+a harness plugin, or a separate Mac, iOS, Android, or web app. Surfaces read
+and write through the runtime; none of them own agent state. The distinction
 matters because it keeps the source of truth in one place — a surface can be
 stale, wrong, or absent without the coordination record being any of those.
 
@@ -122,7 +122,7 @@ requested value, the launch ladder's resolved value and source, and the value
 later observed from the harness. Drift is match, mismatch, or unknown. A launch
 argument is resolved intent, not evidence that the harness accepted it.
 
-**Route Alias.** A route alias is broker-owned mutable routing state pointing
+**Route Alias.** A route alias is runtime-owned mutable routing state pointing
 to one canonical durable agent id or one exact broker-known session. It is not
 an identity, card, actor, endpoint, or session. The scope key is owner realm +
 project + node + normalized name; every accepted dispatch pins the binding
@@ -165,12 +165,12 @@ is not the same object as a `ScoutAgentCard`: one is a discovery card, the other
 is a routing return-address. The two genuinely share the word "card" today,
 which trips readers; when it matters, say `ScoutAgentCard` for the discovery
 card and "return-address card" for the `card_create` record. Creating either is
-a pro concern — core agents send and reply, and let the broker bind cards
+a pro concern — core agents send and reply, and let the runtime bind cards
 internally.
 
 **@scoutbot.** `@scoutbot` is the conversational assistant handle — the identity
 the human operator talks to. It is distinct from platform Scout: the product,
-broker, CLI, and protocol are Scout/OpenScout, while `@scoutbot` is the
+runtime, CLI, and protocol are Scout, while `@scoutbot` is the
 routeable assistant that appears in mentions, chips, and broker logs. Friendly
 UI may call the assistant "Scout," but use `@scoutbot` when routing or
 disambiguating it from the platform.
@@ -182,8 +182,7 @@ messages live — a DM, channel, group DM, thread, or system lane. Internally th
 broker and protocol store that place as a Conversation
 (`ConversationDefinition`), addressed by an opaque Chat ID. Chat is
 communication continuity and nothing else: it must not collapse into session
-(runtime continuity), workspace path (context continuity), or work. See
-[`chat-model.md`](./chat-model.md) for the invariants that keep those axes
+(runtime continuity), workspace path (context continuity), or work. Keep those axes
 apart.
 
 **Message.** A message (`MessageRecord`) is a durable communicative turn: one
@@ -195,10 +194,10 @@ may reply to another message.
 **Delivery.** A delivery (`DeliveryIntent`) is a planned, transport-specific
 fan-out of a message or invocation. It is separate from the message because one
 message may need to reach several endpoints across transports and nodes, each
-with its own state. A delivery receipt means the broker accepted and journaled
+with its own state. A delivery receipt means the runtime accepted and journaled
 the request — not that the target read it or finished the work.
 
-**Binding.** Scout uses binding for two join records, both broker-owned. A
+**Binding.** Scout uses binding for two join records, both runtime-owned. A
 project binding maps a project path and branch to an addressable agent target —
 it is what `scout up` creates or refreshes so a workspace resolves to an agent.
 A conversation binding (`ConversationBinding`) maps a Scout conversation to an
@@ -215,7 +214,7 @@ goes through an explicit reply tool. It exists so delegated work lands back
 where it was requested rather than in a disconnected new thread.
 
 **Dispatch Record.** A dispatch record (`ScoutDispatchRecord`) is the routing
-diagnostic the broker writes when a target is ambiguous, unknown, unparseable,
+diagnostic the runtime writes when a target is ambiguous, unknown, unparseable,
 or unavailable. Rather than a bare "not found," it can carry candidates and
 wake, register, or retry guidance. It exists so a client can render a useful
 next step instead of guessing.
@@ -297,16 +296,16 @@ purpose. These are the deliberate alignments.
 Scout uses A2A (the Agent2Agent protocol) as its main external interoperability
 reference point. The positions are distinct: **Scout is a local-first
 coordination substrate; A2A is an interoperability protocol.** Scout keeps its
-own internal mechanics — broker-owned routing, the invocation/flight pair,
+own internal mechanics — runtime-owned routing, the invocation/flight pair,
 first-class questions and work items, explicit delivery and bindings — and
 overlaps with A2A only in discovery-oriented vocabulary where the concepts are
 genuinely close: provider metadata, skills, interfaces, security hints, and
 artifacts as durable outputs.
 
-At the boundary today, the broker exposes concrete A2A primitives:
+At the boundary today, the runtime exposes concrete A2A primitives:
 
 - agent-card intake for external A2A-style cards, and agent-card serving for the
-  local broker and per-agent routes
+  local runtime and per-agent routes
 - JSON-RPC `SendMessage`, `GetTask`, `ListTasks`, `CancelTask`, and
   `GetExtendedAgentCard`, plus legacy slash-method compatibility such as
   `message/send`
@@ -327,8 +326,7 @@ agent speaks Scout's protocol, that every boundary is Scout-owned, or that its
 internal nouns must be renamed one-for-one to match A2A. It also does not claim
 full A2A conformance — streaming, push notifications, authenticated extended
 cards, active cancellation of running work, and production security controls are
-open. For the dated, area-by-area status, see
-[`protocol-readiness-a2a-acp.md`](./protocol-readiness-a2a-acp.md).
+open.
 
 ### ACP
 

@@ -1,10 +1,10 @@
 # Host Integrations
 
-OpenScout's core broker, runtime, protocol, CLI, desktop app, and mobile app live
+Scout's core runtime, protocol, harness adapters, and CLI live
 in this repository. Host-specific integrations can live beside this repo when
 they are independently installable packages for another host's install surface.
 
-This keeps the OpenScout root focused on the product control plane while still
+This keeps the Scout root focused on the product control plane while still
 making the integration surface discoverable.
 
 ## Current Integrations
@@ -13,10 +13,10 @@ making the integration surface discoverable.
 | --- | --- | --- | --- |
 | T3 Orchestrator | Adapter in `packages/runtime/src/t3` | [T3 setup and contract](./t3-orchestrator.md) | Alpha adapter for T3 projects, boards, card workflows, and exact thread continuation through Scout. |
 | Grok Bot (hosted) | [Grok Scout](https://github.com/arach/grok-scout) | [Grok Bot setup](https://openscout.app/grokbot) | Hosted MCP and OAuth through an online provisioned bridge. Marketplace submission pending review. |
-| Muse (hosted) | Remote client in this repository | [Muse setup](https://openscout.app/muse) | Python CLI calls the hosted MCP gateway using an operator-approved OAuth grant. Requires an online Scout bridge; no Muse execution harness. |
+| Muse (hosted) | Remote client published with the hosted service | [Muse setup](https://openscout.app/muse) | Python CLI calls the hosted MCP gateway using an operator-approved OAuth grant. Requires an online Scout bridge; no Muse execution harness. |
 | Grok | [Grok Scout](https://github.com/arach/grok-scout) | [Grok guide](https://openscout.app/grok) · [Full connection map](./scout-for-grok.md) | Scout launches the xAI Grok CLI over ACP (`grok-acp`; `grok` is an alias), and the Grok CLI can call `scout mcp` locally. Grok Bot, the hosted connector, is a separate row; see /grokbot. |
-| Slack | `packages/slack` (private source; not in the public `oscout/scout` mirror) | [Scout for Slack](https://openscout.app/slack) | Socket Mode bridge from mentions, DMs, threads, and files into durable Scout coding work. Private preview until the package is published. |
-| pi | [`arach/pi-scout`](https://github.com/arach/pi-scout) | [`arach.github.io/pi-scout`](https://arach.github.io/pi-scout/) | pi extension for Scout `send`, `ask`, `who`, and broker-backed coordination from pi sessions. |
+| Slack | `packages/slack` (private source; not in the public `oscout/scout` mirror) | [Scout for Slack](https://openscout.app/slack) | Socket Mode bridge from mentions, DMs, threads, and files into durable Scout coding work. Not yet published. |
+| pi | [`arach/pi-scout`](https://github.com/arach/pi-scout) | [`arach.github.io/pi-scout`](https://arach.github.io/pi-scout/) | pi extension for Scout `send`, `ask`, `who`, and runtime-backed coordination from pi sessions. |
 | Claude Code | [`oscout/claude-scout`](https://github.com/oscout/claude-scout) | [`oscout.github.io/claude-scout`](https://oscout.github.io/claude-scout/) | Claude Code plugin with `/scout:*` commands and Scout channel integration. |
 | Codex | [`oscout/codex-scout`](https://github.com/oscout/codex-scout) | [`oscout.github.io/codex-scout`](https://oscout.github.io/codex-scout/) | Codex plugin with Scout MCP tools and coordination guidance. |
 | Cursor | [`oscout/cursor-scout`](https://github.com/oscout/cursor-scout) | [`oscout.github.io/cursor-scout`](https://oscout.github.io/cursor-scout/) | Cursor MCP configuration and installer that points Cursor at `scout mcp`. |
@@ -25,7 +25,7 @@ making the integration surface discoverable.
 
 ## Compatibility Model
 
-OpenClaw has an initial [local session adapter](./scout-for-openclaw.md) in
+OpenClaw has an initial local session adapter in
 `@openscout/agent-sessions`. It is not yet a broker-selectable harness or an
 OpenClaw plugin that exposes Scout tools.
 
@@ -78,7 +78,7 @@ project-routed work.
 
 ## Hosted Assistants Using The Remote Client
 
-The single-file client at `landing/openscout.app/public/remote/scout` is for
+The single-file remote client, published with the hosted service, is for
 assistants with a Python 3.8+ shell in a cloud VM. Install it using the
 [remote installer](https://openscout.app/remote/install.sh). A host with native
 remote MCP OAuth support can use the gateway directly; a host with a secret
@@ -141,7 +141,7 @@ behavior.
 Keep integration source in a separate repository when:
 
 - the host has its own plugin marketplace or install flow
-- the integration can be installed without cloning OpenScout
+- the integration can be installed without cloning Scout
 - the package should have its own release cadence
 - the integration depends on Scout's public CLI/protocol surface rather than
   private app internals
@@ -158,7 +158,7 @@ Recommended sibling checkout layout:
 
 ```plaintext
 ~/dev/
-├── openscout/
+├── scout/
 ├── pi-scout/
 ├── claude-scout/
 ├── codex-scout/
@@ -175,5 +175,4 @@ easy to work on side by side.
 For owner-directed hosted-assistant onboarding, use a published
 `https://oscout.net/{user}` profile. The assistant requests access, displays a
 matching code, and privately completes login after the owner approves the same
-code in their inbox. See [Personal Scout profiles](scout-profiles.md) for visibility
-controls, the remote client command, notification limits, and rollout requirements.
+code in their inbox.

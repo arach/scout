@@ -9,14 +9,14 @@ evidence proportionate to their risk.
 - Search existing issues and pull requests before opening a new lane.
 - Use an issue for a substantial behavior change or public protocol decision.
 - Do not file security vulnerabilities publicly; follow [SECURITY.md](./SECURITY.md).
-- Keep private OpenScout product code, assets, credentials, and internal release
+- Keep private Scout product code, assets, credentials, and internal release
   material out of this public repository.
 
 ## Repository routing
 
 Use the public Scout checkout for public CLI, TUI, protocol, pairing, harness,
 and runtime work. Push a topic branch to your fork and open its pull
-request against `oscout/scout`. Keep private OpenScout product work in its
+request against `oscout/scout`. Keep private Scout product work in its
 private repository. See [the source boundary](./docs/public-source-boundary.md)
 for ownership details; inspect mixed changes before copying them across repos.
 
@@ -48,7 +48,7 @@ Run the narrowest relevant tests while iterating. Use `bun run check` and
 
 ## Architecture guardrails
 
-- The broker is the canonical writer for Scout-owned records.
+- The runtime is the canonical writer for Scout-owned records.
 - Harness transcripts are observed source material, not canonical Scout
   messages.
 - One target is a DM; group coordination requires an explicit channel;

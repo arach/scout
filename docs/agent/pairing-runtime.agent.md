@@ -2,7 +2,7 @@
 
 Source: `packages/pairing` (`@openscout/pairing`), the core host-pairing package.
 Verified against the core-only extraction on 2026-10-24. Phone apps are separate
-clients. This is not broker routing or Scout messaging.
+clients. This is not runtime routing or Scout messaging.
 
 ## Ownership
 

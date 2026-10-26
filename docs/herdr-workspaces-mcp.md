@@ -1,7 +1,7 @@
 # Herdr workspace reads from MCP
 
-`herdr_workspaces` reads the selected local broker's
-`GET /v1/terminal-hosts/herdr/workspaces` projection. The broker owns the
+`herdr_workspaces` reads the selected local runtime's
+`GET /v1/terminal-hosts/herdr/workspaces` projection. The runtime owns the
 TTL-cached Herdr probes. The MCP client does not run Herdr, enumerate local
 sessions, start services or use the private web server.
 
@@ -46,9 +46,9 @@ It makes no retry or alternate-source read after failure.
 
 The response has a two-MiB byte ceiling, strict UTF-8/JSON validation and the
 versioned digest shape. It validates the requested session, count, duplicate
-sessions, saved/live consistency, nested arrays and the broker's declared
+sessions, saved/live consistency, nested arrays and the runtime's declared
 limits. Unrecognized or oversized shapes are unavailable, not silently
-truncated into a valid observation. The broker's 40 emitted panes can occupy
+truncated into a valid observation. The runtime's 40 emitted panes can occupy
 up to 256 directory groups, including groups whose panes were all omitted.
 
 The browser-cookie adapter and its temporary private inventory exception are

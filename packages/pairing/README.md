@@ -31,7 +31,7 @@ bun run --cwd packages/pairing test
 
 The former desktop bridge now uses the existing broker receipt-backed
 native-session reply procedure instead of its unsupported-operation stub.
-Receipt validation and refusal behavior are owned by the broker. This is an
+Receipt validation and refusal behavior are owned by the runtime. This is an
 intentional unification of the former web and desktop procedure sets, not a
 new input authority.
 

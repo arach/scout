@@ -5,7 +5,7 @@ board card, and project its board into durable Scout work items. T3 remains auth
 its projects, cards, workflows, and transcripts. Scout owns the coordination
 records and the return path for work requested through Scout.
 
-Status: alpha adapter for local developer pilots. The adapter targets
+Status: alpha adapter for local developer environments. The adapter targets
 [T3 Orchestrator commit `46e3533`](https://github.com/leonaaardob/t3-orchestrator/tree/46e35332722e6cc7da2dfb47a7b1f8795ab3b7e0).
 T3's Effect RPC interfaces are internal APIs. Check compatibility before
 changing the T3 version.
@@ -13,7 +13,7 @@ changing the T3 version.
 ## Configure a connection
 
 Run T3 with a configured execution provider and a project in its environment.
-Use T3's own setup flow to obtain access to that environment. The Scout broker
+Use T3's own setup flow to obtain access to that environment. The Scout runtime
 must be able to reach the T3 environment's WebSocket endpoint.
 
 Configure connections in the **broker process environment**:
@@ -30,7 +30,7 @@ query parameters, or fragments.
 Supply the access token to the broker process under the environment variable
 named by `tokenEnv`. Use the machine's credential manager to inject the value.
 Do not put the token in the connection JSON, a CLI argument, or a request body.
-Restart the broker through its normal lifecycle after changing its environment.
+Restart the runtime through its normal lifecycle after changing its environment.
 
 Each `id` identifies one T3 environment. Keep the ID stable when rotating a
 token. Scout uses the connection ID to scope source identities. Configure a new
@@ -158,7 +158,7 @@ for the source meanings.
 
 ## Broker API
 
-The CLI sends these requests to the Scout broker. Credential values never
+The CLI sends these requests to the Scout runtime. Credential values never
 travel through these request bodies.
 
 | Method and path | JSON body | Operation |
@@ -210,11 +210,11 @@ export SCOUT_T3_LIVE_RECEIPTS=<existing-output-directory>
 bun test packages/runtime/src/t3/broker.live.test.ts
 ```
 
-The suite verifies exact-session dispatch, a broker restart during execution,
+The suite verifies exact-session dispatch, a runtime restart during execution,
 one correlated source request, the result in the original Scout conversation
 and return mailbox, source-turn interruption, and a board run reaching the
 human review gate. Repeating the card request with the same request ID must
-return the same Scout invocation. Each broker is isolated and stopped by the
+return the same Scout invocation. Each runtime is isolated and stopped by the
 test harness. T3 setup and shutdown remain with the caller.
 
 Without the live variables, these tests are skipped. Transport, source

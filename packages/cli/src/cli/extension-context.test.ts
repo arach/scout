@@ -10,6 +10,7 @@ import { applyOpenScoutInstanceEnvironment, deriveOpenScoutInstanceLayout, selec
 import { resolveOpenScoutPairingHomeForEnv, resolveOpenScoutHomeForEnv } from "@openscout/runtime/support-paths";
 import { resolveScoutHome } from "@openscout/runtime/scout-home";
 import { findScoutExtension, scoutExtensionEnv } from "./extensions.ts";
+import { SCOUT_APP_VERSION } from "../lib/shared/product.ts";
 import { mutateScoutExtension, readScoutExtensionInstallReceipt } from "./extension-install.ts";
 import { captureScoutExtensionSelection, projectScoutExtensionContext, encodeScoutExtensionContext, EXTENSION_CONTEXT_MAX_BYTES, type ScoutExtensionContext } from "./extension-context.ts";
 import { prepareScoutExtensionContext, runScoutExtensionWithQualifiedContext, runScoutExtensionWithContext, scoutExtensionContextStdio, stopScoutExtensionContextChild } from "./extension-context-runner.ts";
@@ -148,8 +149,8 @@ test("dispatch revalidates auxiliary bytes, declarations, generation, removal an
 
 test("API1 filtered environment and descriptor ABI equal the prior inherit-only runner",async()=>{
  const f=fixture(1);await installed(f);const extension=findScoutExtension("context-fixture",f.env)!;
- const expected={...Object.fromEntries(Object.entries(f.env).filter(([key])=>!/^(OPENSCOUT|SCOUT)_/.test(key)||["SCOUT_HOME","OPENSCOUT_HOME"].includes(key))),PATH:[join(process.execPath,".."),f.env.PATH].filter(Boolean).join(":"),SCOUT_EXTENSION_API:"1",SCOUT_EXTENSION_NAME:"context-fixture",SCOUT_CLI_VERSION:"0.3.9",SCOUT_OUTPUT:"json",OPENSCOUT_BROKER_URL:"http://127.0.0.1:43110"};
- const projected=scoutExtensionEnv({env:f.env,extension,cliVersion:"0.3.9",outputMode:"json",brokerUrl:"http://127.0.0.1:43110"});expect(projected).toEqual(expected);
+ const expected={...Object.fromEntries(Object.entries(f.env).filter(([key])=>!/^(OPENSCOUT|SCOUT)_/.test(key)||["SCOUT_HOME","OPENSCOUT_HOME"].includes(key))),PATH:[join(process.execPath,".."),f.env.PATH].filter(Boolean).join(":"),SCOUT_EXTENSION_API:"1",SCOUT_EXTENSION_NAME:"context-fixture",SCOUT_CLI_VERSION:SCOUT_APP_VERSION,SCOUT_OUTPUT:"json",OPENSCOUT_BROKER_URL:"http://127.0.0.1:43110"};
+ const projected=scoutExtensionEnv({env:f.env,extension,cliVersion:SCOUT_APP_VERSION,outputMode:"json",brokerUrl:"http://127.0.0.1:43110"});expect(projected).toEqual(expected);
  const oldRunner=join(f.base,"old-runner.ts");
  writeFileSync(oldRunner,`import {spawn} from "node:child_process";const child=spawn(${JSON.stringify(extension.command)},['unchanged'],{env:process.env,stdio:'inherit'});child.once('exit',code=>process.exitCode=code??1);`);
  const baseline=await new Promise<{code:number|null;stdout:string}>((done,reject)=>{const child=spawn(process.execPath,[oldRunner],{env:expected,cwd:f.base,stdio:["ignore","pipe","pipe"]});let stdout="";child.stdout.on("data",chunk=>stdout+=chunk);child.once("error",reject);child.once("close",code=>done({code,stdout}));});

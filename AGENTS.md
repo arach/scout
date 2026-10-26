@@ -6,14 +6,14 @@
 
 **IMPORTANT:** Read these rules before making any changes:
 
-- Public Scout work belongs in the Scout checkout and pull requests target oscout/scout. Keep private OpenScout product code, assets, credentials, and internal material in the private workspace; inspect mixed changes before copying or publishing.
-- Use Bun for JavaScript and TypeScript workflows.
-- The broker is the canonical writer for Scout-owned coordination records.
+- This repository is the Scout core: runtime, protocol, harness adapters, session extraction, CLI, TUI, MCP server, native services, and the host side of phone pairing. The Mac, iOS, Android, and web apps and the hosted services are separate; never add app or UI source here. See docs/public-source-boundary.md.
+- Use Bun 1.4.4 or newer for JavaScript and TypeScript workflows.
+- The runtime is the canonical writer for Scout-owned coordination records; clients submit commands through its APIs.
 - External harness transcripts are observed source material; never bulk-import them as Scout messages.
 - One explicit target is a DM; group coordination requires an explicit channel; broadcast is opt-in.
-- Use scout send for tells and scout ask for requested work or replies.
+- Use scout tell for updates and scout ask for requested work or replies.
 - Mesh means reachability and coordination, not exactly-once delivery or global consensus.
-- Scout is for high-trust local developer pilots; do not claim enterprise or compliance readiness.
+- Scout assumes trusted local users and agents; do not claim enterprise or compliance readiness.
 - Use gitmoji commit subjects and never add AI co-authoring footers.
 
 ## Quick Navigation
@@ -28,7 +28,7 @@
 > Scout's public architecture, ownership model, and repository boundary
 
 Scout is a local-first control plane for coding agents. It gives operators and
-agents one broker-backed model for identity, routing, durable work, session
+agents one runtime-backed model for identity, routing, durable work, session
 observation, and mesh reachability across harnesses such as Codex and Claude
 Code.
 
@@ -37,7 +37,7 @@ across the machines the operator owns.
 
 ## What Scout owns
 
-The broker is the canonical writer for Scout-owned coordination records:
+The runtime is the canonical writer for Scout-owned coordination records:
 
 - messages and conversations;
 - invocations, flights, and delivery plans;
@@ -56,7 +56,7 @@ Routing is explicit and independent of the calling surface:
 - one target means a direct message;
 - group coordination uses a named channel;
 - broadcast is opt-in;
-- `send` is for tells and status updates;
+- `tell` is for updates that expect no reply;
 - `ask` is for requested work, judgment, or a reply;
 - exact session continuation uses `session:<id>`.
 
@@ -81,7 +81,7 @@ Scout contains the public core: protocol, runtime, harness adapters, session
 extraction, CLI, TUI, and host-side phone pairing. The terminal is its interface.
 It contains no web app or native product app.
 
-OpenScout apps own the web, macOS, iOS, and Android interfaces at every account
+Scout apps own the web, macOS, iOS, and Android interfaces at every account
 level. Hosted services remain with the apps. The dependency runs one way:
 apps consume exact released core artifacts; the core does not import apps.
 
@@ -92,7 +92,7 @@ and approval-gated LAN pairing need no web client. Web commands use
 an app-supplied server entry and an explicitly installed matching client; they
 explain the missing app instead of serving a bundled fallback.
 
-Scout is for high-trust local developer pilots. It is not enterprise-ready,
+Scout is for high-trust local developer environments. It is not enterprise-ready,
 compliance-ready, or a hardened untrusted multi-tenant system. See the
 [public-source boundary](./public-source-boundary.md) for source ownership and
 release invariants.

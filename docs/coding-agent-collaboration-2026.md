@@ -10,7 +10,7 @@ These are all variations of the same problem: **give another coding agent enough
 
 The direction can change with every task. Codex ↔ Claude Code, Claude Code ↔ Grok, Grok ↔ Codex, and Codex ↔ OpenCode are useful when those tools are available. Kimi Code, pi, and Cursor CLI fit the same pattern when Scout can launch them. No brand has to be the one that always plans or always implements.
 
-This guide explains the choices, then walks through Scout's approach. Scout is a local control plane for existing agents, intended for high-trust developer pilots. Its coordination features do not establish enterprise readiness, guaranteed delivery, or a shared transcript across tools.
+This guide explains the choices, then walks through Scout's approach. Scout is a local control plane for existing agents, intended for high-trust developer environments. Its coordination features do not establish enterprise readiness, guaranteed delivery, or a shared transcript across tools.
 
 ## How the agents connect: the moving parts
 
@@ -58,7 +58,7 @@ Claude Code has an interactive terminal interface and a programmatic CLI. `claud
 
 The Agent SDK provides another application interface. Its permission callbacks handle requests that reach that point in evaluation; earlier rules can already allow an operation. Tool preapproval, available tools, and instructions in a prompt are different controls. A peer's request to “only read” should be backed by the appropriate permissions if read-only operation is required. [Agent SDK permissions](https://code.claude.com/docs/en/agent-sdk/permissions).
 
-Scout's structured Claude adapter drives the CLI's stream-JSON interface; it is not an Agent SDK integration. Its terminal path preserves a human-visible session. In either case, the integration needs to represent both ordinary replies and requests for human attention. A permission dialog intercepted inside the host may never reach an MCP server, so watching only the broker cannot establish that the peer is unblocked.
+Scout's structured Claude adapter drives the CLI's stream-JSON interface; it is not an Agent SDK integration. Its terminal path preserves a human-visible session. In either case, the integration needs to represent both ordinary replies and requests for human attention. A permission dialog intercepted inside the host may never reach an MCP server, so watching only the runtime cannot establish that the peer is unblocked.
 
 ### tmux: a visible session with terminal semantics
 
@@ -72,7 +72,7 @@ Use this route when keeping the interactive session visible matters. Prefer a st
 
 A tool may expose an HTTP server while Scout's default route uses ACP. A CLI may support an SDK while a particular adapter drives its JSON stream. Read the integration path you will actually use, including how it resumes a session and reports an interrupted turn.
 
-In this repository's current routes and adapters, Codex uses app-server; broker-created OpenCode work defaults to ACP; Claude Code has terminal and structured-CLI paths; and the listed Grok CLI route uses ACP. The product-V2 OpenCode server has a separate, explicit adapter/configuration path. A command alias is not evidence that this path was selected; names and routing differ by release. Run `scout runtimes --json` against your installed version before selecting a route.
+In this repository's current routes and adapters, Codex uses app-server; runtime-created OpenCode work defaults to ACP; Claude Code has terminal and structured-CLI paths; and the listed Grok CLI route uses ACP. The product-V2 OpenCode server has a separate, explicit adapter/configuration path. A command alias is not evidence that this path was selected; names and routing differ by release. Run `scout runtimes --json` against your installed version before selecting a route.
 
 For any pairing, answer three concrete questions before a larger handoff: **Which process owns the work? Which session receives the request? What event proves it finished?** Then pass the files and context the peer needs. This works in both directions without giving a brand a permanent job.
 
@@ -83,7 +83,7 @@ For any pairing, answer three concrete questions before a larger handoff: **Whic
 | A bounded research task inside your current agent | Native subagent | Simple delegation within one harness; context and tool access follow that product's rules. |
 | An independent review from another coding tool | Separate sessions and an explicit handoff | You must supply context and an exact review target. |
 | Several agents changing independent components | Separate worktrees and one integration owner | File isolation helps; shared services and interfaces still need coordination. |
-| Repeated requests across Claude, Codex, Grok, or OpenCode | A broker such as Scout | Adds routing and work records; each runtime still needs installation and authentication. |
+| Repeated requests across Claude, Codex, Grok, or OpenCode | A runtime such as Scout | Adds routing and work records; each runtime still needs installation and authentication. |
 | Work on another machine you own | A reachable agent and a checkout that already exists there | Moving a request does not move source files or credentials. |
 | Work in a managed cloud environment | A hosted coding-agent service | Environment setup and artifact transfer become part of the handoff. |
 
@@ -145,7 +145,7 @@ Return: findings with file and line, triggering input, and consequence.
 If there are no findings, say so and state the limits of the review.
 ```
 
-Scout prints a broker receipt with a flight id and, when the broker binds one, a `ref:` handle. A receipt means the request was recorded. It does not mean the review finished. Replace `ref:RETURNED` with the handle from your receipt:
+Scout prints a broker receipt with a flight id and, when the runtime binds one, a `ref:` handle. A receipt means the request was recorded. It does not mean the review finished. Replace `ref:RETURNED` with the handle from your receipt:
 
 ```bash
 scout wait ref:RETURNED --timeout 600
@@ -224,7 +224,7 @@ Worktrees isolate working files. They leave a shared database, dev-server port, 
 
 ## What has to exist before an agent on another machine can help?
 
-Scout's optional mesh extends reachability among machines you trust. Pair a second workstation with `scout pair`, or discover peers with `scout mesh discover` when brokers can already see each other (a shared Tailscale network, or `OPENSCOUT_MESH_SEEDS` pointing at the other broker). `scout who` can then show agents whose authority is the other machine, and an ask addressed to one of them is forwarded there. Forwarding does not copy the repository, credentials, or the other harness's transcript. Provider inference can still happen on that vendor's service. Mesh does not promise exactly-once delivery. These commands are for a high-trust pilot among your own machines.
+Scout's optional mesh extends reachability among machines you trust. Pair a second workstation with `scout pair`, or discover peers with `scout mesh discover` when runtimes can already see each other (a shared Tailscale network, or `OPENSCOUT_MESH_SEEDS` pointing at the other broker). `scout who` can then show agents whose authority is the other machine, and an ask addressed to one of them is forwarded there. Forwarding does not copy the repository, credentials, or the other harness's transcript. Provider inference can still happen on that vendor's service. Mesh does not promise exactly-once delivery. These commands are for a high-trust pilot among your own machines.
 
 Before you send the work, confirm:
 
@@ -232,7 +232,7 @@ Before you send the work, confirm:
 2. The two brokers are paired or discovered, and `scout who` shows the destination agent.
 3. That machine has the repository checked out at the revision you name.
 4. The destination harness is installed and authenticated *there*. A login on your laptop does not sign in the other computer.
-5. The brief uses the destination's checkout path. `--project` on your laptop selects a project path the local broker can resolve. It does not create that directory on the other disk. When the worker lives elsewhere, address that worker with `--to` and put its local path in the brief.
+5. The brief uses the destination's checkout path. `--project` on your laptop selects a project path the local runtime can resolve. It does not create that directory on the other disk. When the worker lives elsewhere, address that worker with `--to` and put its local path in the brief.
 
 ## When is a hosted coding agent a different handoff?
 
@@ -248,7 +248,7 @@ Devin is a catalogued route with its own environment. A catalog entry does not e
 
 They solve different joins. Using one does not imply the others.
 
-**MCP** connects an application (the host) to tool servers. Each connection is an MCP client. Servers expose tools, resources, and prompts. `scout mcp` is Scout's local stdio coordination server; the broker still owns the messages and asks. Local hosts such as Claude Code, Codex, and Cursor can launch it, and Grok Bot reaches the same tools through the hosted gateway. The connection does not pour another agent's conversation into the caller. Tool names can change while the [MCP posture](https://github.com/oscout/scout/blob/main/docs/mcp-api-posture.md) is v0 guidance, so use `tools/list` to see what your server exposes. Ordinary handoffs are still `ask` or `messages_send`. [MCP architecture](https://modelcontextprotocol.io/docs/2026-07-28/learn/architecture).
+**MCP** connects an application (the host) to tool servers. Each connection is an MCP client. Servers expose tools, resources, and prompts. `scout mcp` is Scout's local stdio coordination server; the runtime still owns the messages and asks. Local hosts such as Claude Code, Codex, and Cursor can launch it, and Grok Bot reaches the same tools through the hosted gateway. The connection does not pour another agent's conversation into the caller. Tool names can change while the [MCP posture](https://github.com/oscout/scout/blob/main/docs/mcp-api-posture.md) is v0 guidance, so use `tools/list` to see what your server exposes. Ordinary handoffs are still `ask` or `messages_send`. [MCP architecture](https://modelcontextprotocol.io/docs/2026-07-28/learn/architecture).
 
 **ACP**, the Agent Client Protocol, is how a coding client talks to a coding agent, analogous to the Language Server Protocol. Local agents typically use JSON-RPC over stdio. The introduction describes remote agents over HTTP or WebSocket, and says full remote support is still in progress. Scout's `grok-acp` route uses ACP as a client adapter: Scout talks to that agent. Scout does not become an ACP server, and this ACP is not BeeAI's Agent Communication Protocol. [ACP introduction](https://agentclientprotocol.com/get-started/introduction).
 

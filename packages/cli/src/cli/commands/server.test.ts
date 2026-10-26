@@ -123,7 +123,7 @@ test("web startup requires the apps' explicit server entry and refuses stale fal
   const before = process.env.OPENSCOUT_WEB_SERVER_ENTRY;
   try {
     process.env.OPENSCOUT_WEB_SERVER_ENTRY = "";
-    expect(() => resolveScoutWebServerEntry()).toThrow("supplied by OpenScout apps");
+    expect(() => resolveScoutWebServerEntry()).toThrow("supplied by the Scout apps");
     const entry = join(root, "selected.mjs");
     writeFileSync(entry, "export {};", {mode: 0o600});
     process.env.OPENSCOUT_WEB_SERVER_ENTRY = entry;

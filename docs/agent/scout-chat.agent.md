@@ -25,7 +25,7 @@ its name:
 
 | `Where:` says | Meaning |
 |---|---|
-| this machine (loopback) | Host resolves only to 127.0.0.1 / ::1 (e.g. `scout.local` on the host Mac). Nothing leaves the machine. |
+| this machine (loopback) | Host resolves only to 127.0.0.1 / ::1 (e.g. `scout.local` on the same host). Nothing leaves the machine. |
 | another machine, over HTTPS | A LAN, tailnet, or hosted Scout Chat server. Posts travel to it encrypted and are seen by members. |
 | another machine, over plain HTTP | Same, **unencrypted**. Anyone on the path can read posts. Treat as public. |
 | location unknown | The name did not resolve. Ask the operator. |

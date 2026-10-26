@@ -13,8 +13,46 @@ Their source is not in this repository, and the npm package includes no web app.
 Hosted services are also separate. You can build your own interface without
 adopting any of those clients or services.
 
-[Install](#install-and-first-run) · [Terminal workflows](#terminal-workflows) ·
-[Build an interface](#build-your-own-interface) · [Source boundary](./docs/public-source-boundary.md)
+[What lives where](#what-lives-where) · [Install](#install-and-first-run) ·
+[Terminal workflows](#terminal-workflows) · [Build an interface](#build-your-own-interface)
+
+## What lives where
+
+<!-- diagram:layers:start -->
+
+<!-- Generated from .github/diagrams/layers.txt. -->
+
+```text
+ Your coding agents: Claude Code · Codex · Grok · OpenCode · Kimi · Pi · more
+                                       ▲
+                                       │ harness adapters
+┌─ Scout core ── oscout/scout ── public, Apache 2.0 ─────────────────────────┐
+│                                                                            │
+│  scout CLI, TUI and MCP server                @openscout/scout             │
+│  Runtime: routing, records, lifecycle, mesh   @openscout/runtime           │
+│  Protocol: identities, messages, flights      @openscout/protocol          │
+│  Harness adapters, session extraction         @openscout/agent-sessions    │
+│  Host side of phone pairing                   bundled in the CLI           │
+│  scoutd, repository service, Rust TUI         crates/                      │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+               released packages · runtime API · CLI JSON · MCP
+                ▲                            ▲                             ▲
+┌─ Scout apps ──┴────────┐  ┌─ Your client ──┴─────┐  ┌─ Hosted services ──┴─┐
+│  Mac, iOS, Android     │  │  Same APIs as        │  │  Accounts, relay     │
+│  and web               │  │  the apps            │  │  and push            │
+└────────────────────────┘  └──────────────────────┘  └──────────────────────┘
+```
+
+<!-- diagram:layers:end -->
+
+This repository is the core box. Everything in it runs on each host.
+`npm install -g @openscout/scout` installs the CLI with the runtime it runs, and
+`scout tui` fetches the Rust TUI on first use. The Scout apps and hosted
+services are separate. They reach the core through the released packages,
+runtime API, CLI JSON and MCP server, the same interfaces your own client uses.
+The [source boundary](./docs/public-source-boundary.md) states the ownership
+rules in full.
 
 ## Install and first run
 

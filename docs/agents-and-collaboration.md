@@ -4,7 +4,7 @@ In Scout, a conversation is where you say things; a durable work record is how y
 get things done. The two are deliberately separate. A message is a durable turn in
 a conversation — it captures what was said. A question or a work item is a durable
 coordination record — it captures what is being asked, who owns the next move, and
-whether it is finished. The broker keeps both durable and routable, so a handoff
+whether it is finished. The runtime keeps both durable and routable, so a handoff
 survives restarts, device switches, and the gap between when work is requested and
 when it actually lands.
 
@@ -16,7 +16,7 @@ and adapter workflows — request shapes, receipts, reply context — read
 [`scout-comms.md`](./scout-comms.md), which stays the front door for building a
 Scout-aware client.
 
-The [Shared Interaction Model](./interaction-model.md) defines the adopted
+The Shared Interaction Model defines the adopted
 design for external participants, represented authority, and continuity across
 interfaces. Collaboration ownership and the next move remain separate from
 permission to perform an action. Moving work to another agent cannot by itself
@@ -28,7 +28,7 @@ identity. The model's coverage table records the remaining implementation gaps.
 Two verbs carry every interaction:
 
 - **`send`** posts a durable message with no tracked lifecycle. Use it for a
-  status, a note, a reply, or a channel post. The broker still writes a durable
+  status, a note, a reply, or a channel post. The runtime still writes a durable
   receipt (`conversationId`, `messageId`), but there is no flight to follow and no
   owned work to complete. `send` is the clean replacement for pasting the same
   update into three terminals.
@@ -42,7 +42,7 @@ Routing follows one model everywhere. The [quickstart](./quickstart.md) teaches 
 commands; here are the semantics:
 
 - **One target** routes to a DM.
-- **Group coordination** requires an explicit channel — the broker will not invent
+- **Group coordination** requires an explicit channel — the runtime will not invent
   one.
 - **Everyone** is an opt-in broadcast, never a default.
 - **A capability request** names a project path plus an optional harness; the
@@ -74,7 +74,7 @@ are work-item concerns.
 
 Typical flow:
 
-1. The asker creates a question; the broker routes it to a responder.
+1. The asker creates a question; the runtime routes it to a responder.
 2. The responder posts an answer, moving the state to `answered` — or `declined` if
    it cannot help.
 3. The asker closes it, or leaves it open to press further.
@@ -203,7 +203,7 @@ override used by trusted control-plane writers).
 
 ### Broker Lifecycle Floor
 
-The broker supplies one deterministic lifecycle floor today. When an ask's
+The runtime supplies one deterministic lifecycle floor today. When an ask's
 flight becomes terminal, it evaluates the orchestrator lifecycle binding
 `post_ask_summary`: if the target or requester holds the applicable
 orchestrator assignment, Scout appends a concise mission-log summary. Completed
@@ -278,7 +278,7 @@ sequenceDiagram
 - **Broadcasting a 1:1 task.** Sending an owned handoff to a shared channel or
   broadcast trains the logs, UI, and sweeper on the wrong audience.
 - **Guessing a generic handle.** Reaching for a name like `claude.main` as a first
-  guess is fragile; route by project plus capability, let the broker return the
+  guess is fragile; route by project plus capability, let the runtime return the
   real worker, then pin a memorable sibling only after it proves good.
 - **Untyped consults for durable work.** Dropping an owned task in as a plain
   shared-thread message loses the ownership and lifecycle the work deserves. If it
@@ -286,7 +286,7 @@ sequenceDiagram
 
 ## Waking And Attention
 
-The broker wakes the minimum set of targets needed to preserve responsibility — not
+The runtime wakes the minimum set of targets needed to preserve responsibility — not
 everyone in the conversation.
 
 Reliably wakes an agent:
@@ -301,7 +301,7 @@ Does **not** reliably wake an agent:
   attention; if you need an agent to act, address it, assign it, or hand it the next
   move.
 
-The broker owns this decision. Harness adapters carry the collaboration contract
+The runtime owns this decision. Harness adapters carry the collaboration contract
 into a session and translate lifecycle events back, but they do not reinterpret
 mentions, rewrite work-state transitions, or turn a wake into a restart loop. That
 contract is specified in [`agent-integration-contract.md`](./agent-integration-contract.md)
@@ -311,9 +311,7 @@ Operators are pulled in by attention, not solicited at every step. "Needs the
 human" — an approval, an unanswered question, or a `waiting` item stalled on an
 operator decision — is a first-class state routed to the person, not a side effect
 of whichever harness printed a prompt. See
-[`operator-attention-and-unblock.md`](./operator-attention-and-unblock.md). For how
-an operator opens a request into Scout in the first place, see
-[`ask-scout.md`](./ask-scout.md).
+[`operator-attention-and-unblock.md`](./operator-attention-and-unblock.md).
 
 ## Invariants
 
@@ -328,7 +326,7 @@ an operator opens a request into Scout in the first place, see
    work item instead.
 6. A one-to-one delegation stays in its DM; it never leaks to a channel or
    broadcast.
-7. Follow-up rides the handles the broker returned — `ref`, `flightId`,
+7. Follow-up rides the handles the runtime returned — `ref`, `flightId`,
    `conversationId`, `workId`, `target:<name>`, `session:<id>` — never a
    re-guessed name.
 8. Work-state transitions are broker-recorded, not inferred; routing history is

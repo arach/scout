@@ -1,16 +1,16 @@
-# OpenScout Control Protocol
+# Scout Control Protocol
 
-`@openscout/protocol` defines the durable local communication and execution contract for OpenScout.
+`@openscout/protocol` defines the durable local communication and execution contract for Scout.
 
 This package is intentionally not named `relay`. Relay is now a surface and compatibility layer. The control protocol is the canonical model underneath it.
 
 For the definitive Scout vocabulary and A2A posture, see [docs/concepts.md](../../docs/concepts.md).
 
-Scout is aware of adjacent standards such as A2A, but this package is not trying to become an A2A clone. The goal is clean correspondence without giving up Scout-specific mechanics such as broker-owned routing, `invocation` plus `flight`, or the `question` / `work_item` collaboration model.
+Scout is aware of adjacent standards such as A2A, but this package is not trying to become an A2A clone. The goal is clean correspondence without giving up Scout-specific mechanics such as runtime-owned routing, `invocation` plus `flight`, or the `question` / `work_item` collaboration model.
 
 ## Quickstart
 
-`@openscout/protocol` is pure, dependency-free TypeScript: typed records, discriminated-union control events, and hand-written validators for the OpenScout control plane. Use it at the boundary where user intent becomes broker-owned state.
+`@openscout/protocol` is pure, dependency-free TypeScript: typed records, discriminated-union control events, and hand-written validators for the Scout control plane. Use it at the boundary where user intent becomes runtime-owned state.
 
 ```ts
 import {
@@ -33,7 +33,7 @@ const question: QuestionRecord = {
   state: "open",
   acceptanceState: "none",
   title: parsed.body,
-  createdById: "person:arach",
+  createdById: "person:operator",
   ownerId: parsed.route.target.value,
   nextMoveOwnerId: parsed.route.target.value,
   createdAt: now,
@@ -58,7 +58,7 @@ const command: CollaborationUpsertCommand = {
 The target is a protocol that is:
 
 - explicit: conversation, work, delivery, and external bindings are separate records
-- durable: clients and adapters submit commands to the broker instead of writing coordination records directly
+- durable: clients and adapters submit commands to the runtime instead of writing coordination records directly
 - addressable: actors, conversations, messages, invocations, flights, and deliveries all have stable IDs
 - replayable: read models can be rebuilt from durable records and events
 - observable: status, ownership, outputs, and failures are inspectable
@@ -78,7 +78,7 @@ The protocol keeps a small set of nouns and gives each one a single job:
 - `invocation`: an explicit request for work
 - `flight`: the tracked lifecycle of one invocation
 - `delivery`: a transport-specific fan-out intent for a message or invocation
-- `binding`: a mapping from an OpenScout conversation to an external thread or channel
+- `binding`: a mapping from an Scout conversation to an external thread or channel
 - `event`: an append-only fact emitted whenever one of the durable records changes
 
 For discovery, Scout also uses a `ScoutAgentCard`: a local discovery and routing card that overlaps intentionally with A2A-style discovery fields such as provider, skills, supported interfaces, and security hints without claiming to be the A2A wire-level `AgentCard`.
@@ -108,7 +108,7 @@ Acceptance is modeled separately from workflow state so that a reply and satisfa
 not collapse into one transition. A work item can be done without peer acceptance, and a
 question can be answered without being closed yet.
 
-These collaboration shapes are backed by the runtime. The broker persists collaboration
+These collaboration shapes are backed by the runtime. The runtime persists collaboration
 records and events to its local store (`collaboration.upsert` and
 `collaboration.event.append` commands, `collaboration_records` and `collaboration_events`
 tables) and emits `collaboration.upserted` / `collaboration.event.appended` control events.
@@ -142,7 +142,7 @@ exports `parseScoutComposerRoute`, `SCOUT_COMPOSER_ROUTE_OPERATOR`, and
 `SCOUT_TARGET_HANDLE_SHORTHAND` so clients can translate `>> hudson`,
 `>> target:mw-talkie`, `>> ⌖mw-talkie`, `>> ref:8kj4pd`, `>> channel:ops`,
 or `>> broadcast` into structured `ScoutRouteTarget` metadata before
-submitting to the broker.
+submitting to the runtime.
 
 ## Core Design Rules
 
@@ -151,7 +151,7 @@ submitting to the broker.
 3. A flight is the tracked lifecycle of that work.
 4. Delivery is planned explicitly per target and transport.
 5. Bindings map external channels into the same internal model.
-6. Clients and adapters submit commands to the broker instead of writing Scout-owned coordination records directly.
+6. Clients and adapters submit commands to the runtime instead of writing Scout-owned coordination records directly.
 7. Harnesses own their primary transcripts and logs; Scout links to and observes them without importing them as canonical messages.
 
 ## Conversation, Work, And Delivery
@@ -247,7 +247,7 @@ The runtime package owns the local storage and projection schema for Scout-owned
 - `delivery_attempts`
 - `events`
 
-These are first-party Scout facts: records created by Scout surfaces, agent tools, the broker, or mesh forwarding. Local projections such as SQLite make those facts cheap to inspect, query, and render across surfaces.
+These are first-party Scout facts: records created by Scout surfaces, agent tools, the runtime, or mesh forwarding. Local projections such as SQLite make those facts cheap to inspect, query, and render across surfaces.
 
 External harness transcripts are different. Claude Code JSONL, Codex session JSONL, and future harness logs are source material owned by their harnesses. Scout can observe them through adapters and tail views, but the protocol should not treat every external transcript turn as a Scout `message` or require bulk transcript replication into the control-plane database.
 
@@ -263,11 +263,11 @@ The protocol is designed so that the system does not depend on terminal scrollba
 - append-only events let read models be rebuilt
 - external harness transcript files remain linkable and observable without becoming Scout-owned conversation records
 
-That does not require every surface to be smart. The broker owns the hard part, and the surfaces can recover by reading the canonical store.
+That does not require every surface to be smart. The runtime owns the hard part, and the surfaces can recover by reading the canonical store.
 
 ## Harness-Agnostic By Design
 
-OpenScout should not fork its protocol per harness.
+Scout should not fork its protocol per harness.
 
 - endpoint records describe `harness`, `transport`, `session_id`, `cwd`, and `project_root`
 - the same invocation and flight model applies whether the endpoint is Claude, Codex, tmux, or a future harness
@@ -296,12 +296,12 @@ protocol keeps the durable record shape stable.
 `ScoutCompletionRequest`, `ScoutCompletionRelation`, `ScoutCompletionReply`, and
 `ScoutCompletionState` define the optional local `explicit-completion/1`
 contract. Requests opt in through `ScoutDeliverRequest.completion`; child asks
-may carry a `relation`. The broker owns the revision and bounded obligations in
+may carry a `relation`. The runtime owns the revision and bounded obligations in
 `FlightRecord.metadata.completion`. Invocation metadata persists the selected
 mode, and message metadata carries the explicit progress/final identity.
 
 The HTTP ask discriminant is `explicit_consult`, and typed replies use
-`/v1/messages/reply`, so an older broker rejects the new operations rather than
+`/v1/messages/reply`, so an older runtime rejects the new operations rather than
 silently applying legacy completion rules. See the [runtime contract](../runtime/README.md#explicit-completion-and-joined-work)
 for route limits, pending obligations, retries, and restart behavior.
 

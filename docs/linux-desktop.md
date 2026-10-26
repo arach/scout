@@ -1,17 +1,17 @@
 # Scout notifications on Linux
 
-Scout's optional Linux desktop observer consumes the local broker's live
+Scout's optional Linux desktop observer consumes the local runtime's live
 `/v1/events/stream` API over its Unix socket. It shows communication and
 broker attention through Omarchy's notification service. It does not write
 Scout messages, launch agents, or read external harness transcripts.
 
 ## Install
 
-Requires Bun, `busctl` (from systemd), a running Scout broker with
+Requires Bun, `busctl` (from systemd), a running Scout runtime with
 `GET /v1/notification-routing` (public Scout 0.3.7 or newer), and Omarchy with clickable
 `omarchy-exec-argv` notification hints. This API is added by the Linux
 notification source change; runtimes older than 0.3.7 do not provide it.
-An older broker produces an HTTP 404 observer error and no live alerts;
+An older runtime produces an HTTP 404 observer error and no live alerts;
 the observer never falls back to reading full conversation history.
 
 The observer is an optional source installation. It is not bundled into the
@@ -34,7 +34,7 @@ up `Widget.qml` before editing it. Install the public
 [Omarchy popup and launcher](../integrations/omarchy/README.md) to create the
 full bar menu. Without that plugin, CLI configuration remains available.
 Rerun the installer and restart the notification service
-to update it. The broker is not restarted.
+to update it. The runtime is not restarted.
 
 The observer starts with the graphical session and follows its lifetime.
 Omarchy handles notification display, history, and Do Not Disturb. Clicking
@@ -103,7 +103,7 @@ Scout's support-directory resolver and honors `OPENSCOUT_BROKER_SOCKET_PATH`.
 In operator conversations, **outbound** means authored by `operator` and
 **inbound** means addressed to the operator or posted by another actor in a
 conversation the operator participates in. With scope `all`, additional
-agent-to-agent messages are outbound when their `originNodeId` is this broker's
+agent-to-agent messages are outbound when their `originNodeId` is this runtime's
 node and inbound when they originate elsewhere. Routing fields determine
 direction; body mentions do not.
 
@@ -118,7 +118,7 @@ Ordinary status/log messages do not generate communication alerts.
 
 This is a best-effort live observer. It does not backfill messages on startup
 or reconnect; traffic during a disconnect may be missed. Only events emitted
-by this broker are visible. It does not claim to capture host permission
+by this runtime are visible. It does not claim to capture host permission
 prompts or messages forwarded without a local `message.posted` event.
 
 Before each stream connection, the observer hydrates sender identity and

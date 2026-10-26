@@ -2,11 +2,11 @@
 
 Bring your local coding agents into a Grok Bot conversation — and let Scout launch Grok as a harness when the work belongs there.
 
-OpenScout connects to Grok in **three complementary ways**. This page is the map. For concise setup and machine-readable instructions, use [Grok](https://openscout.app/grok) or [Grok Bot](https://openscout.app/grokbot).
+Scout connects to Grok in **three complementary ways**. This page is the map. For concise setup and machine-readable instructions, use [Grok](https://openscout.app/grok) or [Grok Bot](https://openscout.app/grokbot).
 
 | Path | What it is | When to use it |
 | --- | --- | --- |
-| **Hosted MCP connector** | Grok Bot → `https://mcp.oscout.net` → your online bridge → local broker | Talking to Scout **from** Grok Bot over the internet |
+| **Hosted MCP connector** | Grok Bot → `https://mcp.oscout.net` → your online bridge → local runtime | Talking to Scout **from** Grok Bot over the internet |
 | **Local host package** ([grok-scout](https://github.com/arach/grok-scout)) | Installer that writes `scout` into `~/.cursor/mcp.json` so the host runs `scout mcp` locally | Cursor using a Grok model on the Scout machine |
 | **Execution harness** (`--harness grok-acp`) | Scout starts a Grok CLI / ACP session as a worker | Handing work **to** Grok from Scout, Claude, Codex, etc. |
 
@@ -28,8 +28,8 @@ Custom MCP setup works today. The Grok Bot / Cursor marketplace application was 
 
 ### Prerequisites
 
-- OpenScout installed and healthy (`scout doctor`)
-- A **provisioned, online** MCP bridge for your account (operator-assisted for local developer pilots today)
+- Scout installed and healthy (`scout doctor`)
+- A **provisioned, online** MCP bridge for your account (operator-assisted for local developer environments today)
 - The GitHub account that owns that bridge
 
 Adding the connector alone does **not** install Scout or create a bridge.
@@ -37,7 +37,7 @@ Adding the connector alone does **not** install Scout or create a bridge.
 ### Connect
 
 1. Open Grok Bot → **Plugins** → add a custom MCP server.
-2. Name it **OpenScout**.
+2. Name it **Scout**.
 3. URL: `https://mcp.oscout.net`. Leave custom headers empty.
 4. Complete browser sign-in with GitHub (the account tied to your Scout bridge).
 5. Choose the agent identity that will appear in Scout, review scopes, approve.
@@ -69,7 +69,7 @@ Grok Bot → Scout hosted MCP gateway (mcp.oscout.net)
         → coding agents / harnesses
 ```
 
-The gateway supplies authenticated identity. Your local broker owns the records. The bridge exposes Scout's core MCP tier (`mcp:core`): identity, messaging, asks, work updates, flight inspection.
+The gateway supplies authenticated identity. Your local runtime owns the records. The bridge exposes Scout's core MCP tier (`mcp:core`): identity, messaging, asks, work updates, flight inspection.
 
 If a call returns `node_unreachable`:
 
@@ -102,7 +102,7 @@ scout doctor
 
 Then confirm Scout MCP tools appear in Cursor (`whoami`, `ask`, `messages_send`, …).
 
-This package does **not** reimplement the broker. It is thin host packaging so Grok is discoverable in the ecosystem the same way Claude, Codex, Cursor, pi, and Hermes are.
+This package does **not** reimplement the runtime. It is thin host packaging so Grok is discoverable in the ecosystem the same way Claude, Codex, Cursor, pi, and Hermes are.
 
 ---
 
@@ -134,7 +134,7 @@ Prefer project-path + optional harness over guessing names like `claude.main`. F
 
 - Hosted connector scope: core `mcp:core` (read/send messages, create asks, follow work).
 - Grok Bot connections can be shared across bots on the same Cursor account — review with that in mind.
-- OpenScout remains high-trust local developer pilots; hosted bridge provisioning is operator-assisted.
+- Scout remains high-trust local developer environments; hosted bridge provisioning is operator-assisted.
 - The hosted connector marketplace submission is pending review. Until then, use custom MCP with `https://mcp.oscout.net`.
 
 ---
@@ -145,5 +145,4 @@ Prefer project-path + optional harness over guessing names like `claude.main`. F
 - [Host integrations directory](./integrations.md) — full companion map
 - [Quickstart](./quickstart.md) — healthy local Scout
 - [Agent integration contract](./agent-integration-contract.md) — plugging runtimes into Scout
-- [Learn 11 · The broker contract](./learn-11-the-broker-contract.md) — records and MCP surface
 - [grok-scout](https://github.com/arach/grok-scout) · [cursor-scout](https://github.com/oscout/cursor-scout) — local MCP packaging twins
