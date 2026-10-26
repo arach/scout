@@ -171,6 +171,15 @@ describe("scout auth login", () => {
     expect(savedKey()).toBeNull();
   });
 
+  test("an expiry names a dropped request only when the host never answered after it", async () => {
+    const shortGrant = { status: 200, body: { ...GRANT, expires_in: 12 } };
+    const recovered = harness({ grant: shortGrant, polls: [new Error("socket hang up"), PENDING] });
+    const healed = await runAuthCommand(recovered.context, ["login"], recovered.deps).catch((error: Error) => error.message);
+    expect(healed).toBe("The sign-in code expired before it was approved. Run: scout auth login");
+    const dropped = harness({ grant: shortGrant, polls: [PENDING, new Error("socket hang up")] });
+    await expect(runAuthCommand(dropped.context, ["login"], dropped.deps)).rejects.toThrow("(last answer: socket hang up)");
+  });
+
   test("--no-browser, SSH and a non-terminal print the page without opening it", async () => {
     for (const setup of [
       { args: ["login", "--no-browser"] },

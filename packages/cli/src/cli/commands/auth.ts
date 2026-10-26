@@ -357,6 +357,8 @@ async function deviceSignIn(context: ScoutCommandContext, args: string[], deps: 
         lastProblem = error instanceof Error ? error.message : String(error);
         continue;
       }
+      // An answer clears an earlier dropped request, so an expiry names only a problem that lasted.
+      lastProblem = null;
       if (poll.response.ok) {
         const key = typeof poll.body?.key === "string" ? poll.body.key : "";
         if (!key.startsWith(DIST_KEY_PREFIX)) throw new ScoutCliError("The sign-in host approved this terminal but sent no download key.");
