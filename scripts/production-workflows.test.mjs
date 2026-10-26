@@ -20,7 +20,7 @@ test('TUI-created dev releases are prereleases, stable releases are not', () => 
   const source = workflow('release-scout-tui');
   const snippet = source.slice(source.indexOf('            prerelease=(--prerelease=false)'), source.indexOf('\n          fi', source.indexOf('            prerelease=(--prerelease=false)')));
   for (const [version, prerelease] of [['0.3.8', false], ['0.3.6-dev.3', true]]) {
-    const result = spawnSync('bash', ['-c', `set -euo pipefail; gh() { printf '%s\\n' "$@"; }; VERSION="$1"; TAG="v$1"; GITHUB_REPOSITORY=oscout/scout; ${snippet}`, '--', version], { encoding: 'utf8' });
+    const result = spawnSync('bash', ['-c', `set -euo pipefail; gh() { printf '%s\\n' "$@"; }; VERSION="$1"; TAG="v$1"; GITHUB_REPOSITORY=openscout-app/scout; ${snippet}`, '--', version], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.split('\n').includes('--prerelease'), prerelease);
     assert.ok(result.stdout.includes('--latest=false'));

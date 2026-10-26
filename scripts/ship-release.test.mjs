@@ -96,8 +96,8 @@ test("0.2.89 GitHub publication refuses legacy npm token authentication", () => 
     env: {
       ...process.env,
       GITHUB_ACTIONS: "true",
-      GITHUB_REPOSITORY: "oscout/scout",
-      GITHUB_WORKFLOW_REF: "oscout/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
+      GITHUB_REPOSITORY: "openscout-app/scout",
+      GITHUB_WORKFLOW_REF: "openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
       NPM_TOKEN: "legacy-token-must-not-be-used",
     },
   });
@@ -209,7 +209,7 @@ fi
 if [[ "$1" == "status" || "$1" == "fetch" ]]; then exit 0; fi
 if [[ "$1" == "branch" ]]; then echo main; exit 0; fi
 if [[ "$1" == "remote" && "$2" == "get-url" ]]; then
-  echo https://github.com/oscout/scout.git
+  echo https://github.com/openscout-app/scout.git
   exit 0
 fi
 if [[ "$1" == "ls-remote" ]]; then
@@ -236,7 +236,7 @@ exit 1
         "scripts/npm-release-receipt.mjs",
         "create",
         "release-state/receipt.json",
-        "https://github.com/oscout/scout",
+        "https://github.com/openscout-app/scout",
         version,
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         authority,
@@ -272,7 +272,7 @@ if [[ "$identity" == "@openscout/scout@${version}" ]]; then
   case "$field" in
     version) echo ${version} ;;
     gitHead) echo ${observedSha} ;;
-    repository.url) echo git+https://github.com/oscout/scout.git ;;
+    repository.url) echo git+https://github.com/openscout-app/scout.git ;;
     dist.integrity) echo ${registryIntegrityMismatch ? "sha512-registrymismatch" : scoutIntegrity} ;;
     *) exit 8 ;;
   esac
@@ -282,7 +282,7 @@ if [[ "$identity" == "@openscout/protocol@${version}" ]]; then
   case "$field" in
     version) echo ${version} ;;
     gitHead) echo ${observedSha} ;;
-    repository.url) echo git+https://github.com/oscout/scout.git ;;
+    repository.url) echo git+https://github.com/openscout-app/scout.git ;;
     dist.integrity) echo ${protocolIntegrity} ;;
     *) exit 8 ;;
   esac
@@ -382,7 +382,7 @@ function createPublishFixture({
     '    case "$field" in',
     `      version) echo ${version} ;;`,
     '      gitHead) echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;',
-    '      repository.url) echo git+https://github.com/oscout/scout.git ;;',
+    '      repository.url) echo git+https://github.com/openscout-app/scout.git ;;',
     '      dist.integrity) if [[ "$key" == "protocol" ]]; then echo "$protocol_integrity"; else echo "$scout_integrity"; fi ;;',
     '      *) exit 8 ;;',
     '    esac',
@@ -568,7 +568,7 @@ test("release receipts are exclusive and cannot be overwritten", () => {
         "scripts/npm-release-receipt.mjs",
         "create",
         receiptPath,
-        "https://github.com/oscout/scout",
+        "https://github.com/openscout-app/scout",
         "0.2.99",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "local-signed",
@@ -692,9 +692,9 @@ test("trusted publishing works without optional token arguments on macOS Bash", 
       env: {
         ...registryEnv(fixture),
         GITHUB_ACTIONS: "true",
-        GITHUB_REPOSITORY: "oscout/scout",
+        GITHUB_REPOSITORY: "openscout-app/scout",
         GITHUB_WORKFLOW_REF:
-          "oscout/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
+          "openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
         NPM_TOKEN: "",
       },
     });
@@ -722,9 +722,9 @@ test("trusted publishing converges split older latest tags with one fresh versio
       env: {
         ...registryEnv(fixture),
         GITHUB_ACTIONS: "true",
-        GITHUB_REPOSITORY: "oscout/scout",
+        GITHUB_REPOSITORY: "openscout-app/scout",
         GITHUB_WORKFLOW_REF:
-          "oscout/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
+          "openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
         NPM_TOKEN: "",
       },
     });
@@ -751,9 +751,9 @@ test("prepared OIDC candidate bundles are reusable without npm mutation", () => 
       env: {
         ...registryEnv(fixture),
         GITHUB_ACTIONS: "true",
-        GITHUB_REPOSITORY: "oscout/scout",
+        GITHUB_REPOSITORY: "openscout-app/scout",
         GITHUB_WORKFLOW_REF:
-          "oscout/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
+          "openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
         NPM_TOKEN: "",
       },
     });
@@ -778,9 +778,9 @@ test("publish-prepared refuses to mutate npm without an exact candidate bundle",
       env: {
         ...registryEnv(fixture),
         GITHUB_ACTIONS: "true",
-        GITHUB_REPOSITORY: "oscout/scout",
+        GITHUB_REPOSITORY: "openscout-app/scout",
         GITHUB_WORKFLOW_REF:
-          "oscout/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
+          "openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
         NPM_TOKEN: "",
       },
     });
@@ -807,9 +807,9 @@ test("OIDC recovery resumes only the missing Scout package from the exact protoc
       env: {
         ...registryEnv(fixture),
         GITHUB_ACTIONS: "true",
-        GITHUB_REPOSITORY: "oscout/scout",
+        GITHUB_REPOSITORY: "openscout-app/scout",
         GITHUB_WORKFLOW_REF:
-          "oscout/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
+          "openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
         NPM_TOKEN: "",
       },
     });
@@ -836,9 +836,9 @@ test("OIDC recovery rejects a protocol artifact that has not reached latest", ()
       env: {
         ...registryEnv(fixture),
         GITHUB_ACTIONS: "true",
-        GITHUB_REPOSITORY: "oscout/scout",
+        GITHUB_REPOSITORY: "openscout-app/scout",
         GITHUB_WORKFLOW_REF:
-          "oscout/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
+          "openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
         NPM_TOKEN: "",
       },
     });
@@ -865,9 +865,9 @@ test("OIDC recovery rejects a Scout-only partial set before npm mutation", () =>
       env: {
         ...registryEnv(fixture),
         GITHUB_ACTIONS: "true",
-        GITHUB_REPOSITORY: "oscout/scout",
+        GITHUB_REPOSITORY: "openscout-app/scout",
         GITHUB_WORKFLOW_REF:
-          "oscout/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
+          "openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
         NPM_TOKEN: "",
       },
     });
@@ -894,9 +894,9 @@ test("trusted publishing refuses dist-tag recovery for an existing unpromoted se
       env: {
         ...registryEnv(fixture),
         GITHUB_ACTIONS: "true",
-        GITHUB_REPOSITORY: "oscout/scout",
+        GITHUB_REPOSITORY: "openscout-app/scout",
         GITHUB_WORKFLOW_REF:
-          "oscout/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
+          "openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
         NPM_TOKEN: "",
       },
     });
@@ -1210,7 +1210,7 @@ for (const version of ["0.2.88", "0.2.89", "0.2.90"]) {
 }
 
 for (const [label, before, after, diagnostic] of [
-  ["foreign origin", "https://github.com/oscout/scout.git", "https://github.com/other/scout.git", /requires https:\/\/github.com\/oscout\/scout/],
+  ["foreign origin", "https://github.com/openscout-app/scout.git", "https://github.com/other/scout.git", /requires https:\/\/github.com\/openscout-app\/scout/],
   ["unreviewed branch", "then echo main;", "then echo feature;", /requires reviewed public main/],
   ["stale main", 'if [[ "$1" == "rev-parse" ]]; then', 'if [[ "$2" == "FETCH_HEAD^{commit}" ]]; then echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; exit 0; fi\nif [[ "$1" == "rev-parse" ]]; then', /freshly fetched origin\/main/],
   ["dirty source", 'if [[ "$1" == "status" ||', 'if [[ "$1" == "status" ]]; then echo " M source.ts"; exit 0; fi\nif [[ "$1" == "status" ||', /clean reviewed source/],
@@ -1304,12 +1304,12 @@ if [[ "$1 $2" == "release view" ]]; then
     file='${fixture}/remote-'"$name"
     if [[ -f "$file" ]]; then
       size=$(wc -c < "$file" | tr -d ' ')
-      assets="$assets$comma"'{"name":"'"$name"'","size":'"$size"',"url":"https://github.com/oscout/scout/releases/download/v${version}/'"$name"'"}'
+      assets="$assets$comma"'{"name":"'"$name"'","size":'"$size"',"url":"https://github.com/openscout-app/scout/releases/download/v${version}/'"$name"'"}'
       comma=','
     fi
   done
   assets="[$assets]"
-  echo '{"tagName":"v${version}","isDraft":'"$draft"',"isPrerelease":'"$prerelease"',"url":"https://github.com/oscout/scout/releases/tag/v${version}","assets":'"$assets"'}'
+  echo '{"tagName":"v${version}","isDraft":'"$draft"',"isPrerelease":'"$prerelease"',"url":"https://github.com/openscout-app/scout/releases/tag/v${version}","assets":'"$assets"'}'
   exit 0
 fi
 if [[ "$1 $2" == "release create" ]]; then
@@ -1606,7 +1606,7 @@ function createOriginalCandidateFixture() {
   for (let i = 0; i < names.length; i++) {
     const stage = join(fixture, `original-package-${i}`);
     mkdirSync(join(stage, "package"), { recursive: true });
-    writeFileSync(join(stage, "package/package.json"), JSON.stringify({ name: names[i], version, gitHead: source, repository: { url: "https://github.com/oscout/scout" } }));
+    writeFileSync(join(stage, "package/package.json"), JSON.stringify({ name: names[i], version, gitHead: source, repository: { url: "https://github.com/openscout-app/scout" } }));
     const file = join(bundle, `openscout-${names[i].split('/').at(-1)}-${version}.tgz`);
     const packed = spawnSync("tar", ["-czf", file, "-C", stage, "package"], { encoding: "utf8" });
     assert.equal(packed.status, 0, packed.stderr);
@@ -1615,7 +1615,7 @@ function createOriginalCandidateFixture() {
     writeFileSync(join(stateDir, `${i ? 'scout' : 'protocol'}-stage`), version);
   }
   const receiptPath = join(bundle, "receipt.json");
-  const created = spawnSync(process.execPath, ["scripts/npm-release-receipt.mjs", "create", receiptPath, "https://github.com/oscout/scout", version, source, "local-signed", ...triples], { cwd: fixture, encoding: "utf8" });
+  const created = spawnSync(process.execPath, ["scripts/npm-release-receipt.mjs", "create", receiptPath, "https://github.com/openscout-app/scout", version, source, "local-signed", ...triples], { cwd: fixture, encoding: "utf8" });
   assert.equal(created.status, 0, created.stderr);
   const digest = bytes => createHash("sha256").update(bytes).digest("hex");
   const receipt = JSON.parse(readFileSync(receiptPath));
@@ -1632,7 +1632,7 @@ function createOriginalCandidateFixture() {
     writeFileSync(join(fixture, file), readFileSync(join(fixture, file), "utf8").replaceAll(version, "0.4.0"));
   }
   writeFileSync(join(fixture, "fake-bin/git"), `#!/bin/bash
-if [[ "$1" == "remote" ]]; then echo https://github.com/oscout/scout.git; exit 0; fi
+if [[ "$1" == "remote" ]]; then echo https://github.com/openscout-app/scout.git; exit 0; fi
 if [[ "$1" == "status" ]]; then [[ ! -f '${fixture}/dirty' ]] || echo ' M source'; exit 0; fi
 if [[ "$1" == "branch" ]]; then echo main; exit 0; fi
 if [[ "$1" == "fetch" ]]; then exit 0; fi
@@ -1662,7 +1662,7 @@ if(a[0]==='view'){
  const i=names.findIndex(n=>a[1]===n||a[1]===n+'@'+version),key=keys[i]; if(i<0)process.exit(91);
  if(a[2]==='dist-tags'){print({latest:get(key,'latest'),['scout-release-0-3-3']:get(key,'stage')});process.exit(0);}
  if(!fs.existsSync(path.join(state,key+'-exists'))){print({error:{code:'E404',summary:'No match found for version0.3.3'}});process.exit(1);}
- print({name:names[i],version,gitHead:source,repository:{url:'https://github.com/oscout/scout'},dist:{integrity:receipt.packages[i].integrity,tarball:'https://registry.npmjs.org/'+names[i]+'/-/'+key+'-'+version+'.tgz'}});process.exit(0);
+ print({name:names[i],version,gitHead:source,repository:{url:'https://github.com/openscout-app/scout'},dist:{integrity:receipt.packages[i].integrity,tarball:'https://registry.npmjs.org/'+names[i]+'/-/'+key+'-'+version+'.tgz'}});process.exit(0);
 }
 fs.appendFileSync(path.join(state,'mutations.log'),a.join(' ')+'\\n');
 if(a[0]==='dist-tag'&&a[1]==='add'){
@@ -1796,8 +1796,8 @@ test("retained identity cannot be supplied incompletely or used for the default 
 
 function devEnv(fixture) {
   return { ...registryEnv(fixture), GITHUB_ACTIONS: "true", NPM_TAG: "dev",
-    GITHUB_REPOSITORY: "oscout/scout",
-    GITHUB_WORKFLOW_REF: "oscout/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
+    GITHUB_REPOSITORY: "openscout-app/scout",
+    GITHUB_WORKFLOW_REF: "openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main",
     NPM_TOKEN: "", NODE_AUTH_TOKEN: "", NPM_DIST_TAG_VERIFY_ATTEMPTS: "1", NPM_DIST_TAG_VERIFY_DELAY_SECONDS: "0" };
 }
 

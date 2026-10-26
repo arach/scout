@@ -7,8 +7,8 @@ import { writeFileSync, renameSync, rmSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const repository = 'https://github.com/oscout/scout';
-const api = 'https://api.github.com/repos/oscout/scout';
+const repository = 'https://github.com/openscout-app/scout';
+const api = 'https://api.github.com/repos/openscout-app/scout';
 const names = ['@openscout/protocol', '@openscout/scout'];
 const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };

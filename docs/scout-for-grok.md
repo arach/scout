@@ -85,7 +85,7 @@ Host plugin help: [Grok Bot connect plugins](https://cursor.com/help/grok-bot/co
 
 ## 2. Local host package (grok-scout)
 
-When Cursor hosting Grok agents runs on the **same machine** as Scout, you can point Cursor at the local stdio MCP server — the same pattern as [Cursor Scout](https://github.com/oscout/cursor-scout).
+When Cursor hosting Grok agents runs on the **same machine** as Scout, you can point Cursor at the local stdio MCP server — the same pattern as [Cursor Scout](https://github.com/openscout-app/cursor-scout).
 
 | | |
 | --- | --- |
@@ -145,4 +145,4 @@ Prefer project-path + optional harness over guessing names like `claude.main`. F
 - [Host integrations directory](./integrations.md) — full companion map
 - [Quickstart](./quickstart.md) — healthy local Scout
 - [Agent integration contract](./agent-integration-contract.md) — plugging runtimes into Scout
-- [grok-scout](https://github.com/arach/grok-scout) · [cursor-scout](https://github.com/oscout/cursor-scout) — local MCP packaging twins
+- [grok-scout](https://github.com/arach/grok-scout) · [cursor-scout](https://github.com/openscout-app/cursor-scout) — local MCP packaging twins

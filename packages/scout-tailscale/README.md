@@ -54,7 +54,7 @@ python3 -m venv "$HOME/.local/share/scout-tailscale" &&
 
 Use the executable's full path if its directory is not on PATH. The Linux
 admission and no-hosted-service guide is
-[here](https://github.com/oscout/scout/blob/main/docs/linux-tailnet-guest.md);
+[here](https://github.com/openscout-app/scout/blob/main/docs/linux-tailnet-guest.md);
 ship those instructions only after their CLI prerequisites are merged.
 
 ## Without hosted pairing

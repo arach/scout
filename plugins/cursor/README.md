@@ -10,7 +10,7 @@ OpenScout is model- and harness-agnostic, with any-to-any routing between suppor
 - OpenScout installed and set up with a running local broker.
 - Any target worker configured separately through a supported Scout integration.
 
-See the [OpenScout installation instructions](https://github.com/oscout/scout/blob/main/install.md). The MCP process runs `bunx @openscout/scout@0.2.108 mcp`.
+See the [OpenScout installation instructions](https://github.com/openscout-app/scout/blob/main/install.md). The MCP process runs `bunx @openscout/scout@0.2.108 mcp`.
 
 ## First check
 

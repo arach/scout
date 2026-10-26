@@ -1,5 +1,5 @@
 # Source of truth: arach/openscout scripts/public-workflows/release-scout-tui.yml.
-# scripts/sync-public-core.mjs installs it into oscout/scout; edit it there, not here.
+# scripts/sync-public-core.mjs installs it into openscout-app/scout; edit it there, not here.
 #
 # Builds the scout-tui binary for each prebuilt platform and attaches it to the
 # public GitHub release for the version, where `scout tui` downloads it on first

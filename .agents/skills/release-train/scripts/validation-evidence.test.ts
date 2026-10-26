@@ -44,7 +44,7 @@ for (const [name, mutate] of Object.entries({
 test("hosted mode requires authorization and a hashed exact-revision run receipt", () => {
   const f = fixture(); f.gate.validationSource = "HOSTED_CI"; f.plan.hostedCiAuthorization = "Operator explicitly requested this run";
   expect(() => validateMergeEvidence(f.checkpoint, f.gate)).toThrow();
-  const payload = JSON.stringify({ headSha: f.gate.headSha, baseSha: f.gate.baseSha, runUrl: "https://github.com/oscout/scout/actions/runs/123", checks: [f.receipt] });
+  const payload = JSON.stringify({ headSha: f.gate.headSha, baseSha: f.gate.baseSha, runUrl: "https://github.com/openscout-app/scout/actions/runs/123", checks: [f.receipt] });
   const outputRef = join(dirs.at(-1)!, "hosted.json"); writeFileSync(outputRef, payload);
   f.gate.hostedEvidence = { outputRef, outputSha256: createHash("sha256").update(payload).digest("hex") };
   expect(() => validateMergeEvidence(f.checkpoint, f.gate)).not.toThrow();

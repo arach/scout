@@ -12,10 +12,10 @@ test("npm metadata points visitors to the OpenScout project", () => {
   assert.equal(packageJson.homepage, "https://openscout.app");
   assert.deepEqual(packageJson.repository, {
     type: "git",
-    url: "git+https://github.com/oscout/scout.git",
+    url: "git+https://github.com/openscout-app/scout.git",
     directory: "packages/cli",
   });
-  assert.deepEqual(packageJson.bugs, { url: "https://github.com/oscout/scout/issues" });
+  assert.deepEqual(packageJson.bugs, { url: "https://github.com/openscout-app/scout/issues" });
   assert.match(packageJson.description, /^Coordinate Claude Code, Codex/);
   assert.match(packageJson.description, /local-first/);
   assert.equal(packageJson.engines?.bun, ">=1.4.4");

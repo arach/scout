@@ -645,14 +645,14 @@
   },
   "license": "Apache-2.0",
   "author": "Arach Tchoupani",
-  "homepage": "https://github.com/oscout/scout/tree/main/packages/runtime#readme",
+  "homepage": "https://github.com/openscout-app/scout/tree/main/packages/runtime#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/oscout/scout.git",
+    "url": "git+https://github.com/openscout-app/scout.git",
     "directory": "packages/runtime"
   },
   "bugs": {
-    "url": "https://github.com/oscout/scout/issues"
+    "url": "https://github.com/openscout-app/scout/issues"
   },
   "keywords": [
     "openscout",

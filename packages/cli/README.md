@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@openscout/scout"><img alt="npm version" src="https://img.shields.io/npm/v/@openscout/scout?style=flat-square&amp;label=npm&amp;color=f7f4ea&amp;labelColor=171a16" /></a>
   <a href="https://bun.sh"><img alt="Bun 1.4.4 or newer" src="https://img.shields.io/badge/runtime-Bun_%E2%89%A5_1.4.4-f7f4ea?style=flat-square&amp;labelColor=171a16&amp;logo=bun" /></a>
-  <a href="https://github.com/oscout/scout/blob/main/LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-f7f4ea?style=flat-square&amp;labelColor=171a16" /></a>
+  <a href="https://github.com/openscout-app/scout/blob/main/LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-f7f4ea?style=flat-square&amp;labelColor=171a16" /></a>
   <a href="https://openscout.app"><img alt="Scout homepage" src="https://img.shields.io/badge/project-openscout.app-f7f4ea?style=flat-square&amp;labelColor=171a16" /></a>
 </p>
 
@@ -277,7 +277,7 @@ the same released packages and APIs.
  Your coding agents: Claude Code · Codex · Grok · OpenCode · Kimi · Pi · more
                                        ▲
                                        │ harness adapters
-┌─ Scout core ── oscout/scout ── public, Apache 2.0 ─────────────────────────┐
+┌─ Scout core ── openscout-app/scout ── public, Apache 2.0 ──────────────────┐
 │                                                                            │
 │  scout CLI, TUI and MCP server                @openscout/scout             │
 │  Runtime: routing, records, lifecycle, mesh   @openscout/runtime           │
@@ -391,11 +391,11 @@ harness configuration.
 
 Connect Scout to your agent host:
 
-- [Claude Code plugin](https://github.com/oscout/claude-scout)
-- [Codex plugin](https://github.com/oscout/codex-scout)
-- [Cursor MCP setup](https://github.com/oscout/cursor-scout)
-- [Pi extension](https://github.com/oscout/pi-scout)
-- [Hermes Agent plugin](https://github.com/oscout/hermes-scout)
+- [Claude Code plugin](https://github.com/openscout-app/claude-scout)
+- [Codex plugin](https://github.com/openscout-app/codex-scout)
+- [Cursor MCP setup](https://github.com/openscout-app/cursor-scout)
+- [Pi extension](https://github.com/openscout-app/pi-scout)
+- [Hermes Agent plugin](https://github.com/openscout-app/hermes-scout)
 - [Grok setup guide](https://openscout.app/docs/scout-for-grok)
 
 Hermes Agent connects as an agent host through its plugin. It is not a
@@ -406,7 +406,7 @@ maps every package and setup path.
 
 For commercial support or to learn more about our plans,
 [contact us](https://openscout.app/contact). Report bugs and request features
-in [GitHub issues](https://github.com/oscout/scout/issues).
+in [GitHub issues](https://github.com/openscout-app/scout/issues).
 
 ## Go deeper
 
@@ -416,7 +416,7 @@ in [GitHub issues](https://github.com/oscout/scout/issues).
 - [Install guide](../../install.md)
 - [Architecture](https://openscout.app/docs/architecture)
 - [Source boundary](../../docs/public-source-boundary.md)
-- [Source repository](https://github.com/oscout/scout)
+- [Source repository](https://github.com/openscout-app/scout)
 
 ## License
 

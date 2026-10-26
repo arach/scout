@@ -1,7 +1,7 @@
 # Public-source boundary
 
 Scout has three layers: the public core, separate apps, and hosted services.
-This repository, `oscout/scout`, owns the core that runs on each host. Its
+This repository, `openscout-app/scout`, owns the core that runs on each host. Its
 interface is the terminal. It contains no web app.
 
 ## Ownership
@@ -14,7 +14,7 @@ interface is the terminal. It contains no web app.
  Your coding agents: Claude Code · Codex · Grok · OpenCode · Kimi · Pi · more
                                        ▲
                                        │ harness adapters
-┌─ Scout core ── oscout/scout ── public, Apache 2.0 ─────────────────────────┐
+┌─ Scout core ── openscout-app/scout ── public, Apache 2.0 ──────────────────┐
 │                                                                            │
 │  scout CLI, TUI and MCP server                @openscout/scout             │
 │  Runtime: routing, records, lifecycle, mesh   @openscout/runtime           │
@@ -123,7 +123,7 @@ enterprise, compliance, or hardened untrusted multi-tenant readiness.
 ## Release invariants
 
 1. Public packages are built from their canonical source in this repository.
-2. Package metadata and provenance point to `oscout/scout` and the reviewed
+2. Package metadata and provenance point to `openscout-app/scout` and the reviewed
    source commit.
 3. The release tag, package versions, and registry artifacts agree.
 4. Packages in a lockstep core release use one exact version.

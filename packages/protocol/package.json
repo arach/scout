@@ -5,14 +5,14 @@
   "license": "Apache-2.0",
   "type": "module",
   "author": "Arach Tchoupani",
-  "homepage": "https://github.com/oscout/scout/tree/main/packages/protocol#readme",
+  "homepage": "https://github.com/openscout-app/scout/tree/main/packages/protocol#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/oscout/scout.git",
+    "url": "git+https://github.com/openscout-app/scout.git",
     "directory": "packages/protocol"
   },
   "bugs": {
-    "url": "https://github.com/oscout/scout/issues"
+    "url": "https://github.com/openscout-app/scout/issues"
   },
   "keywords": [
     "openscout",

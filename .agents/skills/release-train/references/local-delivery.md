@@ -38,10 +38,10 @@ Fetch the run and job results from GitHub; never manufacture a green status.
 The runner validates receipt integrity and coverage, not GitHub identity.
 
 Source merging and publishing are separate decisions. Use canonical public
-`oscout/scout` for npm and public DMG distribution. Local builds must preserve
+`openscout-app/scout` for npm and public DMG distribution. Local builds must preserve
 exact native dependency pins, approved Developer ID, notarization, Sparkle
 signing and public-byte verification. A local npm process cannot claim the
-GitHub OIDC provenance of the hosted publisher. Canonical public `oscout/scout`
+GitHub OIDC provenance of the hosted publisher. Canonical public `openscout-app/scout`
 now provides a reviewed local publisher; follow its current `docs/releases.md`
 and preserve its canonical release scripts when changing core ownership. Local
 publication needs configured authentication and exact retained candidates. If authentication is

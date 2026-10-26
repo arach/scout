@@ -133,7 +133,7 @@ agent should act, investigate, judge, or report back.
 ## Work from source
 
 ```bash
-git clone https://github.com/oscout/scout.git
+git clone https://github.com/openscout-app/scout.git
 cd scout
 bun install --frozen-lockfile
 

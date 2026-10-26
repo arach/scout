@@ -41,8 +41,8 @@ export const SCOUT_HOST_INTEGRATIONS: readonly ScoutHostIntegration[] = [
     roles: ["execution_harness", "agent_host", "mcp_host"],
     harness: "claude",
     homepage: "https://claude.ai/claude-code",
-    repositoryUrl: "https://github.com/oscout/claude-scout",
-    installHint: "/plugin marketplace add oscout/claude-scout",
+    repositoryUrl: "https://github.com/openscout-app/claude-scout",
+    installHint: "/plugin marketplace add openscout-app/claude-scout",
     summary: "Claude Code can run Scout-routed work as a harness and expose Scout through a host plugin.",
   },
   {
@@ -51,8 +51,8 @@ export const SCOUT_HOST_INTEGRATIONS: readonly ScoutHostIntegration[] = [
     roles: ["execution_harness", "agent_host", "mcp_host"],
     harness: "codex",
     homepage: "https://github.com/openai/codex",
-    repositoryUrl: "https://github.com/oscout/codex-scout",
-    installHint: "/plugin marketplace add oscout/codex-scout",
+    repositoryUrl: "https://github.com/openscout-app/codex-scout",
+    installHint: "/plugin marketplace add openscout-app/codex-scout",
     summary: "Codex can run Scout-routed work as a harness and expose Scout through MCP/plugin surfaces.",
   },
   {
@@ -60,8 +60,8 @@ export const SCOUT_HOST_INTEGRATIONS: readonly ScoutHostIntegration[] = [
     label: "Cursor",
     roles: ["execution_harness", "agent_host", "mcp_host"],
     harness: "cursor",
-    repositoryUrl: "https://github.com/oscout/cursor-scout",
-    installHint: "See https://github.com/oscout/cursor-scout for the host-specific installer.",
+    repositoryUrl: "https://github.com/openscout-app/cursor-scout",
+    installHint: "See https://github.com/openscout-app/cursor-scout for the host-specific installer.",
     summary: "Cursor is an agent host and execution target when routed through its supported CLI or MCP surfaces.",
   },
   {

@@ -103,8 +103,8 @@ jobs:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REPOSITORY" == "oscout/scout" ]] || {
-            echo "Release workflow must run in oscout/scout, got: $GITHUB_REPOSITORY" >&2
+          [[ "$GITHUB_REPOSITORY" == "openscout-app/scout" ]] || {
+            echo "Release workflow must run in openscout-app/scout, got: $GITHUB_REPOSITORY" >&2
             exit 1
           }
           [[ "$DISPATCH_REF" == "refs/heads/main" ]] || {
@@ -173,7 +173,7 @@ jobs:
           name: ${{ steps.source.outputs.candidate_artifact_name }}
           path: ${{ steps.source.outputs.bundle_path }}
           github-token: ${{ github.token }}
-          repository: oscout/scout
+          repository: openscout-app/scout
           run-id: ${{ inputs.recovery_run_id }}
 
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6

@@ -7,7 +7,7 @@ Purpose: dense context for coding agents working in this repo.
 ## Repository routing
 
 This is the public Scout workspace. Public changes and pull requests belong in
-`oscout/scout`; private Scout product work stays in the private workspace.
+`openscout-app/scout`; private Scout product work stays in the private workspace.
 Read [CONTRIBUTING.md](../../CONTRIBUTING.md#repository-routing) for checkout,
 fork, and working-directory checks before making changes.
 

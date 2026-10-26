@@ -50,7 +50,7 @@ That distinction also exposes a recovery problem: current subscriptions have no 
 
 Check the API generation before connecting. V1 and V2 now use the same `opencode` command, but their server contracts differ. V1 examples using `/session` and `/event` cannot be assumed to work with V2's `/api/*` contract. [V2 migration guide](https://opencode.ai/v2/docs/migrate-v1).
 
-Scout's [V2 adapter notes](https://github.com/oscout/scout/blob/main/packages/agent-sessions/src/adapters/opencode-v2/README.md) describe an explicit pinned beta integration with an older client package and a registered `opencode2` service. It queues and correlates its own inputs, filters events to the session, and leaves the shared service running on disconnect. Match the adapter's supported version instead of copying current upstream client code into an older integration.
+Scout's [V2 adapter notes](https://github.com/openscout-app/scout/blob/main/packages/agent-sessions/src/adapters/opencode-v2/README.md) describe an explicit pinned beta integration with an older client package and a registered `opencode2` service. It queues and correlates its own inputs, filters events to the session, and leaves the shared service running on disconnect. Match the adapter's supported version instead of copying current upstream client code into an older integration.
 
 ### Claude Code: choose the control surface deliberately
 
@@ -95,7 +95,7 @@ A **harness** runs the agent: its tools, permissions, session, and execution loo
 
 Claude Code, Codex, Grok CLI (`@xai-official/grok`), and OpenCode are harnesses. Opus, GPT, and Grok are models you select inside a harness. `--harness claude` selects Claude Code, not Opus. A Grok model inside OpenCode or Cursor is still that other harness's session. Grok Bot is xAI's hosted agent product, where each Bot works on its own cloud computer. It can call Scout through a connector, which is a different path from Scout launching Grok CLI. [Grok Bot overview](https://docs.x.ai/grok-bot/overview), [Scout's Grok paths](https://openscout.app/docs/scout-for-grok).
 
-The repository's [runtime catalog](https://github.com/oscout/scout/blob/main/packages/protocol/src/runtime-catalog.v1.json) (revision `2026-09-14.1`) contains these execution routes:
+The repository's [runtime catalog](https://github.com/openscout-app/scout/blob/main/packages/protocol/src/runtime-catalog.v1.json) (revision `2026-09-14.1`) contains these execution routes:
 
 | Tool | Scout harness identifier | What to check |
 | --- | --- | --- |
@@ -106,7 +106,7 @@ The repository's [runtime catalog](https://github.com/oscout/scout/blob/main/pac
 | Cursor CLI, Kimi Code, pi | `cursor`, `kimi`, `pi` | The corresponding executable and provider configuration. |
 | Flue, Devin | `flue`, `devin` | Runtime-specific prerequisites and access. |
 
-Run `scout runtimes --json` and `scout doctor` on your machine. A catalog row does not prove the executable, account, or model is ready. Hermes Agent and Herdr connect as a host or a terminal surface; they are not `--harness` ids. See the [CLI guide](https://github.com/oscout/scout/blob/main/packages/cli/README.md) and the [integration guide](https://github.com/oscout/scout/blob/main/docs/integrations.md).
+Run `scout runtimes --json` and `scout doctor` on your machine. A catalog row does not prove the executable, account, or model is ready. Hermes Agent and Herdr connect as a host or a terminal surface; they are not `--harness` ids. See the [CLI guide](https://github.com/openscout-app/scout/blob/main/packages/cli/README.md) and the [integration guide](https://github.com/openscout-app/scout/blob/main/docs/integrations.md).
 
 ## When a native subagent is enough
 
@@ -248,11 +248,11 @@ Devin is a catalogued route with its own environment. A catalog entry does not e
 
 They solve different joins. Using one does not imply the others.
 
-**MCP** connects an application (the host) to tool servers. Each connection is an MCP client. Servers expose tools, resources, and prompts. `scout mcp` is Scout's local stdio coordination server; the runtime still owns the messages and asks. Local hosts such as Claude Code, Codex, and Cursor can launch it, and Grok Bot reaches the same tools through the hosted gateway. The connection does not pour another agent's conversation into the caller. Tool names can change while the [MCP posture](https://github.com/oscout/scout/blob/main/docs/mcp-api-posture.md) is v0 guidance, so use `tools/list` to see what your server exposes. Ordinary handoffs are still `ask` or `messages_send`. [MCP architecture](https://modelcontextprotocol.io/docs/2026-07-28/learn/architecture).
+**MCP** connects an application (the host) to tool servers. Each connection is an MCP client. Servers expose tools, resources, and prompts. `scout mcp` is Scout's local stdio coordination server; the runtime still owns the messages and asks. Local hosts such as Claude Code, Codex, and Cursor can launch it, and Grok Bot reaches the same tools through the hosted gateway. The connection does not pour another agent's conversation into the caller. Tool names can change while the [MCP posture](https://github.com/openscout-app/scout/blob/main/docs/mcp-api-posture.md) is v0 guidance, so use `tools/list` to see what your server exposes. Ordinary handoffs are still `ask` or `messages_send`. [MCP architecture](https://modelcontextprotocol.io/docs/2026-07-28/learn/architecture).
 
 **ACP**, the Agent Client Protocol, is how a coding client talks to a coding agent, analogous to the Language Server Protocol. Local agents typically use JSON-RPC over stdio. The introduction describes remote agents over HTTP or WebSocket, and says full remote support is still in progress. Scout's `grok-acp` route uses ACP as a client adapter: Scout talks to that agent. Scout does not become an ACP server, and this ACP is not BeeAI's Agent Communication Protocol. [ACP introduction](https://agentclientprotocol.com/get-started/introduction).
 
-**A2A**, Agent2Agent, is how agents discover each other and exchange tasks. MCP reaches tools and data; A2A reaches agents. Scout's [concepts](https://github.com/oscout/scout/blob/main/docs/concepts.md) describe Scout as the local coordination substrate and A2A as a boundary where some primitives are exposed and full conformance is not claimed. An MCP connection or an ACP launch does not make that session a general A2A peer. [What is A2A?](https://a2a-protocol.org/latest/topics/what-is-a2a/).
+**A2A**, Agent2Agent, is how agents discover each other and exchange tasks. MCP reaches tools and data; A2A reaches agents. Scout's [concepts](https://github.com/openscout-app/scout/blob/main/docs/concepts.md) describe Scout as the local coordination substrate and A2A as a boundary where some primitives are exposed and full conformance is not claimed. An MCP connection or an ACP launch does not make that session a general A2A peer. [What is A2A?](https://a2a-protocol.org/latest/topics/what-is-a2a/).
 
 ## What to check when a handoff stalls
 
@@ -332,7 +332,7 @@ scout send --to TARGET \
 
 Scout records requests, routes them, and gives you handles. The destination harness can still be offline or unauthenticated, mesh reachability is not exactly-once delivery, and a cloud task or a pasted transcript is not yet a local commit. The next agent needs the goal, the revision, the ownership limits, and the artifact you accepted.
 
-[Web version](https://openscout.app/blog/coding-agent-collaboration-2026) · [Return to the Scout README](https://github.com/oscout/scout/blob/main/README.md) · [Make your first handoff](https://github.com/oscout/scout/blob/main/packages/cli/README.md#make-your-first-handoff-claude-code-or-codex) · [Agents and collaboration](https://github.com/oscout/scout/blob/main/docs/agents-and-collaboration.md)
+[Web version](https://openscout.app/blog/coding-agent-collaboration-2026) · [Return to the Scout README](https://github.com/openscout-app/scout/blob/main/README.md) · [Make your first handoff](https://github.com/openscout-app/scout/blob/main/packages/cli/README.md#make-your-first-handoff-claude-code-or-codex) · [Agents and collaboration](https://github.com/openscout-app/scout/blob/main/docs/agents-and-collaboration.md)
 
 
 ## Pick your first collaboration
