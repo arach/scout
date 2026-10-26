@@ -11,8 +11,9 @@ export function shouldEnsureBrokerUptodateForCommand(command: string | null, arg
   // Guest administration is HTTP-only and must not manage the broker lifecycle.
   if (command === "mesh" && (args[0] === "bridge" || args[0] === "guests")) return false;
   // Local-only knowledge search does not need broker maintenance, and the web
-  // download commands only restart the web server, never the broker.
-  if (command === "web") return false;
+  // download commands only restart the web server, never the broker. Signing
+  // in only talks to the download host.
+  if (command === "web" || command === "auth") return false;
   return command !== "chat" && command !== "status" && command !== "report" && command !== "feedback" && command !== "mcp" && command !== "statusline" && command !== "search";
 }
 

@@ -16,7 +16,7 @@ import { accessSync, constants, existsSync, readdirSync, statSync } from "node:f
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { SCOUT_DIST_KEYS_URL, type ExpandedWebAccess } from "./dist-access.js";
+import type { ExpandedWebAccess } from "./dist-access.js";
 import { execSystemFile } from "./system-probes/exec.js";
 import { isHerdrAvailable, readHerdrSessions } from "./system-probes/herdr.js";
 import { resolveInstalledWebFullClient, webFullClientsDirectory } from "./web-full-client.js";
@@ -261,8 +261,8 @@ export function defaultSoloProProbes(options: {
 
 /* ── access ─────────────────────────────────────────────────────────────── */
 
-const LOGIN: SoloProAction = { kind: "command", label: "Save a download key", command: "scout web login" };
-const MAKE_KEY: SoloProAction = { kind: "link", label: "Make a download key", href: SCOUT_DIST_KEYS_URL };
+// Signing in through the browser saves a fresh download key; there is nothing to copy.
+const LOGIN: SoloProAction = { kind: "command", label: "Sign in", command: "scout auth login" };
 const CHECK: SoloProAction = { kind: "check_access", label: "Check access" };
 
 /** A reason is read back inside a sentence; a raw socket error carries no stop. */
@@ -304,7 +304,7 @@ export function summarizeSoloProAccess(access: ExpandedWebAccess): SoloProAccess
         tier: null,
         title: "Not confirmed",
         detail: "No download key is saved on this machine, so Scout can't ask which plan this account has.",
-        actions: [MAKE_KEY, LOGIN, CHECK],
+        actions: [LOGIN, CHECK],
       };
     case "credential_rejected":
       return {
@@ -313,7 +313,7 @@ export function summarizeSoloProAccess(access: ExpandedWebAccess): SoloProAccess
         tier: null,
         title: "Not confirmed",
         detail: "The saved download key was not accepted. It may have been revoked. This doesn't say what the account has.",
-        actions: [MAKE_KEY, LOGIN, CHECK],
+        actions: [LOGIN, CHECK],
       };
     case "unavailable":
       return {

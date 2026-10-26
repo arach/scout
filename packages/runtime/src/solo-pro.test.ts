@@ -250,14 +250,16 @@ describe("Scout Pro status: no false upgrade or downgrade", () => {
 });
 
 describe("Scout Pro status: recovery paths", () => {
-  test("missing credentials point at making and saving a download key", async () => {
+  test("missing credentials point at signing in", async () => {
     const status = await read({ state: "no_credential", checkedAt: NOW });
-    expect(commands(status)).toEqual(expect.arrayContaining(["https://console.openscout.app/#downloads", "scout web login", "check_access"]));
+    expect(commands(status)).toEqual(expect.arrayContaining(["scout auth login", "check_access"]));
+    expect(commands(status)).not.toContain("https://console.openscout.app/#downloads");
   });
 
-  test("a rejected key points at a new key, not at the account page", async () => {
+  test("a rejected key points at signing in again, not at the account page", async () => {
     const status = await read({ state: "credential_rejected", checkedAt: NOW, keyWhere: "SCOUT_DIST_KEY" });
-    expect(commands(status)).toEqual(expect.arrayContaining(["scout web login", "https://console.openscout.app/#downloads"]));
+    expect(commands(status)).toEqual(expect.arrayContaining(["scout auth login", "check_access"]));
+    expect(commands(status)).not.toContain("https://console.openscout.app/#downloads");
     expect(status.access.detail).toContain("doesn't say what the account has");
   });
 

@@ -82,7 +82,8 @@ export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
   },
   { name: "pair", summary: "Pair devices or answer host-local pairing requests" },
   { name: "server", summary: "Serve the web app supplied by the Scout apps (see: scout server start/open)" },
-  { name: "web", summary: "Install the full web app with a download key (login/install/status)" },
+  { name: "auth", summary: "Sign in to your Scout account from the terminal (login/status/logout)" },
+  { name: "web", summary: "Install the full web app for this Scout version (install/status)" },
   { name: "tui", summary: "Launch the Scout TUI" },
   { name: "init", summary: "Write ~/.openscout/config.json with broker/web/pairing ports" },
 ];

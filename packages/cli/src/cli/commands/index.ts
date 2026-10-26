@@ -64,6 +64,7 @@ export type ScoutCommandName =
   | "wait"
   | "watch"
   | "web"
+  | "auth"
   | "who"
   | "whoami";
 
@@ -170,6 +171,8 @@ export async function loadScoutCommandHandler(name: ScoutCommandName): Promise<S
       return (await import("./statusline.ts")).runStatuslineCommand;
     case "web":
       return (await import("./web.ts")).runWebCommand;
+    case "auth":
+      return (await import("./auth.ts")).runAuthCommand;
     case "tail":
       return (await import("./tail.ts")).runTailCommand;
     case "tell":
