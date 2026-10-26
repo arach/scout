@@ -311,7 +311,8 @@ copy or downloads the release binary for this version on first use.
 
 The package ships no web app. `scout server` and `scout web` serve a web client
 only when the separate apps supply one. Without that client, they say where the
-web app comes from. The [source boundary](../../docs/public-source-boundary.md)
+web app comes from. `scout web install` downloads the web app for this host; it
+signs in through the browser first with `scout auth login`. The [source boundary](../../docs/public-source-boundary.md)
 states the ownership rules, and the
 [repository README](../../README.md#build-your-own-interface) explains how to
 build your own client.
@@ -329,7 +330,7 @@ build your own client.
 | Operate local agents | `scout up`, `scout down`, `scout ps`, `scout restart` |
 | Connect hosts, phones, and tools | `scout mesh`, `scout hosts`, `scout pair`, `scout mcp` |
 | Open the terminal interface | `scout tui` |
-| Work with the separate apps | `scout menu`, `scout server open`, `scout web` |
+| Work with the separate apps | `scout menu`, `scout server open`, `scout web`, `scout auth` |
 
 `scout who` lists known agents; it does not prove live work. `scout search`
 finds past harness sessions; see [session search](../../docs/session-search.md).
