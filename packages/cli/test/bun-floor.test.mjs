@@ -8,13 +8,13 @@ import { bunVersionError, supportedBunVersion, MINIMUM_BUN_VERSION } from "../bi
 
 const root = new URL("../../../", import.meta.url);
 
-test("Bun floor accepts stable versions at or above 1.4.3, not older or prerelease builds", () => {
-  assert.equal(MINIMUM_BUN_VERSION, "1.4.3");
-  for (const version of ["1.4.3", "1.4.4", "1.4.99", "1.5.0", "2.0.0", "1.4.3+revision"]) {
+test("Bun floor accepts stable versions at or above 1.4.4, not older or prerelease builds", () => {
+  assert.equal(MINIMUM_BUN_VERSION, "1.4.4");
+  for (const version of ["1.4.4", "1.4.5", "1.4.99", "1.5.0", "2.0.0", "1.4.4+revision"]) {
     assert.equal(supportedBunVersion(version), true, version);
     assert.equal(bunVersionError(version), null);
   }
-  for (const version of ["1.4.0", "1.4.1", "1.4.2", "1.3.13", "1.3.14", "1.3.999", "0.9.0", "1.4", "1.4.3-canary.1", "garbage", ""]) {
+  for (const version of ["1.4.3", "1.4.3+revision", "1.4.0", "1.4.1", "1.4.2", "1.3.13", "1.3.14", "1.3.999", "0.9.0", "1.4", "1.4.4-canary.1", "garbage", ""]) {
     assert.equal(supportedBunVersion(version), false, version);
     assert.match(bunVersionError(version), /installed: .*\. Upgrade: bun upgrade$/);
   }
@@ -35,7 +35,7 @@ test("remote update and knowledge child entries enforce first, before argument o
   const directory = mkdtempSync(join(tmpdir(), "scout-child-floor-"));
   try {
     const preload = join(directory, "old-bun.cjs");
-    writeFileSync(preload, 'Object.defineProperty(process.versions, "bun", { value: "1.3.14" });\n');
+    writeFileSync(preload, 'Object.defineProperty(process.versions, "bun", { value: "1.4.3" });\n');
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("OPENSCOUT_") && !key.startsWith("SCOUT_")));
     env.HOME = directory;
     env.BUN_RUNTIME_TRANSPILER_CACHE_PATH = "0";
@@ -45,7 +45,7 @@ test("remote update and knowledge child entries enforce first, before argument o
       const result = spawnSync("bun", ["--preload", preload, path.pathname, "malformed-json"], { env, encoding: "utf8", timeout: 5_000 });
       assert.equal(result.status, 1, `${entry}: ${result.stderr}`);
       assert.equal(result.stdout, "");
-      assert.equal(result.stderr, "Scout requires Bun 1.4.3 or newer; installed: 1.3.14. Upgrade: bun upgrade\n");
+      assert.equal(result.stderr, "Scout requires Bun 1.4.4 or newer; installed: 1.4.3. Upgrade: bun upgrade\n");
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -56,14 +56,14 @@ test("Bun entry wrappers refuse before help, dist resolution or daemon imports",
   const directory = mkdtempSync(join(tmpdir(), "scout-bun-floor-"));
   try {
     const preload = join(directory, "old-bun.cjs");
-    writeFileSync(preload, 'Object.defineProperty(process.versions, "bun", { value: "1.3.14" });\n');
+    writeFileSync(preload, 'Object.defineProperty(process.versions, "bun", { value: "1.4.3" });\n');
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("OPENSCOUT_") && !key.startsWith("SCOUT_")));
     env.HOME = directory;
     for (const entry of ["packages/cli/bin/scout.mjs", "packages/cli/bin/openscout-runtime.mjs", "packages/runtime/bin/openscout-runtime.mjs"]) {
       const result = spawnSync(process.execPath, ["--require", preload, new URL(entry, root).pathname, "--help"], { env, encoding: "utf8", timeout: 5_000 });
       assert.equal(result.status, 1, `${entry}: ${result.stderr}`);
       assert.equal(result.stdout, "");
-      assert.equal(result.stderr, "Scout requires Bun 1.4.3 or newer; installed: 1.3.14. Upgrade: bun upgrade\n");
+      assert.equal(result.stderr, "Scout requires Bun 1.4.4 or newer; installed: 1.4.3. Upgrade: bun upgrade\n");
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
