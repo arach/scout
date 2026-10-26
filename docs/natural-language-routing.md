@@ -7,7 +7,7 @@ In an agent host, invoke the Scout skill or MCP `scout` prompt with a request:
 The host interprets the request, calls `route_context` for evidence, and uses
 Scout's existing `ask` for a clear recipient. Competing matches produce a short
 question in that same conversation. The host keeps the message while the user
-chooses. Discovery alone never sends anything. The broker remains the writer
+chooses. Discovery alone never sends anything. The runtime remains the writer
 and delivery authority; the host supplies natural-language interpretation.
 
 `/scout` is a skill/prompt invocation, not a new universal shell command. MCP

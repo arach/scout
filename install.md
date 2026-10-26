@@ -142,7 +142,7 @@ bun run --cwd packages/cli build
 ```
 
 The public repository must be sufficient to build and test the public Scout
-core without the private OpenScout workspace. See the
+core without the private Scout workspace. See the
 [public-source boundary](./docs/public-source-boundary.md) for the layering and
 release invariants.
 

@@ -645,7 +645,7 @@ export class BrokerWebControlService {
   private spawnWebServer(context: WebStartContext = {}): RuntimeChildProcessLike {
     const entry = this.resolveEntry();
     if (!entry) {
-      throw new Error("The web app is supplied by OpenScout apps, not the Scout core. Install the apps and configure OPENSCOUT_WEB_SERVER_ENTRY.");
+      throw new Error("The web app is supplied by the Scout apps, not the Scout core. Install the apps and configure OPENSCOUT_WEB_SERVER_ENTRY.");
     }
     const bun = this.options.resolveBun ? this.options.resolveBun() : resolveBunExecutable();
     if (!bun) {

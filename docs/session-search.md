@@ -10,7 +10,7 @@ transcripts into Scout messages.
 | Need | Prefer |
 | --- | --- |
 | “Read devon-2's last report” / a named Herdr panel | `sessions_inventory` or `herdr_workspaces` with `query: "devon-2"` first |
-| Who is online / what just happened on the broker | `scout who`, `scout latest` |
+| Who is online / what just happened on the runtime | `scout who`, `scout latest` |
 | Live harness firehose | `scout tail` |
 | “What did a past session say/do about X?” | **`scout search`** |
 | Exact session coordinates after a hit | session id + path from search hits |
@@ -41,7 +41,7 @@ discoverable does not imply its harness history is indexed.
 ## Contract
 
 1. **Opt-in first** — turn on **Local search index** in **Settings › System**,
-   or set `knowledgeIndexEnabled: true` in OpenScout `settings.json`. Missing or
+   or set `knowledgeIndexEnabled: true` in Scout `settings.json`. Missing or
    malformed settings mean off. CLI/MCP queries never enable it. Once enabled,
    the web Search page can refresh in the background.
 2. Warm a **time span** (and optional harness), then query.
@@ -151,7 +151,7 @@ text remains untrusted observed material.
 ## Scoutbot attachment inspection
 
 `attachments_read` accepts an attachment id and optional originating message id.
-It requires an active broker reply context and a canonical operator message in
+It requires an active runtime reply context and a canonical operator message in
 that same conversation. The reader actor is the reply context's `toAgentId`,
 not the operator who authored the message. The runtime rechecks current actor
 authority, conversation membership and the committed message/blob binding on
@@ -161,7 +161,7 @@ The tool selects `attachment.blob.sha256` from that message. A URL-only legacy
 attachment returns `supported: false` with an unavailable reason; its URL and
 `blobKey` are never translated or fetched. The message's `originNodeId` selects
 the exact owner. Local reads use `POST /v1/attachments/read`; remote reads use
-the local broker's fixed attachment operation on `/v1/hosts/web-request`. The
+the local runtime's fixed attachment operation on `/v1/hosts/web-request`. The
 tool checks both the transport status and the inner operation status. Missing
 node identity or wrong authority is a refusal, never permission to try another
 node or store.

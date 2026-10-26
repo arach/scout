@@ -1,20 +1,20 @@
 # Agent Integration Contract
 
 This page is for external participants, coding agents, agent runtimes, and
-adapter authors that want to plug into OpenScout without first learning the
+adapter authors that want to plug into Scout without first learning the
 whole product.
 
-OpenScout is a local-first broker. Integrations identify the caller, send
-messages and work requests through the broker, and preserve enough lifecycle
+Scout is a local-first runtime. Integrations identify the caller, send
+messages and work requests through the runtime, and preserve enough lifecycle
 state for humans and agents to understand what is happening. Execution targets
 also register how work can reach them. The participation boundary below
 distinguishes those responsibilities.
 
-Status: v0 integration guidance. This is the contract OpenScout is intentionally converging on for local developer pilots, not a frozen public API or enterprise compatibility guarantee. Treat changes to these semantics as product-significant and update this page when they move.
+Status: v0 integration guidance. This is the contract Scout is intentionally converging on for local developer environments, not a frozen public API or enterprise compatibility guarantee. Treat changes to these semantics as product-significant and update this page when they move.
 
-The [Shared Interaction Model](./interaction-model.md) is the design contract
+The Shared Interaction Model is the design contract
 for represented authority, continuity, and human handoffs across interfaces.
-Its [coverage table](./interaction-model.md#implementation-coverage) separates
+Its coverage table separates
 existing foundations from requirements that still need implementation. No new
 authorization fields or supported external protocols are implied by this page.
 
@@ -45,8 +45,8 @@ Participant adapters must document:
 These are design and acceptance requirements for new adapters. If an adapter
 cannot verify or enforce a requested authority boundary, it must report that
 limitation before dispatch rather than treating missing support as unrestricted
-access. Legacy pilot integrations retain their documented permission posture.
-Use the [acceptance scenario](./interaction-model.md#implementation-order-and-acceptance)
+access. Legacy integrations retain their documented permission posture.
+Use the model's acceptance scenario
 before claiming the full participant contract is implemented.
 
 ## Integration Goals
@@ -70,7 +70,7 @@ Scout compatibility starts at the host integration layer. A host integration is
 any first-class bridge to another agent tool, IDE, terminal host, or
 agent-state surface. It can expose Scout commands, connect to `scout mcp`,
 report lifecycle state, forward approvals, focus or control sessions, or host a
-plugin that talks to the broker.
+plugin that talks to the runtime.
 
 A harness is narrower: it is only the execution backend for a Scout session.
 Populate `harness`, endpoint harness metadata, or CLI `--harness` values only
@@ -90,7 +90,7 @@ session.
 
 ### 1. Identity
 
-The agent needs a stable Scout identity. Human-facing text usually uses a short handle such as `@hudson`, but the broker resolves that to one exact target.
+The agent needs a stable Scout identity. Human-facing text usually uses a short handle such as `@hudson`, but the runtime resolves that to one exact target.
 
 Do not overload `@` handles for saved situations. `@missionwriter` should name a
 role or definition; a saved profile/project/harness situation should be exposed
@@ -107,7 +107,7 @@ Use the [agent identity section of `architecture.md`](./architecture.md#agent-id
 
 ### 2. Reachable Endpoint
 
-The broker needs to know how to reach the agent. A reachable endpoint records:
+The runtime needs to know how to reach the agent. A reachable endpoint records:
 
 - agent id
 - authority node
@@ -124,7 +124,7 @@ Endpoint state should describe the attachment, not a specific task. Use states
 such as `registered`, `attaching`, `waking`, `idle`, `working`, `unreachable`,
 `failed`, `superseded`, and `stopped`; keep task lifecycle in flights or work
 items. `superseded` is diagnostic runtime state for endpoint rows replaced by a
-newer route, not a durable card state. If several endpoints match, the broker
+newer route, not a durable card state. If several endpoints match, the runtime
 should choose the preferred compatible endpoint or return an ambiguity
 diagnostic with candidates.
 
@@ -153,7 +153,7 @@ Session invariants:
 - forked asks should route work to a new execution session seeded from
   `forkFromStateId` or `forkFromSessionId`; the source session is context, not
   the work target
-- project-path asks do not require a caller-created card first; the broker
+- project-path asks do not require a caller-created card first; the runtime
   resolves durable project/agent/profile data and creates a session mapping
 - when the sender needs a concrete live reply destination, carry
   `replyToSessionId` rather than minting another card
@@ -174,7 +174,7 @@ Use the message path for communication:
 - channel: group coordination
 - shared broadcast: only when the audience is intentionally broad
 
-Do not hide routing instructions in the body when structured target fields are available. The broker should know the target as metadata, not by parsing prose.
+Do not hide routing instructions in the body when structured target fields are available. The runtime should know the target as metadata, not by parsing prose.
 
 Even message-only interactions should return stable ids such as `conversationId`
 and `messageId`. Treat "fire and forget" as a UI affordance, not the underlying
@@ -182,7 +182,7 @@ contract.
 
 Channel-addressed work stays channel-first. When a delivery names both a
 channel and a concrete agent/session target, the canonical message and return
-address remain in the channel conversation. The broker may also create a tiny
+address remain in the channel conversation. The runtime may also create a tiny
 direct-message attention pointer for weak harnesses or UIs that do not reliably
 watch channel notifications. That pointer is broker-generated status, not a
 second task body: adapters should follow its `channelPointer` and
@@ -210,7 +210,7 @@ If work becomes blocked, report a waiting state with who or what owns the next m
 ## Broker-Guided Routing
 
 The sender should not carry most of the routing burden. If a command names a
-reasonable target, the broker should resolve, disambiguate, wake, attach, or
+reasonable target, the runtime should resolve, disambiguate, wake, attach, or
 explain the next viable step.
 
 Adapters and clients should render broker diagnostics as first-class results:
@@ -224,7 +224,7 @@ Adapters and clients should render broker diagnostics as first-class results:
 - unknown target with nearby candidates -> suggest likely matches
 
 Avoid pushing agents into repeated `who` / `latest` / manual process inspection
-when the broker can produce useful guidance from its own state.
+when the runtime can produce useful guidance from its own state.
 
 ## Preferred MCP Tools
 
@@ -245,7 +245,7 @@ Agents connected through Scout's MCP server should prefer:
 - future `sessions_*` tools for explicit harness session start, attach, inspect,
   and stop operations
 
-The broker saves a pending terminal report with each new failed or cancelled
+The runtime saves a pending terminal report with each new failed or cancelled
 flight at the request origin. The report has a stable identity derived from the
 flight and outcome; restart recovery retries that same message without invoking
 an executor. A delivery failure leaves the report pending and does not replace
@@ -259,7 +259,7 @@ instead of forcing a discovery loop or guessing a generic name. Invocation and
 flight records are created as side effects of the ask; use `invocations_get`
 and `invocations_wait` only to observe those records.
 
-Integration receipts should preserve the broker-chosen handle set: `ref`,
+Integration receipts should preserve the runtime-chosen handle set: `ref`,
 `flightId`, `conversationId`, `messageId`, `workId`, session id, and any
 broker-suggested situated target handle. Humans type saved targets as
 `target:<name>`; agents and compact UI may render the same handle as `⌖name`.
@@ -332,7 +332,7 @@ Integrations may link to, tail, summarize, or index lightweight metadata from ha
 Adapters must not write into a harness-owned ecosystem. For Claude Code, that means `.claude` project state, subagent definitions, agent-team config, task files, and MCP settings are read-only observation surfaces for adapters. Scout can inspect those surfaces to model reachability and topology when the harness makes them available, but it must not author or repair them on Claude's behalf. Host setup commands that intentionally install Scout into a harness are separate, explicit operator actions, never adapter runtime behavior.
 
 Read the [data model section of `architecture.md`](./architecture.md#the-data-model).
-Read [`eng/harness-topology-observation.md`](./eng/harness-topology-observation.md) for the shared observed-topology shape.
+Read `packages/runtime/src/harness-topology/types.ts` for the shared observed-topology shape.
 
 ## Token And Cost Metadata
 
@@ -379,7 +379,7 @@ on useful onboarding, feature guidance, and targeted recovery coaching.
 
 Mesh means reachability and coordination across machines. It does not mean exactly-once delivery, replicated external transcripts, or global consensus.
 
-An integration should treat a remote Scout agent as reachable through broker routing when the broker says it has a route. It should still report delivery failures and waiting states honestly.
+An integration should treat a remote Scout agent as reachable through runtime routing when the runtime says it has a route. It should still report delivery failures and waiting states honestly.
 
 ## Compatibility Checklist
 
@@ -409,7 +409,7 @@ For a harness-backed execution target, additionally verify:
 ## Pi background dispatch
 
 `scout ask --project /path/to/project --harness pi --notify "Read the fixture and report back."`
-creates a broker-owned session and flight using Pi's persistent `--mode rpc`
+creates a runtime-owned session and flight using Pi's persistent `--mode rpc`
 transport. No prewarmed worker or agent card is required. Pi must be on the
 broker's PATH. Configure a working provider in Pi first (`pi /login`, a selected
 provider's API-key environment, or a provider extension), then verify `pi -p`
@@ -435,7 +435,7 @@ provider errors, unexpected process exit, and missing final output fail the
 tracked execution. Observed model and thinking level come from Pi's RPC state
 and assistant records; launch arguments alone do not prove harness acceptance.
 Pi's native session id is linked to the stable Scout session, not substituted
-for it. The broker remains the writer of the final reply and flight result;
+for it. The runtime remains the writer of the final reply and flight result;
 Pi's complete transcript remains harness-owned.
 
 ## Inbox claims and retry deadlines

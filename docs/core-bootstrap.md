@@ -30,7 +30,7 @@ choices still come from the runtime/protocol model, not a new CLI-owned catalog.
 The command makes passive broker reads for the runtime catalog, capability
 snapshot and health. It starts, restarts, installs or repairs no service.
 An unavailable live catalog leaves the bundled choices available, with explicit
-read-failure metadata. Those choices are not evidence that a broker is healthy.
+read-failure metadata. Those choices are not evidence that a runtime is healthy.
 
 JSON retains the existing Bun catalog/report fields and adds:
 

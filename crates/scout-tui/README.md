@@ -35,6 +35,6 @@ cargo test -p scout-tui
 cargo clippy -p scout-tui -- -D warnings
 ```
 
-For an explicit read-only local broker capture, set
+For an explicit read-only local runtime capture, set
 `OPENSCOUT_BROKER_INTERNAL_URL=http://127.0.0.1:43110`; the URL takes precedence
 above port-only configuration. Do not submit a composer while capturing.

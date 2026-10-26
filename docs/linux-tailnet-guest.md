@@ -5,8 +5,8 @@ Scout service. It needs two separate permissions: restricted network access
 and a key-bound Scout guest grant. Do not install a Scout runtime on the guest.
 This guide uses out-of-band bootstrap import, not hosted profile pairing.
 
-The owner-side `scout mesh guests` commands require the guest-grant CLI change.
-Use a build that includes that change; these are not commands in Scout 0.3.9.
+The owner-side `scout mesh guests` commands ship in Scout 0.4.0 and later.
+Run Scout 0.4.0 or newer on the owner's runtime host.
 Use an operator-provided, checksum-verified client wheel until a public client
 release is explicitly available. A source version is not a publication receipt.
 

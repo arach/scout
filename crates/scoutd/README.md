@@ -2,7 +2,7 @@
 
 Native first slice for SCO-062.
 
-This binary is the native daemon for the existing Bun-backed OpenScout base service. The supervisor path stays small and easy to reason about; the probe/repo child
+This binary is the native daemon for the existing Bun-backed Scout base service. The supervisor path stays small and easy to reason about; the probe/repo child
 uses serde for the local socket protocol.
 
 ```bash
@@ -42,7 +42,7 @@ advertises probe families plus job capabilities: `repo.scan` and `repo.diff`.
 
 The native agent read path uses `openscout.native.read.request/v1`. Rust tails
 the broker journal asynchronously and serves a bounded persisted projection;
-it never proxies the broker or web server. Snapshot mode returns one
+it never proxies the runtime or web server. Snapshot mode returns one
 `openscout.native.read.snapshot/v1` frame. Subscribe mode sends the initial
 snapshot plus material updates and `openscout.native.read.event/v1` heartbeats.
 

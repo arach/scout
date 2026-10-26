@@ -3,7 +3,7 @@
 Web port reservations in this guide apply only when a separate web client is
 configured. The core does not ship a web app.
 
-A checkout or worktree runs as its own OpenScout **instance**, never as the
+A checkout or worktree runs as its own Scout **instance**, never as the
 installed ("prod") one. One knob, `OPENSCOUT_INSTANCE`, derives everything;
 `prod` (the default) is the installed layout, unchanged.
 
@@ -33,7 +33,7 @@ installed ("prod") one. One knob, `OPENSCOUT_INSTANCE`, derives everything;
   `scout instance release <name> [--purge]` frees one.
 - Target an instance from the CLI with `scout --instance dev …` or
   `OPENSCOUT_INSTANCE=dev scout …`. Plain `scout` talks to prod (or, inside a
-  Scout-launched terminal or agent, to the broker that launched it).
+  Scout-launched terminal or agent, to the runtime that launched it).
   `scout doctor` and `scout status` print the instance they checked.
 - Prod keeps honouring individual env vars (`OPENSCOUT_BROKER_PORT`, …). A
   non-prod instance derives them all from its layout, and refuses to start

@@ -1,7 +1,7 @@
 # OTLP inspection receiver — agent reference
 
 Verified: 2026-09-22 against `scout/otel-ingest` worktree implementation.
-Human reference: [../otlp.md](../otlp.md). Future design: [SCO-105](../eng/sco-105-otel-ingest.md).
+Human reference: `packages/runtime/src/otlp/README.md`.
 
 ## Role
 
@@ -36,7 +36,7 @@ rollups, quota readings, exporter configuration, forwarding or public `scout ote
 
 ## Invariants
 
-- No Origin header; loopback Host allowlist; no CORS. Local pilot, not authenticated emitters.
+- No Origin header; loopback Host allowlist; no CORS. Local use only, not authenticated emitters.
 - Sanitize before queue/store; no raw fallback. No log bodies, span names/events/links, prompts, responses or status text.
 - Identifiers: bounded `[A-Za-z0-9_.:/@+-]+`; exact keys in `sanitize.ts`.
 - Large integers remain strings. Metric temporality is retained, not converted into usage.

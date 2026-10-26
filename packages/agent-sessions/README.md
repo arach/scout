@@ -1,8 +1,8 @@
-# OpenScout Agent Sessions
+# Scout Agent Sessions
 
-`@openscout/agent-sessions` is the shared session substrate for OpenScout. It normalizes live harness sessions — Claude Code, Codex, pi, Grok ACP, Kimi Code ACP, OpenCode, OpenAI-compatible processes, and any ACP stdio agent — into one small stream of session events, snapshots, approvals, topology hints, and replayable state that the runtime and surfaces can consume.
+`@openscout/agent-sessions` is the shared session substrate for Scout. It normalizes live harness sessions — Claude Code, Codex, pi, Grok ACP, Kimi Code ACP, OpenCode, OpenAI-compatible processes, and any ACP stdio agent — into one small stream of session events, snapshots, approvals, topology hints, and replayable state that the runtime and surfaces can consume.
 
-This package observes harness-owned material. It does not turn Claude Code, Codex, pi, or future harness transcripts into first-party Scout conversation messages. Durable coordination records belong in the broker and runtime; adapter state here is the bridge between a concrete harness session and Scout's control plane.
+This package observes harness-owned material. It does not turn Claude Code, Codex, pi, or future harness transcripts into first-party Scout conversation messages. Durable coordination records belong in the runtime and protocol; adapter state here is the bridge between a concrete harness session and Scout's control plane.
 
 ## Quickstart
 
@@ -260,4 +260,4 @@ bun run --cwd packages/agent-sessions adapter:conformance
 
 - [Data model](../../docs/architecture.md#the-data-model) for the Scout-owned versus harness-owned boundary.
 - [Agent integration contract](../../docs/agent-integration-contract.md) for adapter expectations.
-- [Architecture](../../docs/architecture.md) for how sessions connect to the broker and runtime.
+- [Architecture](../../docs/architecture.md) for how sessions connect to the runtime.

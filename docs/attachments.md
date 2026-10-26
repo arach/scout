@@ -20,7 +20,7 @@ budget. Text tools keep the smaller text budget. Existing effective upload-reque
 limits also remain unchanged, including protected-ingress limits. HTML, SVG, MIME aliases and
 other binary formats do not become readable through either mode.
 
-A message whose origin belongs to another node is refused by this broker.
+A message whose origin belongs to another node is refused by this runtime.
 The existing signed host route can reach an attachment's owner only under its
 existing verified peer/actor authority. It does not lend local operator rights
 to a remote principal. Reads never fall back to an arbitrary URL, raw hash read
@@ -57,7 +57,7 @@ This is a bounded buffer, not a streaming API or a 25 MiB process-RSS ceiling.
   have to match.
 
 This constant-factor buffering is appropriate for the existing machine-local,
-high-trust developer-pilot API and its admitted image maximum. It is not a
+high-trust developer API and its admitted image maximum. It is not a
 claim of untrusted multi-tenant readiness or globally bounded HTTP memory.
 A streaming transport would require a separately reviewed public contract and
 client rollout; increasing text inspection or adding new read authority is not

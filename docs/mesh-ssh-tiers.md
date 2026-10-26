@@ -14,11 +14,11 @@ JSON, and labels both grants in plain output.
 
 ## Compatibility and partial failure
 
-The parser in every public release tag available in this repository supports
-`install-grant --tier`: 35 tags, from `v0.2.84` through `v0.3.9`, including the
-four `v0.3.6-dev.*` tags. For example, see the
-[earliest tagged parser](https://github.com/oscout/scout/blob/v0.2.84/packages/cli/src/cli/commands/mesh-trust.ts)
-and [0.3.9 parser](https://github.com/oscout/scout/blob/v0.3.9/packages/cli/src/cli/commands/mesh-trust.ts).
+The parser in every public release tag from `v0.2.84` through `v0.4.0` supports
+`install-grant --tier`: 36 tags, including the four `v0.3.6-dev.*` tags. For
+example, see the
+[earliest tagged parser](https://github.com/oscout/scout/blob/v0.2.84/apps/desktop/src/cli/commands/mesh-trust.ts)
+and [0.4.0 parser](https://github.com/oscout/scout/blob/v0.4.0/packages/cli/src/cli/commands/mesh-trust.ts).
 This is a source audit, not proof of the executable installed on a remote.
 Scout therefore checks capability at execution time instead of assuming a
 version or retrying without the flag.
@@ -29,15 +29,15 @@ A separate receipt spot-check at `v0.2.84` (commit
 containing `peer.keyId` and `peer.tier` on success. For an observe grant, its
 shape is `{"peer":{"keyId":"<key-id>","tier":"observe"}}` with additional
 peer metadata. The
-[global argument parser](https://github.com/oscout/scout/blob/v0.2.84/packages/cli/src/cli/argv.ts#L13-L22)
+[global argument parser](https://github.com/oscout/scout/blob/v0.2.84/apps/desktop/src/cli/argv.ts#L13-L22)
 consumes `--json` before subcommand parsing. The
-[grant installer](https://github.com/oscout/scout/blob/v0.2.84/packages/cli/src/lib/core/mesh/trust-service.ts#L136-L165)
+[grant installer](https://github.com/oscout/scout/blob/v0.2.84/apps/desktop/src/core/mesh/trust-service.ts#L136-L165)
 returns the runtime's peer record, including its key ID and requested tier;
-the [command](https://github.com/oscout/scout/blob/v0.2.84/packages/cli/src/cli/commands/mesh-trust.ts#L545-L560)
+the [command](https://github.com/oscout/scout/blob/v0.2.84/apps/desktop/src/cli/commands/mesh-trust.ts#L545-L560)
 wraps it in `{peer}`, and the
-[JSON formatter](https://github.com/oscout/scout/blob/v0.2.84/packages/cli/src/cli/output.ts#L18-L23)
+[JSON formatter](https://github.com/oscout/scout/blob/v0.2.84/apps/desktop/src/cli/output.ts#L18-L23)
 serializes that object. This is an additional source check of the earliest
-tag, not a receipt audit of all 35 tags or an execution of an old binary.
+tag, not a receipt audit of all 36 tags or an execution of an old binary.
 The execution-time capability and receipt checks remain fail-closed.
 
 An old or unknown remote gets a clear upgrade refusal before a grant is sent

@@ -16,7 +16,7 @@ The CLI reads the selected broker's `/health` with a four-second request
 budget. It uses the public broker client and selected control socket or broker
 URL, not a web cookie or app service. Refusals retain their HTTP status and body.
 Timeout, cancellation, unavailable transport and invalid responses remain
-inconclusive. They do not prove that the broker stopped.
+inconclusive. They do not prove that the runtime stopped.
 
 The core report retains separate health, startup, projection, journal-write and
 cached-storage checks. A healthy liveness response cannot hide failed journal
@@ -54,7 +54,7 @@ JSON output uses `schema: "scout.setup.v2"` and `scope: "core"`. It includes
 
 A missing headless foreground broker produces outer `handoff` and inner
 `pending`, with `openscout-runtime broker` as the next command. It is not a
-running broker. Required public integration failures and broker setup warnings
+running runtime. Required public integration failures and broker setup warnings
 still fail setup. Plain output uses the same assessment.
 
 The report has no `localEdge` or `terminalPty` field. `appReadiness.status` is
@@ -73,7 +73,7 @@ scout doctor --fix --yes
 
 The Bun CLI's default diagnostic view runs four bounded checks: `broker`,
 `native`, `runtimes`, and `probes`. Each owned worker has a six-second deadline.
-The broker check uses the shared core assessor. Runtime inspection reports
+The runtime check uses the shared core assessor. Runtime inspection reports
 executable presence, not authenticated readiness. Native and probe diagnostics
 are separate observations, not prerequisites in the core report.
 

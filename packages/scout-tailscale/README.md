@@ -24,7 +24,7 @@ Source release candidate: **0.3.2, not published by this change**. See
 A version bump or local build is not evidence that a public release exists.
 No candidate download URL is asserted here. Obtain the reviewed wheel and
 checksums through a trusted channel until maintainers publish a release.
-This pilot client uses its own version, not the main Scout version. Do not
+This client uses its own version, not the main Scout version. Do not
 install a similarly named PyPI/npm package or replace the full `scout` CLI.
 
 Requires macOS or Linux and Python 3.11+. The only runtime dependency is
@@ -61,9 +61,9 @@ ship those instructions only after their CLI prerequisites are merged.
 
 On the guest, run `scout-tailscale --json key` and share only `publicKey`.
 The owner installs a grant using a runtime-local admin client, for example
-`scout mesh guests grant` in a Scout build containing that command, and exports
-its bootstrap as JSON. This command is not in Scout 0.3.9. Verify the node key
-through a separate trusted channel, then import the owner's file:
+`scout mesh guests grant`, and exports its bootstrap as JSON. Scout 0.4.0 is
+the first release with this command. Verify the node key through a separate
+trusted channel, then import the owner's file:
 
 ```sh
 scout-tailscale connect --bootstrap grant.json --node-key '<verified-node-key-id>' --endpoint '<advertised-https-endpoint>' --proxy direct
@@ -236,9 +236,9 @@ its mailbox, but assignment content and replies travel through Scout. The saved
 session binds to its original machine, node identity, and grant regardless of
 later machine preferences. Revocation/expiry denies every mailbox operation;
 reapproving the same key creates a separate mailbox and does not restore access
-to the revoked grant's history. The broker remains the canonical writer.
+to the revoked grant's history. The runtime remains the canonical writer.
 
-For an isolated private pilot broker, `OPENSCOUT_MESH_TLS_TAILSCALE_ONLY=1`
+For an isolated private runtime, `OPENSCOUT_MESH_TLS_TAILSCALE_ONLY=1`
 restricts mesh TLS listeners to a detected Tailscale IPv4 interface. If it is
-absent there is no remote listener; the broker does not fall back to LAN. This
+absent there is no remote listener; the runtime does not fall back to LAN. This
 setting does not grant access or enroll a guest.

@@ -44,7 +44,7 @@ gate; the core pairing client is not an HTTP proxy for browser requests.
 
 The phone relay's adjacent core `pair-http-proxy.ts` forwards an allowlist to
 the host pairing listener, not arbitrary headers to the runtime. Its ingress
-and operator-control gates remain distinct from the broker's ingress policy.
+and operator-control gates remain distinct from the runtime's ingress policy.
 
 The former web tail/events WebSocket, peer-doorway and Vite paths were app
 implementation evidence at the time of the audit. They left this repository

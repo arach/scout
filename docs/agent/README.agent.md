@@ -7,7 +7,7 @@ Purpose: dense context for coding agents working in this repo.
 ## Repository routing
 
 This is the public Scout workspace. Public changes and pull requests belong in
-`oscout/scout`; private OpenScout product work stays in the private workspace.
+`oscout/scout`; private Scout product work stays in the private workspace.
 Read [CONTRIBUTING.md](../../CONTRIBUTING.md#repository-routing) for checkout,
 fork, and working-directory checks before making changes.
 
@@ -17,11 +17,11 @@ fork, and working-directory checks before making changes.
 |---|---|
 | Product | Scout |
 | Current status | v0.x active product codebase |
-| Trust posture | high-trust local developer pilots |
+| Trust posture | high-trust local developer environments |
 | Not ready for | enterprise, compliance, untrusted multi-tenant runtime |
 | CLI | `scout` |
 | Runtime | Bun |
-| Primary state owner | local broker |
+| Primary state owner | local runtime |
 | Protocol package | `@openscout/protocol` |
 
 The core has no web app. The Mac, iOS, Android, and web apps are separate
@@ -114,7 +114,7 @@ known target.
 
 ## Non-Negotiable Rules
 
-- Clients and adapters submit commands to the broker; they do not write Scout-owned coordination records directly.
+- Clients and adapters submit commands to the runtime; they do not write Scout-owned coordination records directly.
 - Do not make external harness transcripts canonical Scout messages.
 - Assigned roles are explicit duties, never `agentClass`, harness, or identity.
   The first built-in role is orchestrator. No applicable active role assignment
@@ -154,7 +154,7 @@ known target.
   of pasting its full text into the Scout message. Keep the file as the source
   of truth for traceability; see `docs/agent/scout-comms.agent.md`.
 - Assigned roles and mission logs: read the **Assigned Roles And The Mission
-  Log** section in `docs/agents-and-collaboration.md`. The broker terminal-flight
+  Log** section in `docs/agents-and-collaboration.md`. The runtime terminal-flight
   lifecycle can emit `post_ask_summary` for an assigned requester or target when
   a work/mission id is available; MCP role/log tools and soft prompt-injection
   wiring are not landed yet.

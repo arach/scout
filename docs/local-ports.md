@@ -3,7 +3,7 @@
 Web, terminal-relay, Vite, studio, and hosted-chat rows describe separately
 supplied app services. The core does not ship those apps.
 
-OpenScout keeps its stable local development and runtime services in a small
+Scout keeps its stable local development and runtime services in a small
 Scout-owned block instead of using common framework defaults such as `3000`,
 `5173`, `8000`, or ad hoc values.
 
@@ -15,7 +15,7 @@ ports, while staying well above privileged system ports.
 | --- | ---: | --- |
 | Room listening (loopback) | `43112` | Base-supervised sibling process; `OPENSCOUT_LISTENING_PORT` overrides, clients may use `OPENSCOUT_LISTENING_URL` |
 | Broker HTTP/SSE/API | `43110` | `OPENSCOUT_BROKER_PORT` overrides |
-| Web app server | `43120` | `OPENSCOUT_WEB_PORT` / `SCOUT_WEB_PORT` override |
+| Web server (separate web client) | `43120` | `OPENSCOUT_WEB_PORT` / `SCOUT_WEB_PORT` override |
 | Web terminal relay | `43121` | Defaults to web port + 1 |
 | Vite asset server | `43122` | `OPENSCOUT_WEB_VITE_URL` or dev flags override |
 | Pairing bridge | `43130` | `OPENSCOUT_PAIRING_PORT` / `SCOUT_PAIRING_PORT` / `~/.openscout/config.json` override |
@@ -38,7 +38,7 @@ when generating its Caddyfile. Use these snippets to forward companion hostnames
 to distinct upstream ports. Validate the generated config before reloading the
 Scout admin endpoint; never hand-edit generated route blocks as the lasting fix.
 
-On this development machine, `studio.local` and `*.studio.local` forward to
+On a machine that runs Studio, `studio.local` and `*.studio.local` forward to
 Studio's private HTTP edge on `127.0.0.1:43181`; Studio's admin endpoint is
 `127.0.0.1:43182`, and its supervisor stays on `43180`. Studio's LaunchAgent sets
 `STUDIO_LOCAL_PRIVATE_HTTP_PORT=43181` and `CADDY_ADMIN=127.0.0.1:43182` with
@@ -51,7 +51,7 @@ with the main checkout:
 
 | Service | Worktree band |
 | --- | ---: |
-| Web app server | `43200-43899` |
+| Web server (separate web client) | `43200-43899` |
 | Vite asset server | `43900-44599` |
 | Pairing bridge | `44600-45299` |
 | OTLP ingest | `45300-45999` |
