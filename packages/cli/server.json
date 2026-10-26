@@ -1,10 +1,10 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.oscout/scout",
+  "name": "io.github.openscout-app/scout",
   "title": "Scout",
   "description": "Coordinate local coding agents and track handoffs.",
   "repository": {
-    "url": "https://github.com/oscout/scout",
+    "url": "https://github.com/openscout-app/scout",
     "source": "github",
     "subfolder": "packages/cli"
   },

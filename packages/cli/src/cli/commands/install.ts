@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import type { ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
 
-export const OPENSCOUT_RELEASE_OWNER = "oscout";
+export const OPENSCOUT_RELEASE_OWNER = "openscout-app";
 export const OPENSCOUT_RELEASE_REPOSITORY = "scout";
 export const OPENSCOUT_APP_NAME = "Scout.app";
 /**

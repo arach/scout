@@ -252,8 +252,8 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
   });
 
   test("a verb left to an extension says how to install it", () => {
-    expect(missingScoutExtensionMessage({ name: "mesh", summary: "Mesh", provider: "extension", install: "Install it from oscout/scout." }))
-      .toBe("scout mesh is provided by an extension that is not installed. Install it from oscout/scout.");
+    expect(missingScoutExtensionMessage({ name: "mesh", summary: "Mesh", provider: "extension", install: "Install it from openscout-app/scout." }))
+      .toBe("scout mesh is provided by an extension that is not installed. Install it from openscout-app/scout.");
   });
 
   async function cli(args: string[], selected: string, discardStdout = false, plain = false) {

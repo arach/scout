@@ -6,12 +6,12 @@
   "packageManager": "bun@1.4.4",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/oscout/scout.git"
+    "url": "git+https://github.com/openscout-app/scout.git"
   },
   "bugs": {
-    "url": "https://github.com/oscout/scout/issues"
+    "url": "https://github.com/openscout-app/scout/issues"
   },
-  "homepage": "https://github.com/oscout/scout#readme",
+  "homepage": "https://github.com/openscout-app/scout#readme",
   "workspaces": [
     "packages/*"
   ],

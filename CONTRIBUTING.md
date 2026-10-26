@@ -16,7 +16,7 @@ evidence proportionate to their risk.
 
 Use the public Scout checkout for public CLI, TUI, protocol, pairing, harness,
 and runtime work. Push a topic branch to your fork and open its pull
-request against `oscout/scout`. Keep private Scout product work in its
+request against `openscout-app/scout`. Keep private Scout product work in its
 private repository. See [the source boundary](./docs/public-source-boundary.md)
 for ownership details; inspect mixed changes before copying them across repos.
 
@@ -28,7 +28,7 @@ working directory explicitly when the recorded chat directory is stale.
 ## Set up the repository
 
 ```bash
-git clone https://github.com/oscout/scout.git
+git clone https://github.com/openscout-app/scout.git
 cd scout
 bun install
 ```

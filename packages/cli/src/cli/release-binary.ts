@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { ScoutCliError } from "./errors.ts";
 
 /**
- * Prebuilt native binaries that ride on the public `oscout/scout` GitHub
+ * Prebuilt native binaries that ride on the public `openscout-app/scout` GitHub
  * release for each version, fetched on first use instead of shipped in the npm
  * tarball (and never by an install script).
  *
@@ -28,7 +28,7 @@ import { ScoutCliError } from "./errors.ts";
  * The CLI only ever asks for the build that matches its own version.
  */
 
-export const RELEASE_DOWNLOAD_BASE_URL = "https://github.com/oscout/scout/releases/download";
+export const RELEASE_DOWNLOAD_BASE_URL = "https://github.com/openscout-app/scout/releases/download";
 
 export type ReleaseTarget = "darwin-arm64" | "darwin-x64" | "linux-x64" | "linux-arm64";
 
@@ -100,7 +100,7 @@ export function parseSha256Manifest(text: string): Map<string, string> {
 export function unsupportedPlatformMessage(name: string, platform: string, arch: string): string {
   return [
     `${name} has no prebuilt binary for ${platform}-${arch} (prebuilt: ${RELEASE_TARGETS.join(", ")}).`,
-    `Build it from source (cargo install --git https://github.com/oscout/scout ${name}) and point SCOUT_TUI_BIN at it.`,
+    `Build it from source (cargo install --git https://github.com/openscout-app/scout ${name}) and point SCOUT_TUI_BIN at it.`,
   ].join("\n");
 }
 

@@ -18,8 +18,8 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
-const CANONICAL_REPOSITORY = "https://github.com/oscout/scout";
-const CANONICAL_GITHUB_REPOSITORY = "oscout/scout";
+const CANONICAL_REPOSITORY = "https://github.com/openscout-app/scout";
+const CANONICAL_GITHUB_REPOSITORY = "openscout-app/scout";
 
 const PUBLIC_PACKAGES = [
   { dir: "packages/protocol", name: "@openscout/protocol" },
@@ -327,7 +327,7 @@ function printPlan(version, options) {
     return;
   }
   console.log("\nRelease steps:");
-  console.log("  DRY require clean oscout/scout main already versioned at " + version);
+  console.log("  DRY require clean openscout-app/scout main already versioned at " + version);
   console.log("  DRY git fetch --no-tags origin refs/heads/main");
   console.log("  DRY bash scripts/ship-npm.sh --verify-state");
   console.log("  DRY create or verify " + tag + " at HEAD");

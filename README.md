@@ -26,7 +26,7 @@ adopting any of those clients or services.
  Your coding agents: Claude Code · Codex · Grok · OpenCode · Kimi · Pi · more
                                        ▲
                                        │ harness adapters
-┌─ Scout core ── oscout/scout ── public, Apache 2.0 ─────────────────────────┐
+┌─ Scout core ── openscout-app/scout ── public, Apache 2.0 ──────────────────┐
 │                                                                            │
 │  scout CLI, TUI and MCP server                @openscout/scout             │
 │  Runtime: routing, records, lifecycle, mesh   @openscout/runtime           │
@@ -265,7 +265,7 @@ apps layer supplies one; neither command makes a web app part of the core.
 ## Work on Scout
 
 ```bash
-git clone https://github.com/oscout/scout.git
+git clone https://github.com/openscout-app/scout.git
 cd scout
 bun install
 bun run --cwd packages/cli build
@@ -289,7 +289,7 @@ and the [release guide](./docs/releases.md).
 - [Coding-agent collaboration](./docs/coding-agent-collaboration-2026.md)
 - [Public-source boundary](./docs/public-source-boundary.md)
 - [Linux desktop integrations](./docs/linux-desktop.md) and [Omarchy launcher](./integrations/omarchy/README.md)
-- [Integration repositories](https://github.com/oscout)
+- [Integration repositories](https://github.com/openscout-app)
 
 ## License
 

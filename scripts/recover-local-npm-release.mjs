@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const repository = 'https://github.com/oscout/scout';
+const repository = 'https://github.com/openscout-app/scout';
 const registry = 'https://registry.npmjs.org';
 const names = ['@openscout/protocol', '@openscout/scout'];
 const dirs = ['packages/protocol', 'packages/cli'];
@@ -127,7 +127,7 @@ export async function recoverLocalRelease(options, dependencies = {}) {
   const refuseLegacyCandidate = () => {
     if (heldCandidate) return;
     requireThat(!existsSync(candidatePath), 'Held candidate requires explicit candidate recovery or promotion; ordinary recovery would change Latest.');
-    const observed = run('gh', ['release', 'view', tag, '--repo', 'oscout/scout', '--json', 'tagName,isPrerelease'], { allowFailure: true });
+    const observed = run('gh', ['release', 'view', tag, '--repo', 'openscout-app/scout', '--json', 'tagName,isPrerelease'], { allowFailure: true });
     if (observed.status === 0) {
       const release = JSON.parse(observed.stdout);
       requireThat(release.tagName === tag && release.isPrerelease === false, 'Held GitHub prerelease requires explicit candidate recovery or promotion.');
@@ -163,7 +163,7 @@ export async function recoverLocalRelease(options, dependencies = {}) {
   const readJson = args => JSON.parse(output('npm', [...args, '--json', ...registryArgs]));
   const verifyPublicCandidate = () => {
     if (phase !== 'promote') return;
-    const release = JSON.parse(output('gh', ['release', 'view', tag, '--repo', 'oscout/scout', '--json', 'tagName,isDraft,isPrerelease,assets']));
+    const release = JSON.parse(output('gh', ['release', 'view', tag, '--repo', 'openscout-app/scout', '--json', 'tagName,isDraft,isPrerelease,assets']));
     requireThat(release.tagName === tag && release.isDraft === false && typeof release.isPrerelease === 'boolean',
       'Promotion requires an existing non-draft same-tag candidate or stable retry release.');
     const marker = readFileSync(candidatePath);

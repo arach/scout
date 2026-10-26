@@ -504,7 +504,7 @@ describe("history snapshot replay", () => {
           git: {
             branch: "codex/embed-vox-transcription",
             commit_hash: "abc123",
-            repository_url: "https://github.com/oscout/scout.git",
+            repository_url: "https://github.com/openscout-app/scout.git",
           },
         },
       }),

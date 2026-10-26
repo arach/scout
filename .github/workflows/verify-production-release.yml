@@ -22,14 +22,14 @@ jobs:
     timeout-minutes: 15
     environment:
       name: Production
-      url: https://github.com/oscout/scout/releases/tag/v${{ inputs.version }}
+      url: https://github.com/openscout-app/scout/releases/tag/v${{ inputs.version }}
     steps:
       - name: Require canonical public main
         env:
           REPOSITORY: ${{ github.repository }}
           REF: ${{ github.ref }}
         run: |
-          test "$REPOSITORY" = oscout/scout
+          test "$REPOSITORY" = openscout-app/scout
           test "$REF" = refs/heads/main
 
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
