@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "bun": ">=1.4.3"
+    "bun": ">=1.4.4"
   },
   "description": "Host-side phone pairing, encrypted bridge and legacy phone RPC projections.",
   "exports": {

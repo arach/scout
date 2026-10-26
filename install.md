@@ -7,7 +7,7 @@ runtime is ready to route work.
 
 - Apple-silicon macOS, or Linux with a process manager for the foreground
   runtime;
-- [Bun](https://bun.sh) 1.3 or newer;
+- [Bun](https://bun.sh) 1.4.4 or newer;
 - a supported coding-agent harness such as Codex or Claude Code for routed
   work.
 
