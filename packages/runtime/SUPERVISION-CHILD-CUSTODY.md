@@ -8,7 +8,7 @@ listeners, registrations, jobs and restart sources still lack complete coverage.
 The default remains refusal. No daemon, app supervisor or launcher selects this
 adapter. Production readiness and P1 rollout remain closed.
 
-Scout requires Bun 1.4.3 or newer. Direct-child custody and carrier mapping
+Scout requires Bun 1.4.4 or newer. Direct-child custody and carrier mapping
 remain unavailable on supported Bun releases until a new exact-revision audit.
 The migration does not transfer the old native-reaper proof to a new runtime.
 
