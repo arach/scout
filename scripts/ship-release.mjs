@@ -674,6 +674,8 @@ function main() {
   }
   if (options.localPublish) process.env.SCOUT_NPM_LOCAL_PUBLISH = "1";
   else delete process.env.SCOUT_NPM_LOCAL_PUBLISH;
+  if (!options.localPublish && options.phase !== "promote") process.env.SCOUT_NPM_RESUME_ONLY = "1";
+  else delete process.env.SCOUT_NPM_RESUME_ONLY;
   process.env.SCOUT_NPM_AUTH_MODE = options.auth;
 
   assertCanonicalLocalSource();

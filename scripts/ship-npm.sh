@@ -867,6 +867,11 @@ inspect_registry_state
 assert_registry_preflight
 
 if [[ "$MODE" == "verify-state" ]]; then
+  # A run without --local-publish may only finish a pair already on npm. Refuse
+  # here, before ship-release.mjs creates the tag or a candidate marker.
+  if [[ "${SCOUT_NPM_RESUME_ONLY:-}" == "1" ]] && ! all_artifacts_exist; then
+    assert_local_upload_allowed
+  fi
   if all_artifacts_exist && [[ "$RELEASE_RECEIPT_LOADED" != "1" ]]; then
     load_release_receipt
     inspect_registry_state

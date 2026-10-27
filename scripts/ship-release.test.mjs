@@ -1484,17 +1484,22 @@ for (const initialRelease of ["missing", "draft", "prerelease"]) {
   });
 }
 
-test("a retained bundle with nothing uploaded still needs --local-publish to upload", () => {
-  const { fixture, stateDir } = createLocalReleaseFixture({ initialRelease: "missing" });
-  try {
-    const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes"], {
-      cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only" },
-    });
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /a local upload needs .*--local-publish/);
-    assert.doesNotMatch(readFileSync(join(stateDir, "mutations.log"), "utf8"), /publish/);
-  } finally { rmSync(fixture, { recursive: true, force: true }); }
-});
+for (const phase of ["release", "candidate"]) {
+  test(`a ${phase} run on a retained bundle with nothing uploaded needs --local-publish and changes nothing`, () => {
+    const { fixture, stateDir } = createLocalReleaseFixture({ initialRelease: "missing" });
+    try {
+      const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--phase", phase, "--execute", "--yes"], {
+        cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only" },
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /a local upload needs .*--local-publish/);
+      assert.doesNotMatch(readFileSync(join(stateDir, "mutations.log"), "utf8"), /publish/);
+      assert.doesNotMatch(result.stdout, /\$ git (tag|push)/);
+      assert.doesNotMatch(result.stdout, /^\$ bash scripts\/ship-npm\.sh --publish-(prepared|candidate)/m);
+      assert.equal(existsSync(join(fixture, "release-state/candidate-receipt.json")), false);
+    } finally { rmSync(fixture, { recursive: true, force: true }); }
+  });
+}
 
 test("a retained bundle whose pair is already on npm resumes without --local-publish", () => {
   const { fixture, stateDir } = createLocalReleaseFixture({ initialRelease: "missing" });
