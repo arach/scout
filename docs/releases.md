@@ -120,6 +120,20 @@ Commit the source, version manifests, `packages/cli/src/lib/shared/product.ts`,
 `docs.json`, and lockfile on a review branch. Merge only after the standalone
 checks and packed artifact audit pass.
 
+## 0.4.3 npm provenance
+
+Scout 0.4.3 runs the same runtime, CLI, and MCP server as 0.4.2. It changes how
+releases are published.
+
+- **npm provenance:** both packages publish from the `release-package-npm.yml`
+  workflow in `openscout-app/scout`, so npm records which workflow and commit
+  built each version. 0.3.6-dev.4 was the last version with provenance before
+  this one.
+- **MCP Registry:** each stable release is listed in the official MCP Registry
+  under `io.github.openscout-app/scout` when it is published.
+- **Local publishing** is a fallback. It needs `--local-publish`, and
+  `SCOUT_NPM_OTP_COMMAND` supplies a fresh one-time code for each npm write.
+
 ## 0.4.2 the openscout-app organization
 
 Scout's GitHub organization is now `openscout-app`. GitHub redirects the old
