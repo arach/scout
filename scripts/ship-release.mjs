@@ -303,12 +303,18 @@ function printVersionTable(version, source = null) {
   for (const pkg of PUBLIC_PACKAGES) console.log("  " + pkg.name + "@" + version);
 }
 
-function hostedPublicationMessage(version) {
+function hostedPublicationMessage(version, phase) {
   const tag = "v" + version;
   return [
     "Stable releases publish from GitHub Actions, so npm records provenance for them.",
-    "After the reviewed release merges to public main, tag that commit and dispatch:",
-    `  git tag -a ${tag} <merged main commit> -m "Scout ${version}"`,
+    ...(phase === "candidate" ? [
+      "The hosted workflow has no candidate hold: it publishes straight to npm latest.",
+      "A held candidate needs --local-publish and has no npm provenance.",
+    ] : []),
+    "After the reviewed release merges, tag the tip of public main and dispatch before",
+    "anything else merges; the workflow requires the tag to be main's tip:",
+    "  git fetch <public remote> main",
+    `  git tag -a ${tag} FETCH_HEAD -m "Scout ${version}"`,
     `  git push <public remote> refs/tags/${tag}`,
     `  gh workflow run release-package-npm.yml --repo openscout-app/scout --ref main -f tag=${tag} -f npm_tag=latest`,
     "Add --local-publish only when the hosted workflow cannot run. A local publish has no npm provenance.",
@@ -643,9 +649,10 @@ function main() {
   printPlan(version, options);
 
   if (!options.execute) {
-    console.log("\nDry run only. Re-run with --execute --yes after review and merge.");
-    if (!options.source && options.phase !== "promote") {
-      console.log("Stable releases publish from GitHub Actions for npm provenance; local execution also needs --local-publish.");
+    if (options.localPublish || options.source || options.phase === "promote") {
+      console.log(`\nDry run only. Re-run with --execute --yes${options.localPublish ? " --local-publish" : ""} after review and merge.`);
+    } else {
+      console.log("\nDry run only. Stable releases publish from GitHub Actions for npm provenance; --execute --yes prints the dispatch, and local execution also needs --local-publish.");
     }
     return;
   }
@@ -654,14 +661,17 @@ function main() {
   if (major === 0 && (minor < 2 || (minor === 2 && patch <= 90))) {
     throw new Error("Historical unsupported versions are read-only; select a reviewed unused version.");
   }
-  // Promotion and retained-candidate finalization only finish a local upload
-  // that already happened; every new upload goes through the hosted workflow.
-  if (!options.localPublish && !options.source && options.phase !== "promote") {
-    throw new Error(hostedPublicationMessage(version));
-  }
   if (process.env.GITHUB_ACTIONS === "true") {
     throw new Error("This entry point is local-only; dispatch release-package-npm.yml for hosted publication.");
   }
+  // Every new upload goes through the hosted workflow. Promotion, retained-candidate
+  // finalization, and a release whose local bundle already exists for this HEAD
+  // only finish a local release that was already started.
+  const resumingLocalRelease = existsSync(npmReleaseReceiptPath(version, currentHead()));
+  if (!options.localPublish && !options.source && options.phase !== "promote" && !resumingLocalRelease) {
+    throw new Error(hostedPublicationMessage(version, options.phase));
+  }
+  process.env.SCOUT_NPM_LOCAL_PUBLISH = "1";
   process.env.SCOUT_NPM_AUTH_MODE = options.auth;
 
   assertCanonicalLocalSource();

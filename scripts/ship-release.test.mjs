@@ -85,13 +85,39 @@ test("stable execution publishes from GitHub Actions unless --local-publish is e
   assert.match(result.stderr, /Stable releases publish from GitHub Actions, so npm records provenance/);
   assert.ok(result.stderr.includes(`gh workflow run release-package-npm.yml --repo openscout-app/scout --ref main -f tag=v${currentVersion} -f npm_tag=latest`));
   assert.match(result.stderr, /--local-publish only when the hosted workflow cannot run/);
+  assert.match(result.stderr, /tag the tip of public main/);
+  assert.doesNotMatch(result.stderr, /no candidate hold/);
   const candidate = plan(currentVersion, "--phase", "candidate", "--execute", "--yes");
   assert.notEqual(candidate.status, 0);
   assert.match(candidate.stderr, /Stable releases publish from GitHub Actions/);
+  assert.match(candidate.stderr, /no candidate hold: it publishes straight to npm latest/);
+  const hosted = spawnSync(process.execPath, ["scripts/ship-release.mjs", currentVersion, "--execute", "--yes"], {
+    cwd: repoRoot, encoding: "utf8", env: { ...process.env, GITHUB_ACTIONS: "true" },
+  });
+  assert.notEqual(hosted.status, 0);
+  assert.match(hosted.stderr, /local-only; dispatch release-package-npm\.yml/);
   const dry = plan(currentVersion);
   assert.equal(dry.status, 0, dry.stderr);
   assert.match(dry.stdout, /local execution also needs --local-publish/);
+  const dryLocal = plan(currentVersion, "--local-publish");
+  assert.equal(dryLocal.status, 0, dryLocal.stderr);
+  assert.match(dryLocal.stdout, /Re-run with --execute --yes --local-publish/);
+  assert.doesNotMatch(dryLocal.stdout, /also needs --local-publish/);
 });
+
+for (const mode of [[], ["--publish-prepared"], ["--publish-candidate"]]) {
+  test(`ship-npm.sh ${mode[0] ?? "publish"} refuses a local upload without --local-publish`, () => {
+    const { fixture, stateDir } = createPublishFixture();
+    try {
+      const result = spawnSync("bash", ["scripts/ship-npm.sh", ...mode], {
+        cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only", SCOUT_NPM_LOCAL_PUBLISH: "" },
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /stable releases publish from release-package-npm\.yml; a local upload needs .*--local-publish/);
+      assert.equal(readFileSync(join(stateDir, "mutations.log"), "utf8"), "");
+    } finally { rmSync(fixture, { recursive: true, force: true }); }
+  });
+}
 
 test("local npm-login authentication is an explicit plan option", () => {
   const result = plan(currentVersion, "--auth", "npm-login");
@@ -376,6 +402,7 @@ function registryEnv(fixture) {
     GITHUB_ACTIONS: "false",
     NPM_TAG: "latest",
     SCOUT_NPM_RELEASE_STATE_DIR: join(fixture, "release-state"),
+    SCOUT_NPM_LOCAL_PUBLISH: "1",
   };
 }
 
@@ -1441,7 +1468,7 @@ for (const initialRelease of ["missing", "draft", "prerelease"]) {
     const { fixture } = createLocalReleaseFixture({ initialRelease });
     try {
       const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes", "--local-publish"], {
-        cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only" },
+        cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only", SCOUT_NPM_LOCAL_PUBLISH: "" },
       });
       assert.equal(result.status, 0, result.stderr);
       const calls = readFileSync(join(fixture, "gh-release-calls.log"), "utf8").trim().split("\n");
@@ -1460,8 +1487,10 @@ for (const initialRelease of ["missing", "draft", "prerelease"]) {
 test("retrying an existing final release preserves its GitHub Latest state", () => {
   const { fixture } = createLocalReleaseFixture({ initialRelease: "final" });
   try {
-    const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes", "--local-publish"], {
-      cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only" },
+    // The retained bundle for this HEAD marks a local release already started,
+    // so resuming it needs no --local-publish.
+    const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes"], {
+      cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only", SCOUT_NPM_LOCAL_PUBLISH: "" },
     });
     assert.equal(result.status, 0, result.stderr);
     // An existing stable release may be the verified native installer release;
@@ -1472,7 +1501,8 @@ test("retrying an existing final release preserves its GitHub Latest state", () 
 });
 
 function runCandidatePhase(fixture, phase, extraEnv = {}) {
-  return spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--phase", phase, "--execute", "--yes", "--local-publish"], {
+  const local = phase === "promote" ? [] : ["--local-publish"];
+  return spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--phase", phase, "--execute", "--yes", ...local], {
     cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only", ...extraEnv },
   });
 }

@@ -67,8 +67,10 @@ gains it. Recover a failed hosted run with
 against the exact reviewed head and current main base; observe required GitHub
 rules and feedback before merging.
 
-Versions 0.3.6 through 0.4.2 were published locally, with signed receipts and
-without npm provenance.
+These versions have no npm provenance: 0.2.104 through 0.2.110, 0.3.2 through
+0.3.5, and 0.3.6 through 0.4.2. npm versions are immutable, so they keep that
+state. Before hosted publication became the default, the last version with
+provenance was 0.3.6-dev.4.
 
 ## Package publication versus the latest downloadable installer
 
@@ -77,8 +79,8 @@ version does not make them one publication: package publication and the
 downloadable installer have separate owners and separate release steps.
 
 - **Package publication** (this repository): `@openscout/protocol` and
-  `@openscout/scout` on npm, plus a GitHub release on `openscout-app/scout` whose only
-  asset is the npm integrity `receipt.json`.
+  `@openscout/scout` on npm, plus a GitHub release on `openscout-app/scout` that
+  carries the npm integrity `receipt.json` and the `scout tui` archives.
 - **Latest downloadable installer** (private product): the signed macOS DMG,
   built and verified as a local operator task rather than in CI. GitHub's
   **Latest** release, and therefore `/releases/latest` download links, belongs
@@ -493,7 +495,9 @@ tag, verifies both against retained candidates, and only then promotes the pair
 to `latest`. A fresh release must advance the current versions and begin with
 both package versions unused. A matching completed release is idempotent. A
 complete immutable pair may resume missing dist-tag promotion only with its
-exact retained receipt. The ordinary publisher still rejects a partial local pair. A protocol-first
+exact retained receipt. A retained bundle for the current HEAD marks a local
+release already in progress, so resuming it does not need `--local-publish`.
+The ordinary publisher still rejects a partial local pair. A protocol-first
 local interruption may use the explicit retained recovery command below. Changed
 artifacts, wrong source, missing receipt, foreign authority, and historical
 candidates remain forbidden.
@@ -717,15 +721,21 @@ original receipt remain separate steps after the pair succeeds.
 ## Hosted publication
 
 Stable releases publish this way. After the reviewed release merges to public
-`main`, tag that commit and dispatch the public `release-package-npm.yml`
-workflow:
+`main`, tag the tip of `main` and dispatch the public `release-package-npm.yml`
+workflow before anything else merges. The workflow requires the tag to resolve
+to the commit that `main` points at when you dispatch:
 
 ```bash
-git tag -a v<version> <merged main commit> -m "Scout <version>"
+git fetch <public remote> main
+git tag -a v<version> FETCH_HEAD -m "Scout <version>"
 git push <public remote> refs/tags/v<version>
 gh workflow run release-package-npm.yml --repo openscout-app/scout --ref main \
   -f tag=v<version> -f npm_tag=latest
 ```
+
+The hosted path has no candidate hold: it publishes straight to npm `latest`.
+A release that must be validated before `latest` uses the local candidate
+sequence above, with `--local-publish`, and has no npm provenance.
 
 The workflow verifies its canonical workflow identity and refuses token
 authentication. There is no automatic transition

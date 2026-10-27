@@ -168,11 +168,17 @@ if [[ -z "$RELEASE_STATE_DIR" ]]; then
 fi
 RELEASE_RECEIPT_PATH="$RELEASE_STATE_DIR/receipt.json"
 RELEASE_LOCK_DIR="${RELEASE_STATE_DIR}.lock"
-# Local token publication is the default. Hosted OIDC remains an explicit,
-# separately verified workflow authority; neither path falls back to the other.
+# Hosted OIDC publication from release-package-npm.yml is the default, so npm
+# records provenance. A local upload needs ship-release.mjs --local-publish;
+# neither path falls back to the other.
 if [[ "$MODE" == "publish" || "$MODE" == "prepare" || "$MODE" == "publish-prepared" || "$MODE" == "publish-candidate" || "$MODE" == "promote-prepared" ]]; then
   if ! node -e 'const v=process.argv[1].split("-")[0].split(".").map(Number); process.exit(v[0]===0 && (v[1]<2 || (v[1]===2 && v[2]<=90)) ? 1 : 0)' "$release_version"; then
     echo "ERROR: v${release_version} is historical and unsupported; publication is disabled" >&2
+    exit 1
+  fi
+  if [[ "$PUBLICATION_AUTHORITY" == "local-signed" && "${SCOUT_NPM_LOCAL_PUBLISH:-}" != "1" ]] \
+    && [[ "$MODE" == "publish" || "$MODE" == "publish-prepared" || "$MODE" == "publish-candidate" ]]; then
+    echo "ERROR: stable releases publish from release-package-npm.yml; a local upload needs bun run ship -- ${release_version} --execute --yes --local-publish" >&2
     exit 1
   fi
   if [[ "$PUBLICATION_AUTHORITY" == "github-oidc" ]]; then
