@@ -480,6 +480,28 @@ public GitHub release, without marking it Latest, and attaches `receipt.json`. E
 clobbered: their size and anonymously downloaded SHA-256 must match the retained
 receipt. An upload command succeeding alone is not a verified release.
 
+## List the release in the MCP Registry
+
+The official MCP Registry lists `io.github.openscout-app/scout`. Each registry
+version names one exact `@openscout/scout` npm version, so each stable release
+gets its own registry version.
+
+- `bump-version.mjs` writes the release version into `packages/cli/server.json`,
+  both as the server version and in its npm package entry. The ship command
+  and the hosted npm workflow refuse a `server.json` that does not match.
+- Publishing a stable GitHub release starts `publish-mcp-registry.yml`. The
+  workflow waits until npm lists the exact version with its `mcpName`, signs in
+  to the registry with GitHub OIDC, and publishes `server.json`. It uses no
+  stored credential.
+- Prereleases and dev versions are skipped. A version that the registry
+  already lists is left unchanged, so a rerun is safe.
+
+To publish or retry one release by hand:
+
+```bash
+gh workflow run publish-mcp-registry.yml -R openscout-app/scout -f tag=v<version>
+```
+
 ## Validate a candidate before promotion
 
 The full stable command above remains the default. For releases that require a
