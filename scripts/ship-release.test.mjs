@@ -80,14 +80,18 @@ test("local execution requires explicit confirmation before any mutation", () =>
 });
 
 test("stable execution publishes from GitHub Actions unless --local-publish is explicit", () => {
-  const result = plan(currentVersion, "--execute", "--yes");
+  // CI sets GITHUB_ACTIONS, which this entry point refuses before the guard.
+  const local = (...args) => spawnSync(process.execPath, ["scripts/ship-release.mjs", ...args], {
+    cwd: repoRoot, encoding: "utf8", env: { ...process.env, GITHUB_ACTIONS: "" },
+  });
+  const result = local(currentVersion, "--execute", "--yes");
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stable releases publish from GitHub Actions, so npm records provenance/);
   assert.ok(result.stderr.includes(`gh workflow run release-package-npm.yml --repo openscout-app/scout --ref main -f tag=v${currentVersion} -f npm_tag=latest`));
   assert.match(result.stderr, /--local-publish only when the hosted workflow cannot run/);
   assert.match(result.stderr, /tag the tip of public main/);
   assert.doesNotMatch(result.stderr, /no candidate hold/);
-  const candidate = plan(currentVersion, "--phase", "candidate", "--execute", "--yes");
+  const candidate = local(currentVersion, "--phase", "candidate", "--execute", "--yes");
   assert.notEqual(candidate.status, 0);
   assert.match(candidate.stderr, /Stable releases publish from GitHub Actions/);
   assert.match(candidate.stderr, /no candidate hold: it publishes straight to npm latest/);
