@@ -38,6 +38,8 @@ const VERSION_MANIFESTS = [
 
 const APP_VERSION_SOURCE = "packages/cli/src/lib/shared/product.ts";
 const DOCS_VERSION_SOURCE = "docs.json";
+// The MCP Registry entry names one exact npm version of the Scout package.
+const REGISTRY_SERVER_SOURCE = "packages/cli/server.json";
 const LOCKFILE_SOURCE = "bun.lock";
 const APP_VERSION_PATTERN =
   /export const SCOUT_APP_VERSION = process\.env\.SCOUT_APP_VERSION\?\.trim\(\) \|\| "([^"]+)";/;
@@ -250,6 +252,12 @@ function readAppVersion(source = null) {
   return match[1];
 }
 
+function readRegistryServerVersions(source = null) {
+  const server = readJson(REGISTRY_SERVER_SOURCE, source);
+  const scoutPackage = server.packages?.find((entry) => entry.identifier === "@openscout/scout");
+  return { server: server.version, package: scoutPackage?.version };
+}
+
 function lockfileWorkspaceVersion(relativePath, source = null) {
   const contents = readSource(LOCKFILE_SOURCE, source);
   const marker = `    "${relativePath}": {`;
@@ -272,6 +280,11 @@ function verifyReleaseVersion(version, source = null) {
   if (appVersion !== version) drift.push(APP_VERSION_SOURCE + "=" + appVersion);
   const docsVersion = readJson(DOCS_VERSION_SOURCE, source).version;
   if (docsVersion !== version) drift.push(DOCS_VERSION_SOURCE + "=" + docsVersion);
+  const registryVersions = readRegistryServerVersions(source);
+  if (registryVersions.server !== version) drift.push(REGISTRY_SERVER_SOURCE + "=" + registryVersions.server);
+  if (registryVersions.package !== version) {
+    drift.push(REGISTRY_SERVER_SOURCE + ":@openscout/scout=" + registryVersions.package);
+  }
   for (const relativeDir of VERSION_MANIFESTS.filter((entry) => entry !== ".")) {
     const lockVersion = lockfileWorkspaceVersion(relativeDir, source);
     if (lockVersion !== version) drift.push(`${LOCKFILE_SOURCE}:${relativeDir}=${lockVersion}`);
@@ -298,6 +311,7 @@ function printVersionTable(version, source = null) {
   }
   console.log("  " + APP_VERSION_SOURCE + ": " + readAppVersion(source));
   console.log("  " + DOCS_VERSION_SOURCE + ": " + readJson(DOCS_VERSION_SOURCE, source).version);
+  console.log("  " + REGISTRY_SERVER_SOURCE + ": " + readRegistryServerVersions(source).server);
   console.log(`  ${LOCKFILE_SOURCE}: all workspace versions ${version}`);
   console.log("\nPublished package set:");
   for (const pkg of PUBLIC_PACKAGES) console.log("  " + pkg.name + "@" + version);
