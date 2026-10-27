@@ -96,7 +96,7 @@ export async function install(argv: string[]): Promise<void> {
     await mkdir(installation, { recursive: true }); changed.push(receipt);
     const oldReceipt = prior.get(receipt);
     const previous = oldReceipt ? JSON.parse(oldReceipt.bytes.toString()) : {};
-    await replaceFile(receipt, Buffer.from(JSON.stringify({ schemaVersion: 1, repository: "oscout/scout", sourceRevision, sourceDirty, installedAt: new Date().toISOString(), cliBin: cli, cliVersion: version, tuiBin: tuiBin ?? previous.tuiBin, tuiSha256: tuiSha256 ?? previous.tuiSha256, backup, files: Object.fromEntries(files.map((file) => [file.target, createHash("sha256").update(file.bytes).digest("hex")])) }, null, 2) + "\n"), oldReceipt?.mode ?? 0o644);
+    await replaceFile(receipt, Buffer.from(JSON.stringify({ schemaVersion: 1, repository: "openscout-app/scout", sourceRevision, sourceDirty, installedAt: new Date().toISOString(), cliBin: cli, cliVersion: version, tuiBin: tuiBin ?? previous.tuiBin, tuiSha256: tuiSha256 ?? previous.tuiSha256, backup, files: Object.fromEntries(files.map((file) => [file.target, createHash("sha256").update(file.bytes).digest("hex")])) }, null, 2) + "\n"), oldReceipt?.mode ?? 0o644);
   } catch (error) {
     const failures: unknown[] = [];
     for (const target of changed.reverse()) {

@@ -121,7 +121,7 @@ test("flight status exposes observed assignee and broker-captured final answer",
     endpoints: { ep: { id: "ep", agentId: "child", nodeId: "node", harness: "codex", transport: "local_socket", state: "idle",
       cwd: "/work/project", sessionId: "native", metadata: { model: "gpt-test", pid: 123 } } },
     flights: { flt: { id: "flt", invocationId: "inv", requesterId: "parent", targetAgentId: "child", state: "completed",
-      output: "Done: https://github.com/oscout/scout/pull/123" } },
+      output: "Done: https://github.com/openscout-app/scout/pull/123" } },
   });
   const row = buildWorkStatuses(snapshot)[0]!;
   expect(row.assignee).toEqual({ harness: "codex", model: "gpt-test", cwd: "/work/project", pid: 123, sessionId: "native" });

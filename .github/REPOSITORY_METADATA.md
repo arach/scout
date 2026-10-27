@@ -1,6 +1,6 @@
 # GitHub repository metadata
 
-Use these values when configuring `oscout/scout` on GitHub.
+Use these values when configuring `openscout-app/scout` on GitHub.
 
 | Field | Value |
 | --- | --- |

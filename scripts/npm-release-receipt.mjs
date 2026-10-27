@@ -21,7 +21,7 @@ function fail(message) {
 }
 
 function assertReleaseIdentity(repository, releaseVersion, releaseSha, authority) {
-  if (repository !== "https://github.com/oscout/scout") {
+  if (repository !== "https://github.com/openscout-app/scout") {
     fail(`unsupported repository ${repository || "(missing)"}`);
   }
   if (!/^\d+\.\d+\.\d+(?:-dev\.(?:0|[1-9]\d*))?$/.test(releaseVersion)) {

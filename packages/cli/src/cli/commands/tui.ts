@@ -89,7 +89,7 @@ export function renderTuiCommandHelp(): string {
     `  Scout.app (${SCOUT_APP_TUI_RELATIVE_PATH})`,
     "  a downloaded copy for this Scout version",
     "  cargo run from crates/scout-tui in an OpenScout checkout",
-    "  download from the oscout/scout GitHub release (sha256-checked, first run only)",
+    "  download from the openscout-app/scout GitHub release (sha256-checked, first run only)",
     "",
     "Examples:",
     "  scout tui",

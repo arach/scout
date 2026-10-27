@@ -9,7 +9,7 @@ import { parseRecoveryArgs, recoverLocalRelease } from './recover-local-npm-rele
 
 const version = '0.2.105', source = 'a'.repeat(40), tooling = 'b'.repeat(40);
 const names = ['@openscout/protocol', '@openscout/scout'];
-const repository = 'https://github.com/oscout/scout';
+const repository = 'https://github.com/openscout-app/scout';
 const cwd = resolve(new URL('..', import.meta.url).pathname);
 const hash = data => createHash('sha256').update(data).digest('hex');
 function execute(command, args) {

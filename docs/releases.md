@@ -17,7 +17,7 @@ using tags such as `scout-tailscale-v0.3.1`. They do not change Scout's shared
 npm/native version, publish to PyPI, or claim GitHub Latest.
 
 Review and merge the client, license, tests and version before publishing.
-Use a clean checkout at freshly fetched canonical `oscout/scout` main. Run the
+Use a clean checkout at freshly fetched canonical `openscout-app/scout` main. Run the
 Python tests against this checkout's runtime fixture, build the wheel once,
 inspect its contents and license, and fresh-install those exact bytes in an
 isolated environment. Retain the wheel outside the source tree along with
@@ -26,7 +26,7 @@ canonical source commit, filename, SHA-256 and build/test commands.
 
 Create the dedicated tag at that reviewed main commit. Publish a GitHub
 prerelease with the retained wheel, checksums and receipt, using
-`gh release create --repo oscout/scout --verify-tag --prerelease --latest=false`.
+`gh release create --repo openscout-app/scout --verify-tag --prerelease --latest=false`.
 Do not rebuild on a publication retry, overwrite an existing asset, move a
 published tag, or invoke the npm publisher for this client. A retry must first
 compare existing remote assets to the retained bytes.
@@ -48,7 +48,7 @@ all three are historical and unsupported.
 
 Do not complete or manually promote the `0.2.88` or `0.2.90` candidates. Do not
 publish public packages from a private product checkout or from a commit that
-is not public `oscout/scout` `main`.
+is not public `openscout-app/scout` `main`.
 
 ## Publication ownership
 
@@ -70,7 +70,7 @@ version does not make them one publication: package publication and the
 downloadable installer have separate owners and separate release steps.
 
 - **Package publication** (this repository): `@openscout/protocol` and
-  `@openscout/scout` on npm, plus a GitHub release on `oscout/scout` whose only
+  `@openscout/scout` on npm, plus a GitHub release on `openscout-app/scout` whose only
   asset is the npm integrity `receipt.json`.
 - **Latest downloadable installer** (private product): the signed macOS DMG,
   built and verified as a local operator task rather than in CI. GitHub's
@@ -619,7 +619,7 @@ If npm accepts protocol but it becomes visible only after the publication wait
 expires, keep the original signed candidate bundle. Do not rebuild it or bump a
 version solely because registry propagation exceeded the wait. The ordinary
 publisher still rejects partial local state; recovery is a separate explicit
-command in reviewed public tooling (see [issue #23](https://github.com/oscout/scout/issues/23)).
+command in reviewed public tooling (see [issue #23](https://github.com/openscout-app/scout/issues/23)).
 This ordinary promoting path is for an unmarked stable release only. A local
 `candidate-receipt.json`, a GitHub prerelease, or unknown GitHub release state
 refuses execution; use the explicit held-candidate sequence above instead.
@@ -684,7 +684,7 @@ The hosted path uses npm trusted publishing/OIDC and these signing secrets:
 - `MACOS_RELEASE_KEYCHAIN_PASSWORD`
 - `OPENSCOUT_SIGN_IDENTITY`
 - npm trusted publishing for
-  `oscout/scout/.github/workflows/release-package-npm.yml`
+  `openscout-app/scout/.github/workflows/release-package-npm.yml`
 
 The workflow explicitly refuses `v0.2.90` and older. Dispatch
 `release-package-npm.yml` for an already-reviewed public `v0.2.91` or later tag
@@ -746,7 +746,7 @@ The existing `scout-release-0-3-3` through `scout-release-0-3-5` tags are **held
 local stable-number candidates**, not a dev channel. They were produced by the
 local two-phase candidate path (`--phase candidate`, with retained recovery
 where needed), deliberately stopping before promotion. In particular, the
-[v0.3.5 release record](https://github.com/oscout/scout/releases/tag/v0.3.5)
+[v0.3.5 release record](https://github.com/openscout-app/scout/releases/tag/v0.3.5)
 records local-signed artifacts, a blocked first-run preservation check, and
 `latest` held at 0.3.2. Do not relabel/promote those historical candidates.
 A new dev channel does not approve their onboarding or waive that blocker.
@@ -811,7 +811,7 @@ git add package.json packages/*/package.json \
   packages/cli/src/lib/shared/product.ts docs.json bun.lock
 git commit -m "🔖 Prepare v${VERSION} dev release"
 git push -u origin HEAD
-gh pr create --repo oscout/scout --base main --title "🔖 Prepare v${VERSION} dev release" \
+gh pr create --repo openscout-app/scout --base main --title "🔖 Prepare v${VERSION} dev release" \
   --body "Lockstep dogfood prerelease; publish only to dev after review."
 ```
 
@@ -829,7 +829,7 @@ test -z "$(git status --porcelain)"
 test "$(bun -p 'require("./packages/cli/package.json").version')" = "$VERSION"
 git tag -a "v${VERSION}" -m "Scout ${VERSION} dev"
 git push origin "refs/tags/v${VERSION}"
-gh workflow run release-package-npm.yml --repo oscout/scout --ref main \
+gh workflow run release-package-npm.yml --repo openscout-app/scout --ref main \
   -f tag="v${VERSION}" -f npm_tag=dev
 # After successful artifact + registry verification:
 bunx npm view @openscout/scout dist-tags --json
@@ -866,7 +866,7 @@ an explicit stable version that is currently `latest` for both packages and a
 final public GitHub release carrying the original `receipt.json`.
 
 ```bash
-gh workflow run verify-production-release.yml --repo oscout/scout --ref main \
+gh workflow run verify-production-release.yml --repo openscout-app/scout --ref main \
   -f version=0.3.8
 ```
 

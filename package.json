@@ -6,12 +6,12 @@
   "packageManager": "bun@1.4.4",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/oscout/scout.git"
+    "url": "git+https://github.com/openscout-app/scout.git"
   },
   "bugs": {
-    "url": "https://github.com/oscout/scout/issues"
+    "url": "https://github.com/openscout-app/scout/issues"
   },
-  "homepage": "https://github.com/oscout/scout#readme",
+  "homepage": "https://github.com/openscout-app/scout#readme",
   "workspaces": [
     "packages/*"
   ],
@@ -27,7 +27,7 @@
     "check:types": "bun run --cwd packages/protocol check && bun run --cwd packages/agent-sessions check && bun run --cwd packages/runtime check && bun run --cwd packages/session-trace check && bun run --cwd packages/pairing check && bun run --cwd packages/cli check && bun run --cwd packages/mesh-extension check",
     "check:presentation": "node scripts/check-public-repo-presentation.mjs",
     "diagram:readme": "node scripts/render-readme-diagram.mjs",
-    "docs:generate": "dewey generate",
+    "docs:generate": "dewey generate --llms-txt --docs-json",
     "sync-exec:fence": "bun scripts/check-sync-exec-fence.ts",
     "test": "bun run test:unit",
     "test:unit": "bun run test:cli && bun run test:unit:source",

@@ -93,7 +93,7 @@ for setting in NPM_DIST_TAG_VERIFY_ATTEMPTS NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS;
 done
 [[ "$NPM_DIST_TAG_VERIFY_DELAY_SECONDS" =~ ^[0-9]+$ ]] || { echo "ERROR: NPM_DIST_TAG_VERIFY_DELAY_SECONDS must be a nonnegative integer" >&2; exit 1; }
 PUBLISH_PACKAGES=(protocol cli)
-EXPECTED_REPOSITORY="https://github.com/oscout/scout"
+EXPECTED_REPOSITORY="https://github.com/openscout-app/scout"
 mkdir -p "$npm_config_cache"
 
 STATE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/scout-npm-release.XXXXXX")
@@ -176,8 +176,8 @@ if [[ "$MODE" == "publish" || "$MODE" == "prepare" || "$MODE" == "publish-prepar
     exit 1
   fi
   if [[ "$PUBLICATION_AUTHORITY" == "github-oidc" ]]; then
-    expected_workflow_ref="oscout/scout/.github/workflows/release-package-npm.yml@refs/heads/main"
-    if [[ "${GITHUB_REPOSITORY:-}" != "oscout/scout" \
+    expected_workflow_ref="openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main"
+    if [[ "${GITHUB_REPOSITORY:-}" != "openscout-app/scout" \
       || "${GITHUB_WORKFLOW_REF:-}" != "$expected_workflow_ref" ]]; then
       echo "ERROR: hosted publication requires the canonical release-package-npm.yml workflow" >&2
       exit 1

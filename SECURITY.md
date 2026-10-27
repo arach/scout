@@ -18,7 +18,7 @@ npm view @openscout/scout version
 Please do not open a public issue, discussion, or pull request for a suspected
 vulnerability.
 
-Use [GitHub private vulnerability reporting](https://github.com/oscout/scout/security/advisories/new)
+Use [GitHub private vulnerability reporting](https://github.com/openscout-app/scout/security/advisories/new)
 so the report can include reproduction details, affected versions, and impact
 without exposing users. If that form is unavailable, use the maintainer contact
 routes at [arach.dev](https://arach.dev) and include only enough detail to

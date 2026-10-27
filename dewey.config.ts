@@ -12,28 +12,8 @@ export default {
     version: packageMetadata.version,
   },
 
+  // AGENTS.md is written by hand; Dewey builds llms.txt and docs.json from these sections.
   agent: {
-    criticalContext: [
-      "This repository is the Scout core: runtime, protocol, harness adapters, session extraction, CLI, TUI, MCP server, native services, and the host side of phone pairing. The Mac, iOS, Android, and web apps and the hosted services are separate; never add app or UI source here. See docs/public-source-boundary.md.",
-      "Use Bun 1.4.4 or newer for JavaScript and TypeScript workflows.",
-      "The runtime is the canonical writer for Scout-owned coordination records; clients submit commands through its APIs.",
-      "External harness transcripts are observed source material; never bulk-import them as Scout messages.",
-      "One explicit target is a DM; group coordination requires an explicit channel; broadcast is opt-in.",
-      "Use scout tell for updates and scout ask for requested work or replies.",
-      "Mesh means reachability and coordination, not exactly-once delivery or global consensus.",
-      "Scout assumes trusted local users and agents; do not claim enterprise or compliance readiness.",
-      "Use gitmoji commit subjects and never add AI co-authoring footers.",
-    ],
-
-    entryPoints: {},
-
-    rules: [
-      { pattern: "packages/protocol/**", instruction: "Run bun run --cwd packages/protocol check." },
-      { pattern: "packages/runtime/**", instruction: "Run bun run --cwd packages/runtime check and the narrow affected tests." },
-      { pattern: "packages/pairing/**", instruction: "Run bun run --cwd packages/pairing check." },
-      { pattern: "process spawning or shell execution", instruction: "Run bun run sync-exec:fence before committing shell-execution changes." },
-    ],
-
     sections: ["overview", "quickstart", "extensions"],
   },
 

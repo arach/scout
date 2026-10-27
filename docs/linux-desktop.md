@@ -16,7 +16,7 @@ the observer never falls back to reading full conversation history.
 
 The observer is an optional source installation. It is not bundled into the
 npm package and does not start when `scout setup` runs. From a checkout of
-public `oscout/scout`, review the destinations and install:
+public `openscout-app/scout`, review the destinations and install:
 
 ```bash
 bun scripts/linux/install-notifications.ts

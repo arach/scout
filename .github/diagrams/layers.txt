@@ -1,7 +1,7 @@
  Your coding agents: Claude Code · Codex · Grok · OpenCode · Kimi · Pi · more
                                        ▲
                                        │ harness adapters
-┌─ Scout core ── oscout/scout ── public, Apache 2.0 ─────────────────────────┐
+┌─ Scout core ── openscout-app/scout ── public, Apache 2.0 ──────────────────┐
 │                                                                            │
 │  scout CLI, TUI and MCP server                @openscout/scout             │
 │  Runtime: routing, records, lifecycle, mesh   @openscout/runtime           │

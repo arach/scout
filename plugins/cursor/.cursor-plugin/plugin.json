@@ -4,7 +4,7 @@
   "description": "Connect Cursor to a local Scout broker to discover supported agents, exchange messages, and request work.",
   "author": { "name": "OpenScout" },
   "homepage": "https://openscout.app",
-  "repository": "https://github.com/oscout/scout",
+  "repository": "https://github.com/openscout-app/scout",
   "license": "Apache-2.0",
   "keywords": ["openscout", "mcp", "local", "agents"],
   "mcpServers": "mcp.json"

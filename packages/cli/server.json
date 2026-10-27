@@ -1,21 +1,21 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.oscout/scout",
+  "name": "io.github.openscout-app/scout",
   "title": "Scout",
   "description": "Coordinate local coding agents and track handoffs.",
   "repository": {
-    "url": "https://github.com/oscout/scout",
+    "url": "https://github.com/openscout-app/scout",
     "source": "github",
     "subfolder": "packages/cli"
   },
   "websiteUrl": "https://openscout.app/docs/integrations",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@openscout/scout",
-      "version": "0.4.0",
+      "version": "0.4.2",
       "runtimeHint": "bunx",
       "packageArguments": [
         { "type": "positional", "value": "mcp" }

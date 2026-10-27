@@ -334,7 +334,7 @@ describe("install command helpers", () => {
 
   test("pins verified release identity and does not take a Team ID override", () => {
     expect(`${OPENSCOUT_RELEASE_OWNER}/${OPENSCOUT_RELEASE_REPOSITORY}`).toBe(
-      "oscout/scout",
+      "openscout-app/scout",
     );
     expect(DEFAULT_OPENSCOUT_APP_PATH).toBe("/Applications/Scout.app");
     expect(OPENSCOUT_APP_BUNDLE_ID).toBe("app.openscout.scout");

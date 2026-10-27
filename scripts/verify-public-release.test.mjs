@@ -10,8 +10,8 @@ import { readManifest, verifyPublicRelease } from './verify-public-release.mjs';
 const version = '0.3.8';
 const sha = 'a'.repeat(40);
 const main = 'b'.repeat(40);
-const repository = 'https://github.com/oscout/scout';
-const api = 'https://api.github.com/repos/oscout/scout';
+const repository = 'https://github.com/openscout-app/scout';
+const api = 'https://api.github.com/repos/openscout-app/scout';
 const hash = (bytes, algorithm = 'sha256', encoding = 'hex') => createHash(algorithm).update(bytes).digest(encoding);
 function archive(manifest) {
   const bytes = Buffer.from(JSON.stringify(manifest));
