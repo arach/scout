@@ -110,6 +110,23 @@ Commit the source, version manifests, `packages/cli/src/lib/shared/product.ts`,
 `docs.json`, and lockfile on a review branch. Merge only after the standalone
 checks and packed artifact audit pass.
 
+## 0.4.2 the openscout-app organization
+
+Scout's GitHub organization is now `openscout-app`. GitHub redirects the old
+`oscout` links, so nothing needs to change before you upgrade.
+
+- **Native downloads** for `scoutd` and the TUI come from
+  `https://github.com/openscout-app/scout/releases`. They no longer depend on
+  the redirect from the old organization.
+- **Messages and help** name `openscout-app/scout`, including the hint to
+  install a missing extension and the `cargo install --git` fallback for the
+  TUI.
+- **Integrations** link the Claude Code, Codex, Cursor, and other plugin
+  repositories under `openscout-app`, with matching install hints.
+- **MCP Registry:** the package declares
+  `"mcpName": "io.github.openscout-app/scout"`. The Scout MCP server can be
+  listed under that name in the official MCP Registry.
+
 ## 0.4.1 sign in from the terminal
 
 `scout auth login` signs a host in to your Scout account through the browser.
