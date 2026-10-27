@@ -89,3 +89,13 @@ test('session targets remain exact continuations and work metadata is requester 
   expect(f.calls.at(-1)!.body.collaborationRecordId).not.toBe(a.collaborationRecordId);
   await expect(f.adapter.call('ask',{to:'id:target',body:'work',workItem:{title:'Task',id:'forged'}})).rejects.toThrow('invalid arguments');
 });
+
+test('HTTP ask preserves the caller traceparent without asserting origin authority', async () => {
+  const f = fixture();
+  const traceparent = '00-11111111111111111111111111111111-2222222222222222-01';
+  await f.adapter.call('ask', { to: 'id:target', body: 'work', traceparent });
+  const request = f.calls.at(-1)!.body;
+  expect(request.traceparent).toBe(traceparent);
+  expect(request.origin).toBeUndefined();
+  expect(request.invocationMetadata.completionRelation).toBeUndefined();
+});

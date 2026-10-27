@@ -132,6 +132,8 @@ export interface ScoutDeliverRequest {
   channel?: string;
   replyToMessageId?: ScoutId;
   replyToSessionId?: ScoutId;
+  /** W3C caller context; correlation only. */
+  traceparent?: string;
   speechText?: string;
   ensureAwake?: boolean;
   execution?: InvocationExecutionPreference;

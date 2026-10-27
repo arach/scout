@@ -186,7 +186,7 @@
   {
     "name": "feedback_send",
     "title": "Send Scout Feedback",
-    "description": "File feedback about Scout itself with the OpenScout team: a bug, a rough edge, a missing capability. The note is redacted, saved locally, then uploaded; the report names the sender (agent, harness, project, host). Set diagnostics only when the note is about Scout misbehaving on this machine \u2014 it attaches bounded, redacted service logs. This is not a message to another agent; use messages_send or ask for that.",
+    "description": "File feedback about Scout itself with the OpenScout team: a bug, a rough edge, a missing capability. The note is redacted, saved locally, then uploaded; the report names the sender (agent, harness, project, host). Set diagnostics only when the note is about Scout misbehaving on this machine — it attaches bounded, redacted service logs. This is not a message to another agent; use messages_send or ask for that.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -567,7 +567,7 @@
   {
     "name": "ask",
     "title": "Ask",
-    "description": "Ask another agent to answer, review, try, build, compare, or give feedback \u2014 on this machine or on another mesh machine. To start work on another machine, pass `on` (the machine, e.g. peer-machine) with `projectPath` as the folder on that machine, plus harness/runtime; Scout starts a fresh session there and forwards the ask, so never ssh in to launch an agent yourself. Exact runtime requests accept `runtime` as harness/model/effort (for example codex/gpt-5.6-sol/xhigh), or separate harness/model/reasoningEffort fields. A profile is a base preset and explicit dimensions override it when legal. Exact runtime requests create a fresh isolated session; targetSessionId fails closed unless the selected session's observed runtime matches. Ask may create message, invocation, flight, delivery, and work records as side effects; use invocations_get/invocations_wait and the execution-resolution receipt to verify requested, resolved, and observed values.",
+    "description": "Ask another agent to answer, review, try, build, compare, or give feedback — on this machine or on another mesh machine. To start work on another machine, pass `on` (the machine, e.g. peer-machine) with `projectPath` as the folder on that machine, plus harness/runtime; Scout starts a fresh session there and forwards the ask, so never ssh in to launch an agent yourself. Exact runtime requests accept `runtime` as harness/model/effort (for example codex/gpt-5.6-sol/xhigh), or separate harness/model/reasoningEffort fields. A profile is a base preset and explicit dimensions override it when legal. Exact runtime requests create a fresh isolated session; targetSessionId fails closed unless the selected session's observed runtime matches. Ask may create message, invocation, flight, delivery, and work records as side effects; use invocations_get/invocations_wait and the execution-resolution receipt to verify requested, resolved, and observed values.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -613,7 +613,7 @@
           "maxLength": 256
         },
         "to": {
-          "description": "Agent id, label, sibling, specialist, recent collaborator, target:<name>, or \u2316name.",
+          "description": "Agent id, label, sibling, specialist, recent collaborator, target:<name>, or ⌖name.",
           "type": "string",
           "minLength": 1
         },
@@ -805,6 +805,10 @@
         "wait": {
           "description": "Compatibility alias for replyMode='inline'.",
           "type": "boolean"
+        },
+        "traceparent": {
+          "type": "string",
+          "description": "W3C traceparent for correlation only."
         }
       },
       "required": [
@@ -913,7 +917,7 @@
         },
         "targetLabel": {
           "type": "string",
-          "description": "Scout agent handle to contact when a specific target is known, such as @talkie, or a saved situated target such as target:talkie or \u2316talkie. For fresh capability work prefer projectPath plus optional harness; do not guess generic handles like claude.main. Treat harness/model/profile as instance constraints, not the base agent identity."
+          "description": "Scout agent handle to contact when a specific target is known, such as @talkie, or a saved situated target such as target:talkie or ⌖talkie. For fresh capability work prefer projectPath plus optional harness; do not guess generic handles like claude.main. Treat harness/model/profile as instance constraints, not the base agent identity."
         },
         "aliasProject": {
           "description": "Explicit project root for targetLabel=alias:<name>.",

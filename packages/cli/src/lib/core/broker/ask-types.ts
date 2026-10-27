@@ -40,6 +40,8 @@ type ScoutAskCommandBase = {
   };
   labels?: string[];
   replyToSessionId?: string;
+  replyToSessionHarness?: AgentHarness;
+  traceparent?: string;
   replyMode?: ScoutAskReplyMode;
   channel?: string;
   shouldSpeak?: boolean;

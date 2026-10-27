@@ -2704,6 +2704,7 @@ export function createBrokerHttpRouter(
     const signal = requestAbortSignal(request, response);
     try {
       const payload = await readValidatedRequestBody(request, brokerDeliverRequestSchema);
+      payload.traceparent ??= typeof request.headers.traceparent === "string" ? request.headers.traceparent : undefined;
       const execute = async () => {
         if ((payload.completion || payload.relation) && payload.target
           && payload.target.kind !== "agent_id" && payload.target.kind !== "session_id") {
@@ -2766,6 +2767,7 @@ export function createBrokerHttpRouter(
         request,
         brokerInvocationRequestSchemaFor(runtimeCatalogSnapshot?.catalog),
       );
+      payload.traceparent ??= typeof request.headers.traceparent === "string" ? request.headers.traceparent : undefined;
       const execute = async () => {
         if (
           !payload.requestId && payload.target?.kind === "route_alias"
