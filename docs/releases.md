@@ -457,9 +457,24 @@ bun run ship -- <version> --execute --yes --auth npm-login
 Run this mode in an interactive terminal so npm can present browser or OTP
 challenges. It verifies the existing login with `npm whoami` and inherits npm
 configuration and terminal input/output. It does not read, copy, or write
-credentials, call secret-store helpers, or fall back to another authentication
-mode. `NPM_TOKEN` and `NODE_AUTH_TOKEN` must be unset; hosted execution rejects
-this mode. The lower-level publisher accepts `SCOUT_NPM_AUTH_MODE=npm-login`.
+credentials, or fall back to another authentication mode. `NPM_TOKEN` and
+`NODE_AUTH_TOKEN` must be unset; hosted execution rejects this mode.
+
+Without a terminal for npm to prompt in, name a command that prints a fresh
+one-time code in `SCOUT_NPM_OTP_COMMAND`. The publisher runs it immediately
+before each npm write and passes the code to that write only, as
+`npm_config_otp`. It never prints the code. One code cannot cover a whole
+release: a code lasts about 30 seconds, and the publisher waits for registry
+propagation between writes.
+
+```bash
+SCOUT_NPM_OTP_COMMAND='<command that prints a code>' \
+  bun run ship -- <version> --execute --yes --auth npm-login
+```
+
+The publisher calls no secret-store helper unless you name one this way.
+
+The lower-level publisher accepts `SCOUT_NPM_AUTH_MODE=npm-login`.
 Default and `@openscout` scoped registries are pinned to npmjs for every package
 read and mutation, including when the inherited login has a different scope registry.
 Token authentication remains the default, and both local modes retain the same

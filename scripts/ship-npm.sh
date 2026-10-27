@@ -562,7 +562,8 @@ configure_publish_credentials() {
   fi
   if [[ "$NPM_AUTH_MODE" == "npm-login" ]]; then
     # Inherit the operator's existing npm configuration and terminal. Never
-    # read/copy credentials, invoke a secret helper, or fall back to tokens.
+    # read/copy credentials, invoke a secret helper the operator did not name
+    # in SCOUT_NPM_OTP_COMMAND, or fall back to tokens.
     if ! npm whoami --registry "$NPM_REGISTRY_URL" >/dev/null; then
       echo "ERROR: npm-login requires an existing authenticated npm login; run npm login separately" >&2
       exit 1
@@ -583,7 +584,7 @@ configure_publish_credentials() {
   fi
 }
 
-run_npm_mutation() {
+run_npm_with_config() {
   # macOS still ships Bash 3.2, where expanding a declared-but-empty array
   # under `set -u` aborts with "unbound variable". Keep the optional local
   # token argument behind an explicit scalar check so trusted publishing can
@@ -593,6 +594,29 @@ run_npm_mutation() {
   else
     npm "$@"
   fi
+}
+
+run_npm_mutation() {
+  # A one-time code lasts about 30 seconds, and the publisher waits for
+  # registry propagation between writes, so one code cannot cover a release.
+  # Without a terminal for npm to prompt in, the operator can name a command
+  # that prints a fresh code; it runs immediately before each write, and the
+  # code reaches only that write. The code is never printed.
+  if [[ -n "${SCOUT_NPM_OTP_COMMAND:-}" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+    local otp
+    if ! otp=$(bash -c "$SCOUT_NPM_OTP_COMMAND"); then
+      echo "ERROR: SCOUT_NPM_OTP_COMMAND failed" >&2
+      return 1
+    fi
+    otp="${otp//[[:space:]]/}"
+    if [[ ! "$otp" =~ ^[0-9]{6,8}$ ]]; then
+      echo "ERROR: SCOUT_NPM_OTP_COMMAND did not print a one-time code" >&2
+      return 1
+    fi
+    npm_config_otp="$otp" run_npm_with_config "$@"
+    return
+  fi
+  run_npm_with_config "$@"
 }
 
 build_and_check() {
