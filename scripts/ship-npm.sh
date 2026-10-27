@@ -168,12 +168,22 @@ if [[ -z "$RELEASE_STATE_DIR" ]]; then
 fi
 RELEASE_RECEIPT_PATH="$RELEASE_STATE_DIR/receipt.json"
 RELEASE_LOCK_DIR="${RELEASE_STATE_DIR}.lock"
-# Local token publication is the default. Hosted OIDC remains an explicit,
-# separately verified workflow authority; neither path falls back to the other.
+# Hosted OIDC publication from release-package-npm.yml is the default, so npm
+# records provenance. A local upload needs ship-release.mjs --local-publish;
+# neither path falls back to the other.
+assert_local_upload_allowed() {
+  [[ "${SCOUT_NPM_LOCAL_PUBLISH:-}" == "1" ]] && return 0
+  echo "ERROR: stable releases publish from release-package-npm.yml; a local upload needs bun run ship -- ${release_version} --execute --yes --local-publish" >&2
+  exit 1
+}
 if [[ "$MODE" == "publish" || "$MODE" == "prepare" || "$MODE" == "publish-prepared" || "$MODE" == "publish-candidate" || "$MODE" == "promote-prepared" ]]; then
   if ! node -e 'const v=process.argv[1].split("-")[0].split(".").map(Number); process.exit(v[0]===0 && (v[1]<2 || (v[1]===2 && v[2]<=90)) ? 1 : 0)' "$release_version"; then
     echo "ERROR: v${release_version} is historical and unsupported; publication is disabled" >&2
     exit 1
+  fi
+  # Refuse before building; publish_missing_artifacts checks again before any upload.
+  if [[ "$PUBLICATION_AUTHORITY" == "local-signed" && "$MODE" == "publish" ]]; then
+    assert_local_upload_allowed
   fi
   if [[ "$PUBLICATION_AUTHORITY" == "github-oidc" ]]; then
     expected_workflow_ref="openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main"
@@ -770,6 +780,9 @@ wait_for_exact_artifact() {
 
 publish_missing_artifacts() {
   local index name version tarball
+  # Promotion and verification of a pair already on npm never reach this point,
+  # so resuming a local release needs no flag; a new local upload does.
+  [[ "$PUBLICATION_AUTHORITY" == "local-signed" ]] && assert_local_upload_allowed
   for index in "${!PUBLISH_PACKAGES[@]}"; do
     if [[ "${PACKAGE_EXISTS[$index]}" == "1" ]]; then
       echo "  ✓ ${PACKAGE_NAMES[$index]}@${PACKAGE_VERSIONS[$index]} already matches ${release_sha}"
@@ -854,6 +867,11 @@ inspect_registry_state
 assert_registry_preflight
 
 if [[ "$MODE" == "verify-state" ]]; then
+  # A run without --local-publish may only finish a pair already on npm. Refuse
+  # here, before ship-release.mjs creates the tag or a candidate marker.
+  if [[ "${SCOUT_NPM_RESUME_ONLY:-}" == "1" ]] && ! all_artifacts_exist; then
+    assert_local_upload_allowed
+  fi
   if all_artifacts_exist && [[ "$RELEASE_RECEIPT_LOADED" != "1" ]]; then
     load_release_receipt
     inspect_registry_state
