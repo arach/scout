@@ -79,6 +79,20 @@ test("local execution requires explicit confirmation before any mutation", () =>
   assert.match(result.stderr, /Refusing to publish without --yes/);
 });
 
+test("stable execution publishes from GitHub Actions unless --local-publish is explicit", () => {
+  const result = plan(currentVersion, "--execute", "--yes");
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stable releases publish from GitHub Actions, so npm records provenance/);
+  assert.ok(result.stderr.includes(`gh workflow run release-package-npm.yml --repo openscout-app/scout --ref main -f tag=v${currentVersion} -f npm_tag=latest`));
+  assert.match(result.stderr, /--local-publish only when the hosted workflow cannot run/);
+  const candidate = plan(currentVersion, "--phase", "candidate", "--execute", "--yes");
+  assert.notEqual(candidate.status, 0);
+  assert.match(candidate.stderr, /Stable releases publish from GitHub Actions/);
+  const dry = plan(currentVersion);
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, /local execution also needs --local-publish/);
+});
+
 test("local npm-login authentication is an explicit plan option", () => {
   const result = plan(currentVersion, "--auth", "npm-login");
   assert.equal(result.status, 0, result.stderr);
@@ -1404,7 +1418,7 @@ for (const corruptReceipt of [false, true]) {
   test(`local release orchestration ${corruptReceipt ? "refuses conflicting public receipt" : "reuses candidates and verifies public receipt bytes"}`, () => {
     const { fixture, stateDir } = createLocalReleaseFixture({ corruptReceipt });
     try {
-      const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes"], {
+      const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes", "--local-publish"], {
         cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only" },
       });
       if (corruptReceipt) {
@@ -1426,7 +1440,7 @@ for (const initialRelease of ["missing", "draft", "prerelease"]) {
   test(`local release publishes a ${initialRelease} receipt-only release without claiming GitHub Latest`, () => {
     const { fixture } = createLocalReleaseFixture({ initialRelease });
     try {
-      const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes"], {
+      const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes", "--local-publish"], {
         cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only" },
       });
       assert.equal(result.status, 0, result.stderr);
@@ -1446,7 +1460,7 @@ for (const initialRelease of ["missing", "draft", "prerelease"]) {
 test("retrying an existing final release preserves its GitHub Latest state", () => {
   const { fixture } = createLocalReleaseFixture({ initialRelease: "final" });
   try {
-    const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes"], {
+    const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes", "--local-publish"], {
       cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only" },
     });
     assert.equal(result.status, 0, result.stderr);
@@ -1458,7 +1472,7 @@ test("retrying an existing final release preserves its GitHub Latest state", () 
 });
 
 function runCandidatePhase(fixture, phase, extraEnv = {}) {
-  return spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--phase", phase, "--execute", "--yes"], {
+  return spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--phase", phase, "--execute", "--yes", "--local-publish"], {
     cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only", ...extraEnv },
   });
 }
@@ -1736,7 +1750,7 @@ else name=\${url##*/}; cat '${fixture}/remote-'"$name"; fi
   for (const name of ["git", "npm", "curl"]) chmodSync(join(fixture, "fake-bin", name), 0o755);
   const identityArgs = ["--source", source, "--receipt-sha256", digest(readFileSync(receiptPath)), "--candidate-receipt-sha256", digest(readFileSync(markerPath))];
   const execute = (phase, extraEnv = {}, retained = true) => spawnSync(process.execPath, ["scripts/ship-release.mjs", version, "--phase", phase,
-    ...(retained ? identityArgs : []), "--execute", "--yes", "--auth", "npm-login"], {
+    ...(retained ? identityArgs : ["--local-publish"]), "--execute", "--yes", "--auth", "npm-login"], {
     cwd: fixture, encoding: "utf8", env: { ...process.env, PATH: join(fixture, "fake-bin") + ":" + process.env.PATH,
       NPM_TOKEN: "", NODE_AUTH_TOKEN: "", SCOUT_NPM_RELEASE_STATE_DIR: "", GITHUB_ACTIONS: "", ...extraEnv },
   });
