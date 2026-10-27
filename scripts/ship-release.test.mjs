@@ -118,6 +118,58 @@ test("release versions are exact stable semver", () => {
   assert.match(result.stderr, /Invalid stable version/);
 });
 
+test("each npm write takes a fresh one-time code from SCOUT_NPM_OTP_COMMAND and never prints it", () => {
+  const source = readFileSync(new URL("ship-npm.sh", import.meta.url), "utf8");
+  const start = source.indexOf("run_npm_with_config() {");
+  const functions = source.slice(start, source.indexOf("\n}\n", source.indexOf("run_npm_mutation() {")) + 3);
+  const dir = mkdtempSync(join(tmpdir(), "scout-npm-otp-test."));
+  try {
+    mkdirSync(join(dir, "bin"));
+    writeFileSync(join(dir, "bin/npm"), '#!/bin/bash\nprintf "%s otp=%s\\n" "$*" "${npm_config_otp:-none}" >> "$NPM_LOG"\n');
+    chmodSync(join(dir, "bin/npm"), 0o755);
+    writeFileSync(join(dir, "otp.sh"), '#!/bin/bash\nn=$(( $(cat "$OTP_COUNTER" 2>/dev/null || echo 0) + 1 ))\necho "$n" > "$OTP_COUNTER"\nprintf "%06d\\n" $((100000 + n))\n');
+    chmodSync(join(dir, "otp.sh"), 0o755);
+    const log = join(dir, "npm.log");
+    const run = (otpCommand, githubActions = "") => {
+      rmSync(log, { force: true });
+      const { npm_config_otp: _inherited, ...env } = process.env;
+      return spawnSync("bash", ["-c", `set -euo pipefail; NPMRC=""\n${functions}\nrun_npm_mutation publish a.tgz --tag staging\nrun_npm_mutation dist-tag add a@1.0.0 latest`], {
+        env: { ...env, PATH: `${join(dir, "bin")}:${process.env.PATH}`, NPM_LOG: log, OTP_COUNTER: join(dir, "counter"), SCOUT_NPM_OTP_COMMAND: otpCommand, GITHUB_ACTIONS: githubActions },
+        encoding: "utf8",
+      });
+    };
+
+    let result = run(join(dir, "otp.sh"));
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [
+      "publish a.tgz --tag staging otp=100001",
+      "dist-tag add a@1.0.0 latest otp=100002",
+    ]);
+    assert.doesNotMatch(result.stdout + result.stderr, /10000[12]/);
+
+    result = run("echo not-a-code");
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /did not print a one-time code/);
+    assert.equal(existsSync(log), false);
+
+    result = run("exit 3");
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /SCOUT_NPM_OTP_COMMAND failed/);
+    assert.equal(existsSync(log), false);
+
+    for (const [otpCommand, githubActions] of [["", ""], [join(dir, "otp.sh"), "true"]]) {
+      result = run(otpCommand, githubActions);
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [
+        "publish a.tgz --tag staging otp=none",
+        "dist-tag add a@1.0.0 latest otp=none",
+      ]);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("SCOUT_APP_VERSION and the MCP Registry server version participate in release lockstep", () => {
   const fixture = mkdtempSync(join(tmpdir(), "scout-release-source-test."));
   try {
