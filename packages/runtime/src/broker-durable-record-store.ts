@@ -22,10 +22,12 @@ import {
   type DeliveryIntent,
   type FlightRecord,
   type InvocationRequest,
+  type TracedInvocationRequest,
   type MessageRecord,
   type NodeDefinition,
 } from "@openscout/protocol";
 import { isDeepStrictEqual } from "node:util";
+import { stampAskContext } from "./ask-context.js";
 
 import type { BrokerJournalEntry } from "./broker-journal.js";
 import type { BrokerInvocationDispatchJob } from "./broker-dispatch-job.js";
@@ -69,7 +71,7 @@ type RuntimeRecordStore = {
   commitMessage(message: MessageRecord, deliveries: DeliveryIntent[]): Promise<void>;
   upsertFlight?(flight: FlightRecord, options?: { preserveCurrent?: boolean }): Promise<void>;
   flightForInvocation?(invocationId: string): FlightRecord | undefined;
-  planInvocation(invocation: InvocationRequest): FlightRecord;
+  planInvocation(invocation: TracedInvocationRequest): FlightRecord;
   commitInvocation(invocation: InvocationRequest, flight: FlightRecord): Promise<void>;
 };
 
@@ -687,6 +689,8 @@ export class BrokerDurableRecordStore {
   readonly recordInvocation = async (
     invocation: InvocationRequest,
     options: {
+      /** Runtime-held context only, never populated from an HTTP payload. */
+      observedEndpointId?: string;
       flight?: FlightRecord;
       dispatchJob?: BrokerInvocationDispatchJob;
       createDispatchJob?: (flight: FlightRecord) => BrokerInvocationDispatchJob;
@@ -715,6 +719,7 @@ export class BrokerDurableRecordStore {
         const dispatchJob = jobId ? this.options.invocationDispatchJobFor?.(jobId) ?? undefined : undefined;
         return { flight: existingFlight, dispatchJob, entries: [] };
       }
+      stampAskContext(invocation, snapshot, this.options.localNodeId, options.observedEndpointId);
       const plannedFlight = options.flight ?? this.options.runtime.planInvocation(invocation);
       let flight = options.flight ? plannedFlight : {
         ...plannedFlight,

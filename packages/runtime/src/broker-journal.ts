@@ -2107,7 +2107,7 @@ export class FileBackedBrokerJournal {
         this.state.snapshot.readCursors[`${entry.cursor.conversationId}\u0000${entry.cursor.actorId}`] = entry.cursor;
         return;
       case "invocation.record":
-        this.state.snapshot.invocations[entry.invocation.id] = entry.invocation;
+        this.state.snapshot.invocations[entry.invocation.id] = { ...entry.invocation, origin: entry.invocation.origin ?? { source: "unknown" } };
         return;
       case "invocation.dispatch_job.record":
         this.indexDispatchJob(entry.job);

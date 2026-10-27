@@ -1,3 +1,4 @@
+import { stampForwardedAskContext } from "./ask-context.js";
 import { readRuntimeMessage } from "./broker-message-records.js";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalMessageRecord } from "./message-record-canonical.js";
@@ -7,6 +8,7 @@ import type {
   DeliveryIntent,
   FlightRecord,
   InvocationRequest,
+  TracedInvocationRequest,
   MessageRecord,
 } from "@openscout/protocol";
 
@@ -30,7 +32,7 @@ export type BrokerMeshHttpRuntime = {
   commitMessage(message: MessageRecord, deliveries: DeliveryIntent[]): Promise<void>;
   agent(agentId: string): AgentDefinition | undefined;
   flightForInvocation(invocationId: string): FlightRecord | undefined;
-  planInvocation(invocation: InvocationRequest): FlightRecord;
+  planInvocation(invocation: TracedInvocationRequest): FlightRecord;
   commitInvocation(invocation: InvocationRequest, flight: FlightRecord): Promise<void>;
   collaborationRecord(recordId: string): unknown;
 };
@@ -241,6 +243,7 @@ export class BrokerMeshHttpService {
         };
       }
 
+      stampForwardedAskContext(bundle.invocation);
       const flight = this.deps.runtime.planInvocation(bundle.invocation);
       const dispatchJob = createInvocationDispatchJob(
         bundle.invocation,

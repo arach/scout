@@ -1237,6 +1237,8 @@ export class BrokerDeliveryAcceptanceService {
         : { session: "new" as const }),
     };
     const invocation: InvocationRequest = {
+      origin: { source: "unknown" },
+      traceparent: payload.traceparent,
       id: payload.requestId ? deliveryRequestInvocationId(requesterId, payload.requestId) : this.options.createId("inv"),
       ...(payload.requestId ? { requestId: payload.requestId } : {}),
       requesterId,
@@ -1256,6 +1258,7 @@ export class BrokerDeliveryAcceptanceService {
       ...(labels.length ? { labels } : {}),
       metadata: {
         ...invocationMetadata,
+        ...(replyToSessionId ? { replyToSessionId } : {}),
         completion: payload.completion,
         completionRelation: payload.relation,
         completionLocalNodeId: payload.completion || payload.relation ? this.options.nodeId : undefined,
