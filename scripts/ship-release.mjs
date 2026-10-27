@@ -666,12 +666,14 @@ function main() {
   }
   // Every new upload goes through the hosted workflow. Promotion, retained-candidate
   // finalization, and a release whose local bundle already exists for this HEAD
-  // only finish a local release that was already started.
+  // only finish a local release that was already started. ship-npm.sh still
+  // refuses to upload anything new unless --local-publish set the marker.
   const resumingLocalRelease = existsSync(npmReleaseReceiptPath(version, currentHead()));
   if (!options.localPublish && !options.source && options.phase !== "promote" && !resumingLocalRelease) {
     throw new Error(hostedPublicationMessage(version, options.phase));
   }
-  process.env.SCOUT_NPM_LOCAL_PUBLISH = "1";
+  if (options.localPublish) process.env.SCOUT_NPM_LOCAL_PUBLISH = "1";
+  else delete process.env.SCOUT_NPM_LOCAL_PUBLISH;
   process.env.SCOUT_NPM_AUTH_MODE = options.auth;
 
   assertCanonicalLocalSource();

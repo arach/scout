@@ -80,7 +80,8 @@ downloadable installer have separate owners and separate release steps.
 
 - **Package publication** (this repository): `@openscout/protocol` and
   `@openscout/scout` on npm, plus a GitHub release on `openscout-app/scout` that
-  carries the npm integrity `receipt.json` and the `scout tui` archives.
+  carries the npm integrity `receipt.json` and, once `release-scout-tui.yml` has
+  run, the `scout tui` archives.
 - **Latest downloadable installer** (private product): the signed macOS DMG,
   built and verified as a local operator task rather than in CI. GitHub's
   **Latest** release, and therefore `/releases/latest` download links, belongs
@@ -496,7 +497,8 @@ to `latest`. A fresh release must advance the current versions and begin with
 both package versions unused. A matching completed release is idempotent. A
 complete immutable pair may resume missing dist-tag promotion only with its
 exact retained receipt. A retained bundle for the current HEAD marks a local
-release already in progress, so resuming it does not need `--local-publish`.
+release already in progress: finishing a pair that is already on npm does not
+need `--local-publish`, but uploading either package still does.
 The ordinary publisher still rejects a partial local pair. A protocol-first
 local interruption may use the explicit retained recovery command below. Changed
 artifacts, wrong source, missing receipt, foreign authority, and historical

@@ -171,15 +171,19 @@ RELEASE_LOCK_DIR="${RELEASE_STATE_DIR}.lock"
 # Hosted OIDC publication from release-package-npm.yml is the default, so npm
 # records provenance. A local upload needs ship-release.mjs --local-publish;
 # neither path falls back to the other.
+assert_local_upload_allowed() {
+  [[ "${SCOUT_NPM_LOCAL_PUBLISH:-}" == "1" ]] && return 0
+  echo "ERROR: stable releases publish from release-package-npm.yml; a local upload needs bun run ship -- ${release_version} --execute --yes --local-publish" >&2
+  exit 1
+}
 if [[ "$MODE" == "publish" || "$MODE" == "prepare" || "$MODE" == "publish-prepared" || "$MODE" == "publish-candidate" || "$MODE" == "promote-prepared" ]]; then
   if ! node -e 'const v=process.argv[1].split("-")[0].split(".").map(Number); process.exit(v[0]===0 && (v[1]<2 || (v[1]===2 && v[2]<=90)) ? 1 : 0)' "$release_version"; then
     echo "ERROR: v${release_version} is historical and unsupported; publication is disabled" >&2
     exit 1
   fi
-  if [[ "$PUBLICATION_AUTHORITY" == "local-signed" && "${SCOUT_NPM_LOCAL_PUBLISH:-}" != "1" ]] \
-    && [[ "$MODE" == "publish" || "$MODE" == "publish-prepared" || "$MODE" == "publish-candidate" ]]; then
-    echo "ERROR: stable releases publish from release-package-npm.yml; a local upload needs bun run ship -- ${release_version} --execute --yes --local-publish" >&2
-    exit 1
+  # Refuse before building; publish_missing_artifacts checks again before any upload.
+  if [[ "$PUBLICATION_AUTHORITY" == "local-signed" && "$MODE" == "publish" ]]; then
+    assert_local_upload_allowed
   fi
   if [[ "$PUBLICATION_AUTHORITY" == "github-oidc" ]]; then
     expected_workflow_ref="openscout-app/scout/.github/workflows/release-package-npm.yml@refs/heads/main"
@@ -776,6 +780,9 @@ wait_for_exact_artifact() {
 
 publish_missing_artifacts() {
   local index name version tarball
+  # Promotion and verification of a pair already on npm never reach this point,
+  # so resuming a local release needs no flag; a new local upload does.
+  [[ "$PUBLICATION_AUTHORITY" == "local-signed" ]] && assert_local_upload_allowed
   for index in "${!PUBLISH_PACKAGES[@]}"; do
     if [[ "${PACKAGE_EXISTS[$index]}" == "1" ]]; then
       echo "  ✓ ${PACKAGE_NAMES[$index]}@${PACKAGE_VERSIONS[$index]} already matches ${release_sha}"

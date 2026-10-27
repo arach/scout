@@ -1484,12 +1484,37 @@ for (const initialRelease of ["missing", "draft", "prerelease"]) {
   });
 }
 
+test("a retained bundle with nothing uploaded still needs --local-publish to upload", () => {
+  const { fixture, stateDir } = createLocalReleaseFixture({ initialRelease: "missing" });
+  try {
+    const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes"], {
+      cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only" },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /a local upload needs .*--local-publish/);
+    assert.doesNotMatch(readFileSync(join(stateDir, "mutations.log"), "utf8"), /publish/);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test("a retained bundle whose pair is already on npm resumes without --local-publish", () => {
+  const { fixture, stateDir } = createLocalReleaseFixture({ initialRelease: "missing" });
+  try {
+    writeFileSync(join(stateDir, "protocol-exists"), "");
+    writeFileSync(join(stateDir, "scout-exists"), "");
+    const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes"], {
+      cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only" },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const mutations = readFileSync(join(stateDir, "mutations.log"), "utf8");
+    assert.doesNotMatch(mutations, /^publish /m);
+    assert.match(mutations, /^promote protocol/m);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test("retrying an existing final release preserves its GitHub Latest state", () => {
   const { fixture } = createLocalReleaseFixture({ initialRelease: "final" });
   try {
-    // The retained bundle for this HEAD marks a local release already started,
-    // so resuming it needs no --local-publish.
-    const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes"], {
+    const result = spawnSync(process.execPath, ["scripts/ship-release.mjs", "0.2.99", "--execute", "--yes", "--local-publish"], {
       cwd: fixture, encoding: "utf8", env: { ...registryEnv(fixture), NPM_TOKEN: "test-only", SCOUT_NPM_LOCAL_PUBLISH: "" },
     });
     assert.equal(result.status, 0, result.stderr);
