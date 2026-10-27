@@ -30,7 +30,7 @@ test('TUI-created dev releases are prereleases, stable releases are not', () => 
 });
 test('MCP Registry publication lists stable releases only, through GitHub OIDC and a pinned publisher', () => {
   const source = workflow('publish-mcp-registry');
-  assert.match(source, /release:\s+types: \[published\]/);
+  assert.match(source, /release:\s+types: \[released\]/);
   assert.match(source, /permissions:\s+contents: read\s+id-token: write/);
   assert.match(source, /!github\.event\.release\.prerelease/);
   assert.match(source, /mcp-publisher login github-oidc/);
@@ -42,11 +42,25 @@ test('MCP Registry publication lists stable releases only, through GitHub OIDC a
   const snippet = source.slice(start, source.indexOf('>> "$GITHUB_OUTPUT"\n\n', start) + '>> "$GITHUB_OUTPUT"'.length);
   const dir = mkdtempSync(join(tmpdir(), 'scout-registry-workflow.'));
   try {
-    for (const [tag, publish] of [['v0.4.3', true], ['v1.0.0', true], ['v0.4.3-dev.1', false], ['0.4.3', false], ['v0.4', false]]) {
-      const output = join(dir, tag);
-      const result = spawnSync('bash', ['-c', `set -euo pipefail; TAG="$1"; GITHUB_OUTPUT="$2"; ${snippet}`, '--', tag, output], { encoding: 'utf8' });
+    const cases = [
+      ['v0.4.3', 'released', true], ['v1.0.0', 'released', true],
+      ['v0.4.3', 'a prerelease', false], ['v0.4.3', 'a draft', false], ['v0.4.3', 'missing', false],
+      ['v0.4.3-dev.1', 'released', false], ['0.4.3', 'released', false], ['v0.4', 'released', false],
+    ];
+    for (const [tag, state, publish] of cases) {
+      const output = join(dir, `${tag}-${state}`);
+      const gh = `gh() { [[ "$STATE" != missing ]] || return 1; printf '%s\\n' "$STATE"; }`;
+      const result = spawnSync('bash', ['-c', `set -euo pipefail; ${gh}; TAG="$1"; STATE="$2"; GITHUB_OUTPUT="$3"; GITHUB_REPOSITORY=openscout-app/scout; ${snippet}`, '--', tag, state, output], { encoding: 'utf8' });
       assert.equal(result.status, 0, result.stderr);
-      assert.equal(readFileSync(output, 'utf8').includes('publish=true'), publish, tag);
+      assert.equal(readFileSync(output, 'utf8').includes('publish=true'), publish, `${tag} ${state}`);
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test('the hosted release path dispatches the MCP Registry listing for stable versions', () => {
+  const source = workflow('release-scout-tui');
+  const job = source.slice(source.indexOf('\n  publish:'));
+  assert.match(job, /permissions:\s+actions: write\s+contents: write/);
+  const step = job.slice(job.indexOf('- name: List the release in the MCP Registry'));
+  assert.match(step, /if: \$\{\{ !contains\(needs\.resolve\.outputs\.version, '-'\) \}\}/);
+  assert.match(step, /gh workflow run publish-mcp-registry\.yml --repo "\$GITHUB_REPOSITORY" --ref main -f tag="\$TAG"/);
 });

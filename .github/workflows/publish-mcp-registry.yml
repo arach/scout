@@ -3,14 +3,19 @@ name: Publish MCP Registry
 # Lists each stable Scout release in the official MCP Registry. A registry
 # version names one exact npm version, so every stable release gets its own
 # entry. Dev builds and prereleases stay off the registry.
+#
+# `released` fires for a stable release and for a prerelease promoted to
+# stable; `published` misses the promotion. A release created with
+# github.token starts no workflow, so release-scout-tui.yml dispatches this
+# one for the releases it creates.
 
 on:
   release:
-    types: [published]
+    types: [released]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Published stable tag: vX.Y.Z"
+        description: "Released stable tag: vX.Y.Z"
         required: true
 
 permissions:
@@ -36,11 +41,20 @@ jobs:
         id: release
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.event.release.tag_name }}
         run: |
           set -euo pipefail
           if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "Skipping $TAG: the registry lists stable vX.Y.Z releases only."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A manual run must not list a candidate that is still a prerelease.
+          state=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease \
+            --jq 'if .isDraft then "a draft" elif .isPrerelease then "a prerelease" else "released" end' 2>/dev/null || echo "missing")
+          if [[ "$state" != "released" ]]; then
+            echo "Skipping $TAG: its GitHub release is $state."
             echo "publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi

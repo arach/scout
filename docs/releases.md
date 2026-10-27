@@ -489,12 +489,17 @@ gets its own registry version.
 - `bump-version.mjs` writes the release version into `packages/cli/server.json`,
   both as the server version and in its npm package entry. The ship command
   and the hosted npm workflow refuse a `server.json` that does not match.
-- Publishing a stable GitHub release starts `publish-mcp-registry.yml`. The
-  workflow waits until npm lists the exact version with its `mcpName`, signs in
-  to the registry with GitHub OIDC, and publishes `server.json`. It uses no
-  stored credential.
-- Prereleases and dev versions are skipped. A version that the registry
-  already lists is left unchanged, so a rerun is safe.
+- A stable GitHub release starts `publish-mcp-registry.yml` when it is
+  published or when a candidate prerelease is promoted to stable. The workflow
+  waits until npm lists the exact version with its `mcpName`, signs in to the
+  registry with GitHub OIDC, and publishes `server.json`. It uses no stored
+  credential.
+- The hosted npm path creates its GitHub release in `release-scout-tui.yml`
+  with the workflow token. That token starts no release-event workflow, so the
+  same job dispatches `publish-mcp-registry.yml` for each stable version.
+- Prereleases, drafts and dev versions are skipped, including on a manual run.
+  A version that the registry already lists is left unchanged, so a rerun is
+  safe.
 
 To publish or retry one release by hand:
 
