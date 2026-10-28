@@ -53,3 +53,26 @@ are wrapped as `openscout.repo.response/v1` with `{ operation, value, error,
 daemonVersion }`. Repo jobs are executed per request with no daemon-side TTL or
 snapshot cache; the TypeScript repo-watch/repo-diff job/cache layers remain the
 freshness owners.
+
+## Health sweep (work in progress)
+
+The supervisor samples runtime startup health and filesystem availability every
+30 seconds after a two-minute startup allowance. Projection failures have a
+separate two-minute grace period. Disk-related failures wait for at least 2 GiB
+and 5% free space before one owned-base restart. Other projection errors receive
+at most three restarts with increasing backoff. Five minutes of continuously
+observed readiness replenishes the budget; connection failures do not.
+
+`status --json` exposes `healthSweep`, also persisted as `scoutd-health.json`
+beside daemon state. Each active condition includes `condition`, `cause`,
+`action`, `since`, and `escalated`. Consumers must check `checkedAt` for staleness.
+A confirmed mutation-ready health response clears the projection condition.
+
+The sweep also bounds fixed, Scout-owned base child logs in place, including
+`broker.stdout.log` and `broker.stderr.log`. Existing append descriptors remain
+valid; a bounded tail is retained in `.1`. No recursive home-directory scan or
+user-data deletion is performed.
+
+This is not yet the complete host health contract: operator notification,
+relay/web intent checks, stale lock diagnostics, version-skew checks, temp
+orphan cleanup, and supervisor-loop fault-injection coverage remain pending.

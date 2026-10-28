@@ -1,6 +1,7 @@
 #[cfg(not(unix))]
 compile_error!("scoutd first slice requires a Unix-like platform.");
 
+mod health_sweep;
 mod probes;
 
 use std::collections::HashSet;
@@ -9,6 +10,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
@@ -956,6 +958,9 @@ fn supervise_service_inner(
         }};
     }
     let mut next_process_sweep = clock_now!();
+    let sweep_started = clock_now!();
+    let mut next_health_sweep = sweep_started + START_TIMEOUT;
+    let mut health_sweep = health_sweep::Sweep::default();
 
     loop {
         #[cfg(test)]
@@ -992,6 +997,50 @@ fn supervise_service_inner(
                 }
             }
             next_process_sweep = clock_now!() + PROCESS_SWEEP_INTERVAL;
+        }
+
+        if !testing && clock_now!() >= next_health_sweep {
+            let health = fetch_health(config);
+            let previous = health_sweep.conditions.clone();
+            let restart = health_sweep.observe(
+                started_at_ms + clock_now!().duration_since(sweep_started).as_millis(),
+                health.body.as_deref(),
+                health_sweep::disk_space(&config.support_directory),
+            );
+            for condition in &health_sweep.conditions {
+                if !previous.iter().any(|old| {
+                    old.condition == condition.condition && old.escalated == condition.escalated
+                }) {
+                    eprintln!(
+                        "[scoutd] health sweep: {}: {}; {}",
+                        condition.condition, condition.cause, condition.action
+                    );
+                }
+            }
+            for old in &previous {
+                if !health_sweep
+                    .conditions
+                    .iter()
+                    .any(|c| c.condition == old.condition)
+                {
+                    eprintln!("[scoutd] health sweep: {} recovered", old.condition);
+                }
+            }
+            if let Err(error) = publish_health_sweep(config, &health_sweep) {
+                eprintln!("[scoutd] health sweep state unavailable: {error}");
+            }
+            if let Err(error) = maintain_health_sweep_logs(config) {
+                eprintln!("[scoutd] health sweep log maintenance: {error}");
+            }
+            if restart {
+                // Ownership comes from this retained Child, never a pid file.
+                if let Err(error) =
+                    terminate_child(&mut child, "degraded Bun base", CHILD_SHUTDOWN_TIMEOUT)
+                {
+                    eprintln!("[scoutd] health sweep could not stop owned base child: {error}");
+                }
+            }
+            next_health_sweep = clock_now!() + Duration::from_secs(30);
         }
 
         if let Some(probe) = probe_child.as_mut() {
@@ -1308,6 +1357,30 @@ fn spawn_probe_process(config: &Config) -> Result<Child, String> {
         .map_err(|error| format!("failed to start probe server: {error}"))
 }
 
+fn maintain_health_sweep_logs(config: &Config) -> Result<(), String> {
+    prepare_child_logs_for_spawn(config)?;
+    prepare_probe_logs_for_spawn(config)?;
+    let base_logs = config.support_directory.join("logs/base");
+    // A fixed allowlist, not a recursive walk or a user-supplied glob.
+    for role in [
+        "broker",
+        "pairing",
+        "room-listening",
+        "mdns",
+        "edge",
+        "menu",
+        "mesh-bridge",
+    ] {
+        for stream in ["stdout", "stderr"] {
+            rotate_child_log_if_needed(
+                &base_logs.join(format!("{role}.{stream}.log")),
+                &base_logs,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn prepare_child_logs_for_spawn(config: &Config) -> Result<(), String> {
     rotate_child_log_if_needed(&config.stdout_log_path, &config.logs_directory)?;
     rotate_child_log_if_needed(&config.stderr_log_path, &config.logs_directory)
@@ -1338,43 +1411,92 @@ fn rotate_child_log_if_needed(path: &Path, logs_directory: &Path) -> Result<(), 
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(format!("failed to inspect log {}: {error}", path.display())),
     };
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() || metadata.nlink() != 1
+    {
         return Ok(());
     }
     if metadata.len() <= CHILD_LOG_ROTATE_LIMIT {
         return Ok(());
     }
 
-    let mut file = fs::File::open(path)
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
         .map_err(|error| format!("failed to read log {}: {error}", path.display()))?;
+    let opened = file.metadata().map_err(|error| error.to_string())?;
+    if !opened.is_file()
+        || opened.nlink() != 1
+        || opened.ino() != metadata.ino()
+        || opened.dev() != metadata.dev()
+    {
+        return Ok(());
+    }
     file.seek(SeekFrom::Start(
         metadata.len().saturating_sub(CHILD_LOG_ROTATE_LIMIT),
     ))
     .map_err(|error| format!("failed to seek log {}: {error}", path.display()))?;
     let mut retained_tail = Vec::new();
-    file.read_to_end(&mut retained_tail)
+    (&mut file)
+        .take(CHILD_LOG_ROTATE_LIMIT)
+        .read_to_end(&mut retained_tail)
         .map_err(|error| format!("failed to retain log tail {}: {error}", path.display()))?;
 
     let rotated_path = rotated_child_log_path(path);
-    fs::write(&rotated_path, retained_tail).map_err(|error| {
-        format!(
-            "failed to write rotated log {}: {error}",
-            rotated_path.display()
-        )
-    })?;
-    OpenOptions::new()
+    // Never follow a pre-existing rotation symlink into user data.
+    if let Ok(metadata) = fs::symlink_metadata(&rotated_path) {
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Ok(());
+        }
+    }
+    let mut rotated = OpenOptions::new()
         .write(true)
-        .open(path)
-        .and_then(|file| file.set_len(0))
+        .create(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&rotated_path)
+        .map_err(|error| error.to_string())?;
+    let metadata = rotated.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.nlink() != 1 {
+        return Ok(());
+    }
+    rotated
+        .set_len(0)
+        .and_then(|_| rotated.write_all(&retained_tail))
+        .map_err(|error| {
+            format!(
+                "failed to write rotated log {}: {error}",
+                rotated_path.display()
+            )
+        })?;
+    file.set_len(0)
         .map_err(|error| format!("failed to truncate log {}: {error}", path.display()))
 }
 
 fn scoutd_owned_child_log_path(path: &Path, logs_directory: &Path) -> bool {
-    path.parent() == Some(logs_directory)
-        && matches!(
-            path.file_name().and_then(|name| name.to_str()),
-            Some("stdout.log" | "stderr.log")
-        )
+    if path.parent() != Some(logs_directory) {
+        return false;
+    }
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    if matches!(name, "stdout.log" | "stderr.log") {
+        return true;
+    }
+    logs_directory.file_name().and_then(|n| n.to_str()) == Some("base")
+        && [
+            "broker",
+            "pairing",
+            "room-listening",
+            "mdns",
+            "edge",
+            "menu",
+            "mesh-bridge",
+        ]
+        .iter()
+        .any(|role| name == format!("{role}.stdout.log") || name == format!("{role}.stderr.log"))
 }
 
 fn rotated_child_log_path(path: &Path) -> PathBuf {
@@ -3966,6 +4088,7 @@ fn status_json(status: &ServiceStatus) -> String {
 \"hostInfoPath\":{},\
 \"scoutdStatePath\":{},\
 \"scoutdState\":{},\
+\"healthSweep\":{},\
 \"runtimeFreshness\":{},\
 \"probes\":{}\
 }}",
@@ -4000,9 +4123,46 @@ fn status_json(status: &ServiceStatus) -> String {
         json_string(&status.config.host_info_path.to_string_lossy()),
         json_string(&status.config.daemon_state_path.to_string_lossy()),
         status.daemon_state.as_deref().unwrap_or("null"),
+        health_sweep_json(&status.config),
         serde_json::to_string(&status.runtime_freshness).unwrap_or_else(|_| "null".to_string()),
         serde_json::to_string(&status.probes).unwrap_or_else(|_| "null".to_string()),
     )
+}
+
+fn publish_health_sweep(config: &Config, sweep: &health_sweep::Sweep) -> Result<(), String> {
+    let path = config.runtime_directory.join("scoutd-health.json");
+    let temp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    let bytes = serde_json::to_vec(
+        &serde_json::json!({"checkedAt": epoch_ms(), "conditions": sweep.conditions}),
+    )
+    .map_err(|error| error.to_string())?;
+    // Exclusive creation never follows or truncates an existing temp/lock.
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temp)
+        .map_err(|error| error.to_string())?;
+    let result = file
+        .write_all(&bytes)
+        .and_then(|_| fs::rename(&temp, &path));
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result.map_err(|error| error.to_string())
+}
+
+fn health_sweep_json(config: &Config) -> String {
+    let path = config.runtime_directory.join("scoutd-health.json");
+    fs::File::open(path)
+        .ok()
+        .and_then(|file| {
+            let mut bytes = Vec::new();
+            file.take(64 * 1024).read_to_end(&mut bytes).ok()?;
+            serde_json::from_slice::<serde_json::Value>(&bytes).ok()
+        })
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".into())
 }
 
 fn health_json(health: &HealthStatus) -> String {
@@ -5524,6 +5684,69 @@ mod tests {
         assert!(rotated.len() <= CHILD_LOG_ROTATE_LIMIT as usize);
         assert!(rotated.ends_with(marker));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn health_sweep_rotates_only_base_allowlist_and_preserves_rotation_symlink() {
+        let root = unique_temp_path("health-logs");
+        let dir = root.join("base");
+        fs::create_dir_all(&dir).unwrap();
+        let contents = vec![b'x'; CHILD_LOG_ROTATE_LIMIT as usize + 32];
+        let path = dir.join("broker.stderr.log");
+        fs::write(&path, &contents).unwrap();
+        let user_data = root.join("keep.txt");
+        fs::write(&user_data, "keep").unwrap();
+        std::os::unix::fs::symlink(&user_data, rotated_child_log_path(&path)).unwrap();
+        rotate_child_log_if_needed(&path, &dir).unwrap();
+        assert_eq!(fs::read_to_string(&user_data).unwrap(), "keep");
+        assert_eq!(fs::metadata(&path).unwrap().len(), contents.len() as u64);
+        fs::remove_file(rotated_child_log_path(&path)).unwrap();
+        rotate_child_log_if_needed(&path, &dir).unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().len(), 0);
+        assert!(!scoutd_owned_child_log_path(&dir.join("user.log"), &dir));
+        assert!(!scoutd_owned_child_log_path(
+            &root.join("broker.stderr.log"),
+            &root
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn health_sweep_publication_is_atomic_and_does_not_follow_existing_temp_files() {
+        let root = unique_temp_path("health-publication");
+        fs::create_dir_all(&root).unwrap();
+        let mut config = test_config("/nonexistent-runtime", "/nonexistent-scoutd", "scoutd.test");
+        config.runtime_directory = root.clone();
+        let sweep = super::health_sweep::Sweep::default();
+        super::publish_health_sweep(&config, &sweep).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(&super::health_sweep_json(&config)).unwrap();
+        assert!(value["conditions"].as_array().unwrap().is_empty());
+        let user = root.join("keep.txt");
+        fs::write(&user, "keep").unwrap();
+        let temp = root.join(format!("scoutd-health.json.{}.tmp", std::process::id()));
+        std::os::unix::fs::symlink(&user, temp).unwrap();
+        assert!(super::publish_health_sweep(&config, &sweep).is_err());
+        assert_eq!(fs::read_to_string(user).unwrap(), "keep");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rotation_does_not_truncate_active_symlinks_or_hardlinks() {
+        let root = unique_temp_path("health-log-links");
+        fs::create_dir_all(&root).unwrap();
+        let user = root.join("keep.txt");
+        let contents = vec![b'x'; CHILD_LOG_ROTATE_LIMIT as usize + 32];
+        fs::write(&user, &contents).unwrap();
+        let log = root.join("stderr.log");
+        std::os::unix::fs::symlink(&user, &log).unwrap();
+        rotate_child_log_if_needed(&log, &root).unwrap();
+        assert_eq!(fs::read(&user).unwrap(), contents);
+        fs::remove_file(&log).unwrap();
+        fs::hard_link(&user, &log).unwrap();
+        rotate_child_log_if_needed(&log, &root).unwrap();
+        assert_eq!(fs::read(&user).unwrap(), contents);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
