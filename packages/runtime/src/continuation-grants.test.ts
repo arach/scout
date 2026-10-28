@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setSystemTime, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -167,10 +167,26 @@ describe("continuation grants", () => {
 
   test("simultaneous claims never both win, including across a bucket edge", () => {
     const dir = mkdtempSync(join(tmpdir(), "continuation-claim-race-"));
-    for (let round = 0; round < 50; round += 1) {
-      const key = `race-${round}`;
-      const wins = [claimContinuationActuation(key, 5, dir), claimContinuationActuation(key, 5, dir)];
-      expect(wins.filter(Boolean).length).toBeLessThanOrEqual(1);
+    const ttl = 1_000;
+    // Pinned clock, anchored near real time because pruning reads real file mtimes.
+    const edge = (Math.floor(Date.now() / ttl) + 1) * ttl;
+    const conflicting = [[edge - 1, edge - 1], [edge - 1, edge], [edge - 400, edge + 500], [edge, edge + ttl - 1]];
+    try {
+      for (const [round, [first, second]] of conflicting.entries()) {
+        const key = `race-${round}`;
+        setSystemTime(new Date(first));
+        expect(claimContinuationActuation(key, ttl, dir)).toBe(true);
+        setSystemTime(new Date(second));
+        expect(claimContinuationActuation(key, ttl, dir)).toBe(false);
+      }
+      // Two ttls apart share no bucket, so both claims win.
+      setSystemTime(new Date(edge));
+      expect(claimContinuationActuation("spaced", ttl, dir)).toBe(true);
+      setSystemTime(new Date(edge + 2 * ttl));
+      expect(claimContinuationActuation("spaced", ttl, dir)).toBe(true);
+    } finally {
+      setSystemTime();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
