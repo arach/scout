@@ -867,6 +867,7 @@ const durableRecords = new BrokerDurableRecordStore({
   completionCurrentFlight: id => journal.getCurrentFlightForInvocation(id),
   completionFlight: id => journal.getFlight(id),
   completionInvocation: id => journal.getInvocation(id),
+  authorizeReplyCompletion: (invocation, reply) => externalSessionService.authorizesReplyCompletion(invocation, reply) && t3Service.authorizesReplyCompletion(invocation, reply),
   runtime,
   durableStore,
   knownInvocations,

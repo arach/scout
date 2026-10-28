@@ -31,11 +31,12 @@ function reply(revision = 0, kind: "progress" | "final" = "final", id = `reply-$
     class: "agent", body: "result", policy: "durable", visibility: "private", createdAt: 3,
     metadata: { clientMessageId: id, completionReply: { kind, invocationId: "parent", flightId: "flight-parent", revision } } };
 }
-async function fixture() {
+async function fixture(options: { nodeId?: string; authorize?: (invocation: InvocationRequest, message: MessageRecord) => boolean; mesh?: any } = {}) {
+  const nodeId = options.nodeId ?? "node";
   const directory = await mkdtemp(join(tmpdir(), "scout-explicit-completion-")); dirs.push(directory);
   const path = join(directory, "journal.jsonl");
   let journal = new FileBackedBrokerJournal(path); await journal.load();
-  let runtime = createInMemoryControlRuntime({}, { localNodeId: "node" });
+  let runtime = createInMemoryControlRuntime({}, { localNodeId: nodeId });
   let serial = Promise.resolve(), failApplyParent = false;
   const runWrite = <T>(work: () => Promise<T>): Promise<T> => { const result = serial.then(work); serial = result.then(() => {}, () => {}); return result; };
   const frames: BrokerJournalEntry[][] = [];
@@ -45,7 +46,7 @@ async function fixture() {
   const durableStore = { runWrite, commitEntries, applyProjectedEntries: async () => {} };
   let records: BrokerDurableRecordStore, lifecycle: BrokerFlightLifecycleService, messages: BrokerMessageService;
   function configure() {
-    records = new BrokerDurableRecordStore({ localNodeId: "node", runtime: {
+    records = new BrokerDurableRecordStore({ localNodeId: nodeId, authorizeReplyCompletion: options.authorize, runtime: {
       peek: () => runtime.peek(), planInvocation: request => runtime.planInvocation(request),
       commitInvocation: (request, result) => runtime.commitInvocation(request, result),
       upsertFlight: async (value, options) => { if (failApplyParent && value.id === "flight-parent") { failApplyParent = false; throw new Error("runtime apply failed"); } await runtime.upsertFlight(value, options); },
@@ -56,8 +57,8 @@ async function fixture() {
     lifecycle = new BrokerFlightLifecycleService({ runtime, journal, durableStore, invocationFor: id => journal.getInvocation(id),
       updateDeliveryStatus: async () => {}, updateDeliveryStatusIf: async () => false, promoteInvocationFlightToWork: async () => {},
       maybeForwardFlightToAuthority: async () => {}, isInvocationActive: () => false });
-    messages = new BrokerMessageService({ nodeId: "node", systemActorId: "system", runtime, createId: prefix => prefix,
-      mesh: { authorityNodeForConversation: () => null, forwardConversationMessageToAuthority: async () => { throw new Error("unexpected mesh"); }, forwardPeerBrokerDeliveries: async () => ({}) as any },
+    messages = new BrokerMessageService({ nodeId, authorizeReplyCompletion: options.authorize, systemActorId: "system", runtime, createId: prefix => prefix,
+      mesh: options.mesh ?? { authorityNodeForConversation: () => null, forwardConversationMessageToAuthority: async () => { throw new Error("unexpected mesh"); }, forwardPeerBrokerDeliveries: async () => ({}) as any },
       recordMessage: (message, options) => records.recordMessage(message, options), applyProjectedEntries: async () => {}, reconcileStaleLocalDeliveries: async () => {},
       completionFlight: id => journal.getFlight(id), completionCurrentFlight: id => journal.getCurrentFlightForInvocation(id), persistFlight: lifecycle.recordFlight, persistAcceptedReply: async () => {}, activeLocalEndpointForAgent: () => undefined });
   }
@@ -75,7 +76,7 @@ async function fixture() {
   }
   return { accept, child, frames, get runtime() { return runtime; }, get records() { return records; }, get lifecycle() { return lifecycle; }, get messages() { return messages; }, get journal() { return journal; },
     failParentApply() { failApplyParent = true; },
-    async reopen() { journal = new FileBackedBrokerJournal(path); await journal.load(); runtime = createInMemoryControlRuntime(journal.snapshot(), { localNodeId: "node" }); configure(); },
+    async reopen() { journal = new FileBackedBrokerJournal(path); await journal.load(); runtime = createInMemoryControlRuntime(journal.snapshot(), { localNodeId: nodeId }); configure(); },
   };
 }
 
@@ -204,4 +205,32 @@ test("successor launch overrides are separate from the predecessor route", async
   await ask({ task: { version: 1, continue: "parent", successor: { host: "build-peer", projectPath: "/project" } } });
   expect(successors[0]).toMatchObject({ target: { kind: "project_path", host: "build-peer", projectPath: "/project" },
     execution: { session: "new" }, invocationMetadata: { predecessorTaskId: "parent" } });
+});
+
+
+test.each(["reply", "cancel"])("refused completion does not claim an external task; later %s succeeds", async outcome => {
+  const h = await fixture({ authorize: (_task, message) => message.id.startsWith("external-reply-") });
+  await h.accept(invocation("parent", { completion: undefined, taskVersion: 1 }));
+  await expect(h.messages.postConversationMessage(reply())).rejects.toThrow("completion_reply_not_authorized");
+  expect(h.journal.getCurrentFlightForInvocation("parent")?.metadata?.taskFinalReplyMessageId).toBeUndefined();
+  expect(h.runtime.peek().messages[reply().id]).toBeUndefined();
+  await h.reopen();
+  if (outcome === "reply") {
+    await h.messages.postConversationMessage(reply(0, "final", "external-reply-legitimate"));
+    expect(h.journal.getCurrentFlightForInvocation("parent")).toMatchObject({ state: "completed", metadata: { replyMessageId: "external-reply-legitimate" } });
+  } else {
+    await h.lifecycle.recordFlight({ ...h.journal.getCurrentFlightForInvocation("parent")!, state: "cancelled", completedAt: 4 });
+    expect(h.journal.getCurrentFlightForInvocation("parent")?.state).toBe("cancelled");
+  }
+});
+
+test("a typed final on a pre-upgrade task fences a racing harness result", async () => {
+  const h = await fixture();
+  await h.accept(invocation("parent", { completion: undefined }));
+  await h.records.recordMessage(reply());
+  await h.lifecycle.recordFlight({ ...flight(invocation()), state: "completed", output: "harness result", completedAt: 4 });
+  expect(h.journal.getCurrentFlightForInvocation("parent")).toMatchObject({ state: "running", metadata: { taskFinalReplyMessageId: reply().id } });
+  await h.messages.postConversationMessage(reply());
+  expect(h.journal.getCurrentFlightForInvocation("parent")).toMatchObject({ state: "completed", output: "result", metadata: { replyMessageId: reply().id } });
+  expect(Object.values(h.runtime.peek().messages).filter(m => m.replyToMessageId === "ask-parent")).toHaveLength(1);
 });

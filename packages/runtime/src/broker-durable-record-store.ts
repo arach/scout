@@ -81,6 +81,7 @@ export type BrokerDurableRecordStoreOptions = {
   completionCurrentFlight?: (invocationId: string) => FlightRecord | undefined;
   completionFlight?: (id: string) => FlightRecord | undefined;
   completionInvocation?: (id: string) => InvocationRequest | undefined;
+  authorizeReplyCompletion?: (invocation: InvocationRequest, reply: MessageRecord) => boolean;
   runtime: RuntimeRecordStore;
   durableStore: DurableStore;
   knownInvocations: Map<string, InvocationRequest>;
@@ -692,6 +693,10 @@ export class BrokerDurableRecordStore {
         const task = this.options.completionInvocation?.(typedReply.invocationId) ?? replySnapshot.invocations[typedReply.invocationId];
         const late = task?.metadata?.humanOwned === true && durableReplyFlight.metadata?.operatorOutcome === "proceeded_with_default";
         if (late) message = { ...message, metadata: { ...message.metadata, late: true } };
+        if (typedReply.kind === "final" && task && this.options.authorizeReplyCompletion
+          && !this.options.authorizeReplyCompletion(task, message)) {
+          throw new Error("completion_reply_not_authorized: use the task's correlated session reply address");
+        }
         if (typedReply.kind === "final" && !late && !taskTerminal(durableReplyFlight)) taskEntries.push({ kind: "flight.record", flight: {
           ...durableReplyFlight, metadata: { ...durableReplyFlight.metadata, taskFinalReplyMessageId: message.id,
             taskFinalReplyRevision: typedReply.revision } } });
