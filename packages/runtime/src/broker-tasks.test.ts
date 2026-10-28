@@ -80,7 +80,7 @@ async function fixture(options: { nodeId?: string; authorize?: (invocation: Invo
   };
 }
 
-async function taskFixture(state: FlightRecord["state"] = "running", extra: Record<string, unknown> = {}) {
+async function taskFixture(state: FlightRecord["state"] = "running", extra: Record<string, unknown> = {}, beforePost?: () => Promise<void>) {
   const h = await fixture();
   const request = invocation("parent", { completion: undefined, taskVersion: 1, ...extra });
   await h.accept(request);
@@ -90,7 +90,7 @@ async function taskFixture(state: FlightRecord["state"] = "running", extra: Reco
   let now = 100, interrupts = 0;
   const tasks = new BrokerTaskService({ nodeId: "node", operatorActorId: "operator", snapshot: () => h.runtime.snapshot(),
     invocation: id => h.journal.getInvocation(id), flight: id => h.journal.getFlight(id), currentFlight: id => h.journal.getCurrentFlightForInvocation(id),
-    postMessage: message => h.messages.postConversationMessage(message), recordFlight: (flight, eligible) => h.lifecycle.recordFlight(flight, eligible),
+    postMessage: async message => { await beforePost?.(); return h.messages.postConversationMessage(message); }, recordFlight: (flight, eligible) => h.lifecycle.recordFlight(flight, eligible),
     accept: async input => { successors.push(input); return { accepted: true } as any; },
     interrupt: async () => { interrupts++; return true; }, now: () => now });
   const ask = (patch: any = {}) => tasks.ask({ requestId: "followup", requesterId: "operator", target: { kind: "binding_ref", ref: "parent" },
@@ -157,9 +157,11 @@ test("operator default deadlines recover after restart and later answers are mar
   await answer(); expect(Object.values(h.runtime.peek().messages).some(m => m.metadata?.late === true)).toBe(true);
   expect(h.runtime.flightForInvocation("parent")?.output).toBe("Proceeded with default: staging");
 });
-test("operator tasks expire without default and answer before deadline completes normally", async () => {
+test("blocking operator questions stay open even with legacy deadlines; answers complete normally", async () => {
   const first = await taskFixture("running", { humanOwned: true, operatorAnswerDeadline: 99 });
-  await first.tasks.expireOperatorTasks(); expect(first.h.runtime.flightForInvocation("parent")).toMatchObject({ state: "failed", metadata: { operatorOutcome: "expired" } });
+  await first.tasks.expireOperatorTasks(); expect(first.h.runtime.flightForInvocation("parent")?.state).toBe("running");
+  first.setNow(10_000_000); await first.answer();
+  expect(first.h.runtime.flightForInvocation("parent")?.state).toBe("completed");
   const second = await taskFixture("running", { humanOwned: true, operatorAnswerDeadline: 200 });
   await second.answer(); expect(second.h.runtime.flightForInvocation("parent")).toMatchObject({ state: "completed", metadata: { operatorOutcome: "answered" } });
 });
@@ -267,4 +269,23 @@ test("cross-host successor never borrows a local endpoint project", async () => 
   await h.runtime.upsertEndpoint({ ...endpoint, projectRoot: "/local-only-project" });
   await expect(ask({ task: { version: 1, continue: "parent", successor: { host: "peer" } } })).rejects.toThrow("requires --project");
   expect(successors).toHaveLength(0);
+});
+
+
+test("queued follow-up commits after dispatch's prompt read and is delivered to the running session", async () => {
+  let release!: () => void, entered!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const atPost = new Promise<void>(resolve => { entered = resolve; });
+  const { h, ask } = await taskFixture("queued", {}, async () => { entered(); await gate; });
+  const pending = ask();
+  await atPost;
+  await h.lifecycle.recordFlight({ ...h.runtime.flightForInvocation("parent")!, state: "running" });
+  // Dispatch has already read the prompt, before this message reaches the writer.
+  expect(Object.values(h.runtime.peek().messages).filter(m => m.metadata?.taskFollowup)).toHaveLength(0);
+  release();
+  await pending;
+  const followup = Object.values(h.runtime.peek().messages).find(m => m.metadata?.taskFollowup)!;
+  expect(followup.audience).toMatchObject({ notify: ["worker"] });
+  expect(h.frames.flat().filter(entry => entry.kind === "message.record" && entry.message.id === followup.id))
+    .toMatchObject([{ message: { audience: { notify: ["worker"] } } }]);
 });

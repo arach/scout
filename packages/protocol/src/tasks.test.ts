@@ -20,6 +20,7 @@ test.each([
   [{ ref: "task" }, { execution: true }, "execution flags"],
   [{ fyi: true }, { to: "worker", execution: true }, "execution flags"],
   [{ continue: "task" }, { relation: true }, "--continue-for"],
+  [{ operator: true, window: 10 }, {}, "--default-action"],
   [{ operator: true, window: 0 }, {}, "--window"],
   [{ operator: true, window: NaN }, {}, "--window"],
 ] as const)("invalid ask %# fails before effects", (patch, route, error) => {

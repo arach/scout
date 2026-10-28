@@ -50,7 +50,7 @@ export function validateTaskAsk(task: ScoutTaskAsk, route: {
   if (task.defaultAction && task.options?.length && !task.options.includes(task.defaultAction)) throw new Error("--default-action must be one of the options");
   if ((task.permission || task.because) && !task.operator) throw new Error("--permission and --because require --operator");
   if (route.channel && !task.fyi) throw new Error("--channel requires --fyi until task ownership for channels is defined");
-  if (task.window !== undefined && (!task.operator || task.fyi || !Number.isFinite(task.window) || task.window <= 0)) throw new Error("--window requires an operator task and a positive number of seconds");
+  if (task.window !== undefined && (!task.defaultAction || !task.operator || task.fyi || !Number.isFinite(task.window) || task.window <= 0)) throw new Error("--window requires --default-action and a positive number of seconds");
 }
 export function validateTaskReply(reply: Pick<ScoutTaskReply, "ref" | "to" | "progress" | "failed">): void {
   if (Number(Boolean(reply.ref)) + Number(Boolean(reply.to)) !== 1) throw new Error("reply requires exactly one of --ref <task> or --to <message>");

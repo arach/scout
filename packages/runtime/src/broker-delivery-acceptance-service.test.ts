@@ -1714,3 +1714,26 @@ test("malformed task evidence and conflicting wire routes fail before reservatio
   expect(h.localAgentSyncReasons).toHaveLength(0);
   expect(h.ensuredActors).toHaveLength(0);
 });
+
+
+test.each([
+  { target: { kind: "agent_id" as const, agentId: "agent-1" } },
+  { target: { kind: "agent_label" as const, label: "worker" } },
+  { targetAgentId: "agent-1" },
+  { target: { kind: "agent_label" as const, label: "operator" }, targetAgentId: "agent-1" },
+  {},
+])("operator task requires an operator route before effects %#", async route => {
+  const h = createHarness();
+  await expect(h.service.accept({ ...route, requestId: "wrong-operator", requesterId: "agent-1", body: "Choose", intent: "consult",
+    task: { version: 1, operator: true } })).rejects.toThrow("must target the operator");
+  expect(h.localAgentSyncReasons).toHaveLength(0); expect(h.ensuredActors).toHaveLength(0);
+  expect(h.acceptedInvocations).toHaveLength(0); expect(h.postedMessages).toHaveLength(0);
+});
+
+test("blocking operator questions have no deadline", async () => {
+  const h = createHarness({ isOperatorTarget: () => true, now: 100 });
+  await h.service.accept({ requestId: "blocking", requesterId: "agent-1", body: "Ship?", intent: "consult",
+    target: { kind: "agent_label", label: "operator" }, task: { version: 1, operator: true } });
+  expect(h.acceptedInvocations[0]?.metadata?.humanOwned).toBe(true);
+  expect(h.acceptedInvocations[0]?.metadata?.operatorAnswerDeadline).toBeUndefined();
+});

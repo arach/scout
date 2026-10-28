@@ -40,7 +40,7 @@ export function renderAskCommandHelp(): string {
     "  --operator            human-owned task; notification always requested",
     "  --option <choice>     operator answer choices; repeatable",
     "  --default-action <X>  proceed with X at the answer deadline unless answered",
-    "  --window <seconds>    operator answer window (default 1800 seconds)",
+    "  --window <seconds>    default-action answer window (default 1800 seconds)",
     "  --permission          blocking permission request; --because explains why",
     "  --notify              operator push only; FYIs otherwise do not push",
     "  --image <path>        attach PNG, JPEG, GIF, or WebP evidence",

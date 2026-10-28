@@ -1,3 +1,4 @@
+import { isOperatorDeliveryTarget } from "./broker-conversation-helpers.js";
 import { decodeAttachment, imageMimes, postWithAttachmentsSchema, validateAttachmentBytes } from "./attachment-contract.js";
 import { validateTaskAsk, taskNotificationPolicy, SCOUT_TASKS_CAPABILITY } from "@openscout/protocol";
 import { isExternalSessionEndpoint } from "./external-session-transport.js";
@@ -337,7 +338,7 @@ export class BrokerDeliveryAcceptanceService {
     options: { signal?: AbortSignal; receiptReserved?: boolean; admissionReserved?: boolean } = {},
   ): Promise<ScoutDeliverResponse> {
     throwIfAborted(options.signal);
-    validateTaskDelivery(payload);
+    validateTaskDelivery(payload, this.options.operatorActorId);
     this.options.checkTaskPeer?.(payload);
     validateSessionInputRequest(payload);
     if (payload.sessionDelivery && (!this.options.requestReceipts || !this.options.submitSessionInput || !this.options.upsertSessionInputActor)) {
@@ -754,7 +755,7 @@ export class BrokerDeliveryAcceptanceService {
           conversationId: conversation.id, messageId, ensureAwake: false, stream: false, createdAt,
           collaborationRecordId: work.collaborationRecordId,
           metadata: { ...payload.invocationMetadata, taskVersion: 1, humanOwned: true, taskHomeNodeId: this.options.nodeId,
-            operatorAnswerDeadline: createdAt + (payload.task.window ?? 1800) * 1000,
+            ...(payload.task.defaultAction ? { operatorAnswerDeadline: createdAt + (payload.task.window ?? 1800) * 1000 } : {}),
             defaultAction: payload.task.defaultAction, options: payload.task.options, permission: payload.task.permission,
             because: payload.task.because, notificationPolicy: taskNotificationPolicy(payload.task),
             replyToSessionId, replyMode: payload.invocationMetadata?.replyMode ?? "notify" },
@@ -1407,7 +1408,7 @@ async function firstMatchingMessage(records: Record<string, MessageRecord>, pred
 }
 
 /** Before receipt reservation, route resolution, registration, or delivery. */
-export function validateTaskDelivery(payload: ScoutDeliverRequest): void {
+export function validateTaskDelivery(payload: ScoutDeliverRequest, operatorActorId = "operator"): void {
   const task = payload.task;
   if (!task) return;
   if (payload.image) {
@@ -1417,10 +1418,11 @@ export function validateTaskDelivery(payload: ScoutDeliverRequest): void {
   }
   if ((task.ref || task.continue) && targetIsNotTaskRef(payload.target))
     throw new Error("--ref and --continue cannot be combined with another recipient route");
-  if (task.operator && payload.target && !(
-    payload.target.kind === "agent_id" && payload.target.agentId === "operator"
-    || payload.target.kind === "agent_label" && payload.target.label.replace(/^@/, "") === "operator"))
-    throw new Error("--operator cannot be combined with another recipient route");
+  if (task.operator && (!isOperatorDeliveryTarget(payload, operatorActorId)
+    || (payload.targetAgentId && payload.targetAgentId !== operatorActorId)
+    || (payload.targetLabel && !isOperatorDeliveryTarget({ targetLabel: payload.targetLabel }, operatorActorId))
+    || payload.targetSessionId))
+    throw new Error("--operator must target the operator, not another recipient route");
   if ((payload.completion || payload.relation) && (task.fyi || task.operator || task.ref || task.continue))
     throw new Error("completion contracts require a new agent task");
   if (task.version !== 1 || !payload.requestId?.trim()) throw new Error("task asks require version 1 and a stable requestId");

@@ -175,7 +175,7 @@ export class BrokerTaskService {
     for (const invocation of Object.values(this.options.snapshot().invocations)) {
       const deadline = invocation.metadata?.operatorAnswerDeadline;
       const flight = this.options.currentFlight(invocation.id);
-      if (invocation.metadata?.humanOwned !== true || typeof deadline !== "number" || deadline > this.now() || !flight || taskTerminal(flight)) continue;
+      if (typeof invocation.metadata?.defaultAction !== "string" || invocation.metadata?.humanOwned !== true || typeof deadline !== "number" || deadline > this.now() || !flight || taskTerminal(flight)) continue;
       const action = invocation.metadata?.defaultAction;
       await this.options.recordFlight({ ...flight, state: typeof action === "string" ? "completed" : "failed", completedAt: this.now(),
         output: typeof action === "string" ? `Proceeded with default: ${action}` : undefined,
