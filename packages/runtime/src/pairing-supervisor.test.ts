@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import {
   claimScoutPairingSupervision,
+  isScoutPairingFileFromPreviousBoot,
   readScoutPairingProcessPid,
   readScoutPairingSupervisorIntent,
   releaseScoutPairingSupervision,
@@ -97,5 +98,28 @@ describe("pairing supervision ownership", () => {
     expect(readScoutPairingProcessPid(paths.supervisorPidPath)).toBeNull();
     claimScoutPairingSupervision(process.pid + 1, paths.supervisorPidPath);
     expect(readScoutPairingProcessPid(paths.supervisorPidPath)).toBe(process.pid + 1);
+  });
+
+  test("dates a file against the boot time, with slack for clock steps", () => {
+    const paths = createPaths();
+    writeFileSync(paths.supervisorPidPath, `${process.pid}\n`);
+    const bootTimeMs = 1_800_000_000_000;
+    const setWrittenAt = (ms: number) => utimesSync(paths.supervisorPidPath, ms / 1000, ms / 1000);
+
+    setWrittenAt(bootTimeMs - 31_000);
+    expect(isScoutPairingFileFromPreviousBoot(paths.supervisorPidPath, bootTimeMs)).toBe(true);
+    setWrittenAt(bootTimeMs - 29_000);
+    expect(isScoutPairingFileFromPreviousBoot(paths.supervisorPidPath, bootTimeMs)).toBe(false);
+    setWrittenAt(bootTimeMs + 5_000);
+    expect(isScoutPairingFileFromPreviousBoot(paths.supervisorPidPath, bootTimeMs)).toBe(false);
+  });
+
+  test("counts a file as current when the boot time is unknown or the file is missing", () => {
+    const paths = createPaths();
+    writeFileSync(paths.supervisorPidPath, `${process.pid}\n`);
+    utimesSync(paths.supervisorPidPath, 0, 0);
+
+    expect(isScoutPairingFileFromPreviousBoot(paths.supervisorPidPath, null)).toBe(false);
+    expect(isScoutPairingFileFromPreviousBoot(join(paths.supervisorPidPath, "missing"), 1_800_000_000_000)).toBe(false);
   });
 });

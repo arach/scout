@@ -16,6 +16,7 @@ import {
 import {
   claimScoutPairingSupervision,
   isScoutPairingProcessRunning,
+  readLiveScoutPairingSupervisorPid,
   readScoutPairingProcessPid,
   readScoutPairingSupervisorIntent,
   releaseScoutPairingSupervision,
@@ -885,7 +886,7 @@ function tryClaimPairingSupervision(): boolean {
     claimScoutPairingSupervision(process.pid, pairingPaths.supervisorPidPath);
   } catch (error) {
     if (!pairingClaimRefused) {
-      warn("pairing supervision is owned by another live process; retrying", error instanceof Error ? error.message : String(error));
+      warn("pairing supervision claim refused; retrying", error instanceof Error ? error.message : String(error));
     }
     pairingClaimRefused = true;
     return false;
@@ -897,8 +898,16 @@ function tryClaimPairingSupervision(): boolean {
 }
 
 // Keeps trying the claim, so pairing comes back when a previous owner exits.
+// Re-reads the claim on each tick: when another live process holds it, this
+// base stands down, so two supervisors never run the relay at once.
 function startPairingSupervision(): void {
   pairingReconcileTimer = setInterval(() => {
+    if (
+      pairingSupervisionClaimed
+      && readLiveScoutPairingSupervisorPid(pairingPaths.supervisorPidPath) !== process.pid
+    ) {
+      pairingSupervisionClaimed = false;
+    }
     if (pairingSupervisionClaimed || tryClaimPairingSupervision()) void reconcilePairingController();
   }, PAIRING_RECONCILE_INTERVAL_MS);
   pairingReconcileTimer.unref();

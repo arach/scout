@@ -78,6 +78,31 @@ export function updateScoutPairingSupervisorIntent(
 // Absorbs small clock steps right after boot, so a pid file from this boot still counts.
 const PID_FILE_BOOT_SLACK_MS = 30_000;
 
+function currentBootTimeMs(): number | null {
+  try {
+    const seconds = uptime();
+    return Number.isFinite(seconds) && seconds > 0 ? Date.now() - seconds * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when the file at `path` was last written before this boot. When the boot
+ * time cannot be read, the file counts as current.
+ */
+export function isScoutPairingFileFromPreviousBoot(
+  path: string,
+  bootTimeMs: number | null = currentBootTimeMs(),
+): boolean {
+  if (bootTimeMs === null) return false;
+  try {
+    return statSync(path).mtimeMs < bootTimeMs - PID_FILE_BOOT_SLACK_MS;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The pid recorded at `path`, or null. A file written before this boot names a
  * process that ended with the previous boot, and the pid may now belong to any
@@ -86,8 +111,7 @@ const PID_FILE_BOOT_SLACK_MS = 30_000;
 export function readScoutPairingProcessPid(path: string): number | null {
   if (!existsSync(path)) return null;
   try {
-    const bootTimeMs = Date.now() - uptime() * 1000;
-    if (statSync(path).mtimeMs < bootTimeMs - PID_FILE_BOOT_SLACK_MS) return null;
+    if (isScoutPairingFileFromPreviousBoot(path)) return null;
     const pid = Number.parseInt(readFileSync(path, "utf8").trim(), 10);
     return Number.isInteger(pid) && pid > 0 ? pid : null;
   } catch {
