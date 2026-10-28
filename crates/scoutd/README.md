@@ -54,25 +54,21 @@ daemonVersion }`. Repo jobs are executed per request with no daemon-side TTL or
 snapshot cache; the TypeScript repo-watch/repo-diff job/cache layers remain the
 freshness owners.
 
-## Health sweep (work in progress)
+## Health sweep
 
-The supervisor samples runtime startup health and filesystem availability every
-30 seconds after a two-minute startup allowance. Projection failures have a
-separate two-minute grace period. Disk-related failures wait for at least 2 GiB
-and 5% free space before one owned-base restart. Other projection errors receive
-at most three restarts with increasing backoff. Five minutes of continuously
-observed readiness replenishes the budget; connection failures do not.
+The supervisor samples startup health, filesystem availability, web expectation,
+and pairing intent every 30 seconds. It checks version skew and Scout-owned
+stale files at startup and every 10 minutes. Projection recovery uses bounded
+owned-child restarts. Relay, web, and version conditions are report-only.
 
 `status --json` exposes `healthSweep`, also persisted as `scoutd-health.json`
-beside daemon state. Each active condition includes `condition`, `cause`,
-`action`, `since`, and `escalated`. Consumers must check `checkedAt` for staleness.
-A confirmed mutation-ready health response clears the projection condition.
+beside daemon state. Active conditions include `condition`, `cause`, `action`,
+`since`, `notifiedAt`, and `notifyAfter`. Consumers must check `checkedAt` for
+staleness. A confirmed recovery removes the condition; it sends no notification.
 
-The sweep also bounds fixed, Scout-owned base child logs in place, including
-`broker.stdout.log` and `broker.stderr.log`. Existing append descriptors remain
-valid; a bounded tail is retained in `.1`. No recursive home-directory scan or
-user-data deletion is performed.
+The sweep bounds fixed Scout-owned child logs while their append descriptors
+remain open. It does not walk user directories on the periodic path. Disk
+threshold transitions trigger a bounded inventory of Scout-owned directories.
 
-This is not yet the complete host health contract: operator notification,
-relay/web intent checks, stale lock diagnostics, version-skew checks, temp
-orphan cleanup, and supervisor-loop fault-injection coverage remain pending.
+See [health sweep contract](../../docs/scoutd-health-sweep.md) for thresholds,
+notification durability, cleanup guards, and the isolated recovery smoke test.
