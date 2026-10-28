@@ -61,3 +61,28 @@ test("hosted tier descriptions never point at tools it does not expose", async (
     await server.close();
   }
 });
+
+test("harness tool allowlist and reply prompts only name registered tools", async () => {
+  const { DEFAULT_CLAUDE_SCOUT_ALLOWED_TOOLS, buildAttachedSessionInvocationPrompt } = await import("@openscout/runtime/local-agents");
+  const server = createScoutMcpServer({ defaultCurrentDirectory: "/tmp", env: {} });
+  const client = new Client({ name: "harness-tool-contract", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const registered = new Set((await client.listTools()).tools.map(tool => tool.name));
+    const allowed = DEFAULT_CLAUDE_SCOUT_ALLOWED_TOOLS.filter(name => name.startsWith("mcp__scout__"))
+      .map(name => name.replace("mcp__scout__", ""));
+    expect(allowed).toContain("reply");
+    for (const name of allowed) expect({ name, registered: registered.has(name) }).toEqual({ name, registered: true });
+    for (const metadata of [{}, { completion: { mode: "explicit" } }, { completion: { mode: "explicit" }, completionFlightId: "flight-contract" }]) {
+      const prompt = buildAttachedSessionInvocationPrompt({
+        id: "inv-contract", requesterId: "operator", requesterNodeId: "node", targetAgentId: "worker",
+        action: "consult", task: "Review", conversationId: "conversation", messageId: "request",
+        ensureAwake: true, stream: false, createdAt: 1, metadata,
+      }, "worker");
+      const names = [...prompt.matchAll(/(?:call|Use|Submit|and) `([a-z_]+)`/g)].map(match => match[1]!);
+      expect(names).toContain("reply");
+      for (const name of names) expect({ name, registered: registered.has(name) }).toEqual({ name, registered: true });
+    }
+  } finally { await client.close(); await server.close(); }
+});
