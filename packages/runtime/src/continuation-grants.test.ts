@@ -18,8 +18,8 @@ const pane = {
   herdrSession: "default",
   paneId: "w1:p2",
   terminalId: "term-p2",
-  cwd: "/Users/art/dev/openscout",
-  foregroundCwd: "/Users/art/dev/openscout/packages/web",
+  cwd: "/work/dev/openscout",
+  foregroundCwd: "/work/dev/openscout/packages/web",
 };
 
 const BASH_PERMISSION = `
@@ -72,14 +72,14 @@ describe("continuation grants", () => {
   test("a project grant applies only when every pane directory is inside it", () => {
     const policy = parseContinuationPolicy({
       version: 1,
-      grants: [{ scope: "project", path: "/Users/art/dev/openscout", level: "workspace" }],
+      grants: [{ scope: "project", path: "/work/dev/openscout", level: "workspace" }],
     });
     expect(resolveContinuationGrant(policy, pane).level).toBe("workspace");
-    expect(resolveContinuationGrant(policy, { ...pane, foregroundCwd: "/Users/art/dev/other" }).level).toBe("ask");
+    expect(resolveContinuationGrant(policy, { ...pane, foregroundCwd: "/work/dev/other" }).level).toBe("ask");
     // Sibling prefix is not inside.
     expect(resolveContinuationGrant(policy, {
       ...pane,
-      cwd: "/Users/art/dev/openscout-worktrees/x",
+      cwd: "/work/dev/openscout-worktrees/x",
       foregroundCwd: null,
     }).level).toBe("ask");
     expect(resolveContinuationGrant(policy, { ...pane, cwd: null, foregroundCwd: null }).level).toBe("ask");
@@ -89,8 +89,8 @@ describe("continuation grants", () => {
     const policy = parseContinuationPolicy({
       version: 1,
       grants: [
-        { scope: "project", path: "/Users/art/dev", level: "unattended" },
-        { scope: "project", path: "/Users/art/dev/openscout", level: "ask" },
+        { scope: "project", path: "/work/dev", level: "unattended" },
+        { scope: "project", path: "/work/dev/openscout", level: "ask" },
         { scope: "session", herdrSession: "other", paneId: "w1:p2", level: "silent" },
       ],
     });
@@ -156,13 +156,22 @@ describe("continuation grants", () => {
 
   test("a claim is exclusive until it expires", () => {
     const dir = mkdtempSync(join(tmpdir(), "continuation-claim-"));
-    expect(claimContinuationActuation("default:term-p2:bun test", 30_000, dir)).toBe(true);
-    expect(claimContinuationActuation("default:term-p2:bun test", 30_000, dir)).toBe(false);
-    expect(claimContinuationActuation("default:term-p2:curl", 30_000, dir)).toBe(true);
-    expect(claimContinuationActuation("short", 20, dir)).toBe(true);
-    expect(claimContinuationActuation("short", 20, dir)).toBe(false);
-    Bun.sleepSync(60);
-    expect(claimContinuationActuation("short", 20, dir)).toBe(true);
+    // Pinned clock: on the real clock, a pause longer than the 20 ms ttl lets the
+    // second short claim win. Anchored at real time because pruning reads real file mtimes.
+    const now = Date.now();
+    try {
+      setSystemTime(new Date(now));
+      expect(claimContinuationActuation("default:term-p2:bun test", 30_000, dir)).toBe(true);
+      expect(claimContinuationActuation("default:term-p2:bun test", 30_000, dir)).toBe(false);
+      expect(claimContinuationActuation("default:term-p2:curl", 30_000, dir)).toBe(true);
+      expect(claimContinuationActuation("short", 20, dir)).toBe(true);
+      expect(claimContinuationActuation("short", 20, dir)).toBe(false);
+      setSystemTime(new Date(now + 60));
+      expect(claimContinuationActuation("short", 20, dir)).toBe(true);
+    } finally {
+      setSystemTime();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("simultaneous claims never both win, including across a bucket edge", () => {
