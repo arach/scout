@@ -122,7 +122,7 @@ export class CoreHttpAdapter {
       if (a.sessionId || a.deliveryId || a.replyToken) {
         if (!a.ref || !a.sessionId || !a.deliveryId || a.image)
           throw new Error('external reply requires its exact task and correlated return address');
-        return request('/v1/external-sessions/reply', { ...pick(a, ['sessionId','deliveryId','replyToken','body','ref','progress','failed','attachments']), requestId: a.requestId ?? `reply-${randomUUID()}`, ownerId: senderId });
+        return request('/v1/external-sessions/reply', { ...pick(a, ['sessionId','deliveryId','replyToken','body','ref','progress','failed','attachments']), requestId: a.requestId ?? `external-${createHash("sha256").update(JSON.stringify([a.deliveryId, a.progress ? ["progress", a.body] : ["final"]])).digest("hex")}`, ownerId: senderId });
       }
       const node = await request('/v1/node');
       if (!node.capabilities?.includes(SCOUT_TASKS_CAPABILITY)) throw new Error(`runtime requires ${SCOUT_TASKS_CAPABILITY}`);

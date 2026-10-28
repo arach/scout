@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { validateTaskAsk, validateTaskReply, type ScoutTaskReply } from "@openscout/protocol";
 import { readTaskImage } from "../cli/task-image.ts";
 import { replyToScoutTask } from "../lib/core/broker/service.ts";
@@ -3989,7 +3989,7 @@ export function createScoutMcpServer(options: {
       const ownerId = await resolveMcpSenderId(deps, undefined, options.defaultCurrentDirectory, env);
       const result = await aliasBrokerRequest("/v1/external-sessions/reply", {
         method: "POST", body: JSON.stringify({ ownerId, sessionId, deliveryId, replyToken, body, ref,
-          requestId: requestId ?? `reply-${randomUUID()}`, progress, failed,
+          requestId: requestId ?? `external-${createHash("sha256").update(JSON.stringify([deliveryId, progress ? ["progress", body] : ["final"]])).digest("hex")}`, progress, failed,
           ...(image ? { image: await readTaskImage(resolve(options.defaultCurrentDirectory ?? process.cwd(), image)) } : {}),
           ...(attachments ? { attachments: attachments.map((a, index) => ({ ...a, id: `attachment-${index}` })) } : {}) }),
       });

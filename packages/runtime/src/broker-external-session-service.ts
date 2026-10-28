@@ -327,9 +327,23 @@ export class BrokerExternalSessionService {
             || current.metadata.replyBodyHash !== digest(input.body))) throw new Error("task already has a final reply");
           return { ...current, metadata: { ...current.metadata, taskReplyMessageId: messageId, replyBodyHash: digest(input.body) } };
         });
-        const result = await this.deps.replyTask({ ref: invocation.id, senderId: endpoint.agentId,
-          requestId: input.requestId, body: input.body, progress: input.progress, failed: input.failed,
-          attachments: input.attachments, image: input.image });
+        let result: unknown;
+        try {
+          result = await this.deps.replyTask({ ref: invocation.id, senderId: endpoint.agentId,
+            requestId: input.requestId, body: input.body, progress: input.progress, failed: input.failed,
+            attachments: input.attachments, image: input.image });
+        } catch (error) {
+          const flight = this.deps.flight(invocation.id);
+          // Preserve an observed committed claim after an uncertain apply/ack.
+          // Otherwise a failed write must not own the next final attempt.
+          if (!input.progress && flight?.metadata?.taskFinalReplyMessageId !== messageId
+            && flight?.metadata?.replyMessageId !== messageId) await this.deps.mutateDelivery(delivery.id, current => {
+            if (current.metadata?.taskReplyMessageId !== messageId) return current;
+            const { taskReplyMessageId: _claim, replyBodyHash: _hash, ...metadata } = current.metadata;
+            return { ...current, metadata };
+          });
+          throw error;
+        }
         if (!input.progress) await this.deps.mutateDelivery(delivery.id, current => ({ ...current,
           status: input.failed ? "failed" : "completed", metadata: { ...current.metadata, phase: "replied", replyMessageId: messageId } }));
         return result;

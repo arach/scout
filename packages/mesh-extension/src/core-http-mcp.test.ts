@@ -93,3 +93,11 @@ test('session targets remain exact continuations and work metadata is requester 
   expect(f.calls.at(-1)!.body.collaborationRecordId).not.toBe(a.collaborationRecordId);
   await expect(f.adapter.call('ask',{to:'id:target',body:'work',workItem:{title:'Task',id:'forged'}})).rejects.toThrow('invalid arguments');
 });
+
+test('external HTTP replies derive stable delivery keys and keep progress separate',async()=>{
+  const f=fixture(), args={ref:'task',sessionId:'session',deliveryId:'delivery',body:'done'};
+  await f.adapter.call('reply',args);await f.adapter.call('reply',args);
+  await f.adapter.call('reply',{...args,progress:true});
+  expect(f.calls[0]!.body.requestId).toBe(f.calls[1]!.body.requestId);
+  expect(f.calls[2]!.body.requestId).not.toBe(f.calls[0]!.body.requestId);
+});

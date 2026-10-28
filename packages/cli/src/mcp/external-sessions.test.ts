@@ -30,3 +30,24 @@ test("hosted attachment tools pin authenticated owner and exclude credentials an
     expect(requests).toHaveLength(1);
   } finally { await client.close(); await server.close(); broker.stop(true); }
 });
+
+test("external MCP replies without requestId derive a stable key from delivery, distinct from progress", async () => {
+  const requests: Record<string, unknown>[] = [];
+  const broker = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch(request) {
+    requests.push(await request.json() as Record<string, unknown>); return Response.json({ ok: true });
+  } });
+  const server = createScoutMcpServer({ defaultCurrentDirectory: "/tmp", env: {},
+    dependencies: { resolveSenderId: async () => "owner", resolveBrokerUrl: () => `http://127.0.0.1:${broker.port}` } });
+  const client = new Client({ name: "external-retry", version: "1" });
+  const [a,b] = InMemoryTransport.createLinkedPair();
+  try {
+    await Promise.all([server.connect(b), client.connect(a)]);
+    const args = { ref: "task", sessionId: "session", deliveryId: "delivery", body: "done" };
+    for (const patch of [{}, {}, { progress: true }, { requestId: "caller-key" }]) {
+      expect((await client.callTool({ name: "reply", arguments: { ...args, ...patch } })).isError).not.toBe(true);
+    }
+    expect(requests[0]!.requestId).toBe(requests[1]!.requestId);
+    expect(requests[2]!.requestId).not.toBe(requests[0]!.requestId);
+    expect(requests[3]!.requestId).toBe("caller-key");
+  } finally { await client.close(); await server.close(); broker.stop(true); }
+});

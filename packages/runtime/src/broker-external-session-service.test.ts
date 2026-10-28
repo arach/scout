@@ -345,3 +345,23 @@ test("external reply authorization fails before reserving its final address", as
   await service.reply({ ...input, requestId: "authorized" });
   expect(calls).toHaveLength(1);
 });
+
+test("a failed task image write releases its external reservation for a corrected new request", async () => {
+  const f = fixture();
+  const { invocation, endpoint } = await f.setup();
+  await f.service.dispatch(invocation, endpoint);
+  const { decodeAttachment, validateAttachmentBytes } = await import("./attachment-contract.js");
+  let written = 0;
+  const service = new BrokerExternalSessionService({ ...f.options, replyTask: async input => {
+    if (input.image) validateAttachmentBytes(decodeAttachment(input.image.data), input.image.mediaType);
+    written++; return { ok: true };
+  } });
+  const input = { ...f.taskAddress(), ownerId: "remote-owner", requestId: "bad-image", body: "done",
+    image: { data: Buffer.from("not an image").toString("base64"), mediaType: "image/png" } };
+  await expect(service.reply(input)).rejects.toThrow("attachment_mime_mismatch");
+  expect([...f.deliveries.values()][0]?.metadata?.taskReplyMessageId).toBeUndefined();
+  expect([...f.deliveries.values()][0]?.metadata?.replyBodyHash).toBeUndefined();
+  await service.reply({ ...input, requestId: "corrected-image", image: { ...input.image, data: Buffer.from([137,80,78,71,13,10,26,10]).toString("base64") } });
+  expect(written).toBe(1);
+  expect([...f.deliveries.values()][0]?.status).toBe("completed");
+});
