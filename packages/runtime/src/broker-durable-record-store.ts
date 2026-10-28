@@ -4,7 +4,7 @@ import { assertExplicitReplyAdmission, prepareCompletionAdmission } from "./brok
 import { messageWithAcceptedFlight } from "./broker-delivery-receipt-recovery.js";
 import { ChatQuestionError, transitionChatQuestion } from "./chat-question-transition.js";
 import { clearOperatorTitle, markOperatorTitled } from "./conversation-title.js";
-import { isIdempotentMessageRetry } from "./broker-message-idempotency.js";
+import { isIdempotentMessageRetry, MessageIdConflictError } from "./broker-message-idempotency.js";
 import { isIdempotentInvocationRetry } from "./broker-invocation-idempotency.js";
 import { existingDeliveryWorkItemMatches, type DeliveryWorkItemResolution } from "./broker-work-item-store.js";
 import { readMessageRecord } from "./broker-message-records.js";
@@ -670,7 +670,7 @@ export class BrokerDurableRecordStore {
         const existing = await readMessageRecord(messages, message.id);
         if (existing) {
           if (!isIdempotentMessageRetry(existing, message)) {
-            throw new Error(`message id ${message.id} is already assigned to a different record`);
+            throw new MessageIdConflictError(message.id);
           }
           return { deliveries: [], entries: [], duplicate: existing };
         }

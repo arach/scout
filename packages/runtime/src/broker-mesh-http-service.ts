@@ -1,3 +1,4 @@
+import { MessageIdConflictError } from "./broker-message-idempotency.js";
 import { readRuntimeMessage } from "./broker-message-records.js";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalMessageRecord } from "./message-record-canonical.js";
@@ -114,7 +115,11 @@ export class BrokerMeshHttpService {
       }
 
       if (this.deps.recordAuthorityMessage && !existingMessage?.attachments?.some(a => a.blob)) {
-        const recorded = await this.deps.recordAuthorityMessage(bundle.message);
+        const recorded = await this.deps.recordAuthorityMessage(bundle.message).catch(error => {
+          if (existingMessage && error instanceof MessageIdConflictError)
+            throw new Error(`mesh message ${bundle.message.id} conflicts with existing record`);
+          throw error;
+        });
         const message = recorded.duplicate ?? await readRuntimeMessage(this.deps.runtime, bundle.message.id);
         if (!message) throw new Error(`mesh message ${bundle.message.id} was not committed`);
         return { kind: recorded.duplicate ? "duplicate" as const : "ok" as const,
