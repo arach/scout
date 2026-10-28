@@ -198,3 +198,14 @@ test("a matching alternate-instance artifact dispatches with its selected broker
   expect(broker).not.toBe("http://127.0.0.1:43110"); expect(arg).toBe("status");
   expect(result.events).toEqual(["maintenance", "extension"]);
 });
+
+test("a mistyped command with no route gets unknown-command help, not ask validation", async () => {
+  const f = fixture();
+  const typo = await f.run(["stauts"]);
+  expect(typo.code).toBe(1);
+  expect(typo.stderr).toContain("unknown command: stauts");
+  expect(typo.stderr).toContain("scout status");
+  expect(typo.stderr).not.toContain("exactly one routing mode");
+  const ask = await f.run(["review", "--to", "fixture", "this"]);
+  expect(ask.code).toBe(0); expect(ask.events).toContain("implicit_ask");
+});

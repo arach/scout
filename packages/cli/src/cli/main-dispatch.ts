@@ -90,7 +90,7 @@ async function main() {
 
   if (!registration && (command === "need" || command === "attention")) {
     throw new ScoutCliError(command === "need"
-      ? "scout need has been replaced by scout operator --question <text>"
+      ? "scout need has been replaced by scout ask --operator <text>"
       : "scout attention has been replaced by scout status --all --blocked; use scout diff for repository changes");
   }
   if (!registration || registration.provider === "extension") {
@@ -113,17 +113,17 @@ async function main() {
       throw new ScoutCliError(unknownScoutCommandMessage(command, SCOUT_APP_VERSION));
     }
     const implicitPromptArgs = [command, ...commandArgs];
-    try {
-      const options = parseImplicitAskCommandOptions(implicitPromptArgs, defaultScoutContextDirectory(context));
-      await runAskWithOptions(context, options);
-      exitAfterCompletedCommand("ask");
-      return;
-    } catch (error) {
-      if (error instanceof ScoutCliError && error.message.startsWith("implicit ask requires")) {
-        throw new ScoutCliError(unknownScoutCommandMessage(command, SCOUT_APP_VERSION));
-      }
-      throw error;
+    const routeFlags = ["--to", "--operator", "--channel", "--project", "--ref", "--continue",
+      "--harness", "--runtime", "--profile", "--model", "--effort", "--reasoning-effort", "--session", "--new", "--on", "--host"];
+    const literal = implicitPromptArgs.indexOf("--");
+    const routeArgs = literal < 0 ? implicitPromptArgs : implicitPromptArgs.slice(0, literal);
+    if (!command.startsWith("@") && !routeArgs.some(arg => routeFlags.includes(arg.split("=")[0]!))) {
+      throw new ScoutCliError(unknownScoutCommandMessage(command, SCOUT_APP_VERSION));
     }
+    const options = parseImplicitAskCommandOptions(implicitPromptArgs, defaultScoutContextDirectory(context));
+    await runAskWithOptions(context, options);
+    exitAfterCompletedCommand("ask");
+    return;
   }
 
   if (registration.status === "deprecated" && registration.deprecationMessage) {

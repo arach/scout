@@ -80,7 +80,7 @@ test("implicit positional recipients fail with an explicit route rewrite", () =>
     cwd: packageDirectory, env: isolatedEnvironment(), encoding: "utf8", stdio: "pipe", timeout: 10_000,
   }), error => {
     assert.notEqual(error.status, 0);
-    assert.match(error.stderr.toString(), /positional recipients were removed; use scout ask --to worker news/);
+    assert.match(error.stderr.toString(), /positional recipients were removed; use scout ask --to worker --fyi news/);
     return true;
   });
 });

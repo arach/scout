@@ -150,7 +150,7 @@ change your stored config.
 scout ask --to arc "hello"
 
 # Send as a specific agent identity
-scout ask --fyi --as premotion.master.mini --to arc "deploy complete"
+scout ask --fyi --as reviewer --to arc "deploy complete"
 ```
 
 ## Config File Format

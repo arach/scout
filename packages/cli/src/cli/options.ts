@@ -1,3 +1,4 @@
+import { renderScoutCommand } from "./removed-verbs.ts";
 import { validateTaskAsk, type ScoutTaskAsk } from "@openscout/protocol";
 import { parseSetupCommandOptions as parseLifecycleSetupOptions } from "../../bin/lifecycle-preflight.mjs";
 import { resolve } from "node:path";
@@ -919,6 +920,7 @@ export function parseAskCommandOptions(
   let aliasHost: string | undefined;
   const labels: string[] = [];
   const messageParts: string[] = [];
+  let firstMessageIndex: number | undefined;
 
   for (let index = 0; index < parsed.args.length; index += 1) {
     const current = parsed.args[index] ?? "";
@@ -1129,6 +1131,7 @@ export function parseAskCommandOptions(
       continue;
     }
     if (current.startsWith("-")) throw new ScoutCliError(`unknown flag ${current}; run scout ask --help`);
+    firstMessageIndex ??= index;
     messageParts.push(current);
   }
 
@@ -1160,7 +1163,21 @@ export function parseAskCommandOptions(
   }
   if (!targetLabel && !task.operator && !task.ref && !task.continue && !projectPath && !runtimeProfile && !channel) {
     const positional = message.match(/^@([^\s]+)(?:\s|$)/);
-    if (positional) throw new ScoutCliError(`positional recipients were removed; use scout ask --to ${positional[1]} ${message.slice(positional[0].length).trim()}`);
+    if (positional && firstMessageIndex !== undefined) {
+      // Context-root parsing removes tokens. Map this body token back to the
+      // original argv so the refusal retains every flag, value and literal.
+      let parsedIndex = 0;
+      const rewritten = [...args];
+      for (let index = 0; index < args.length; index++) {
+        if (args[index] === "--context-root") { index++; continue; }
+        if (args[index]!.startsWith("--context-root=")) continue;
+        if (parsedIndex++ !== firstMessageIndex) continue;
+        const rest = args[index]!.slice(positional[1]!.length + 1).trimStart();
+        rewritten.splice(index, 1, "--to", positional[1]!, ...(rest ? [rest] : []));
+        break;
+      }
+      throw new ScoutCliError(`positional recipients were removed; use ${renderScoutCommand("ask", rewritten)}`);
+    }
   }
   validateTaskAsk(task, {
     to: targetLabel ?? undefined, channel,

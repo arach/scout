@@ -149,7 +149,7 @@ export function renderScoutHelp(version = "0.2.19", detail = false, extensions: 
     "",
     "One-to-one delegation:",
     '  scout ask --to hudson "review the parser"      # DM by default; returns on acceptance',
-    '  scout ask --as premotion.master.mini --to hudson "build the editor"',
+    '  scout ask --as reviewer --to hudson "build the editor"',
     "  scout ask --to hudson --prompt-file ./handoff.md",
     "",
     "Project targets:",

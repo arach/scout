@@ -1,7 +1,8 @@
 import { ScoutCliError } from "./errors.ts";
 export const REMOVED_SCOUT_VERBS = ["tell", "send", "operator", "notify", "broadcast", "speak"] as const;
 const quote = (value: string) => /^[a-zA-Z0-9_./:@=-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
-const command = (verb: string, args: string[]) => ["scout", verb, ...args.map(quote)].join(" ");
+export const renderScoutCommand = (verb: string, args: string[]) => ["scout", verb, ...args.map(quote)].join(" ");
+const command = renderScoutCommand;
 /** Tombstones, not aliases: no replacement is ever executed. Preserve caller payload literally. */
 export function removedScoutVerbError(verb: string, original: string[]): ScoutCliError | null {
   if (!REMOVED_SCOUT_VERBS.some(name => name === verb)) return null;

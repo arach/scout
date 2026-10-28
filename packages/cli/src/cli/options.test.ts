@@ -629,7 +629,7 @@ describe("parseImplicitAskCommandOptions", () => {
     expect(parseImplicitAskCommandOptions(args, "/tmp/workspace")).toEqual(parseAskCommandOptions(args, "/tmp/workspace"));
   });
   test("rejects positional recipients with a rewrite, and never extracts body mentions", () => {
-    expect(() => parseImplicitAskCommandOptions(["@worker", "--fyi", "news"], "/tmp/workspace")).toThrow("scout ask --to worker news");
+    expect(() => parseImplicitAskCommandOptions(["@worker", "--fyi", "news"], "/tmp/workspace")).toThrow("scout ask --to worker --fyi news");
     const parsed = parseImplicitAskCommandOptions(["--to", "worker", "hey @other review this"], "/tmp/workspace");
     expect(parsed.targetLabel).toBe("worker");
     expect(parsed.message).toBe("hey @other review this");
@@ -830,4 +830,10 @@ describe("explicit completion ask options", () => {
       .toThrow("mutually exclusive");
     expect(() => parseAskCommandOptions(["--join-to=", "hi"], "/tmp")).toThrow();
   });
+});
+
+
+test("positional route rewrites preserve flags and shell-quote literal payload", () => {
+  expect(() => parseAskCommandOptions(["--as", "sender", "@worker", "--fyi", "--image", "shot.png", "news $HOME"], "/repo"))
+    .toThrow("scout ask --as sender --to worker --fyi --image shot.png 'news $HOME'");
 });
