@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { SCOUT_MCP_CORE_TOOL_CATALOG } from "@openscout/protocol";
+import portableTools from "../../../mesh-extension/src/core-tools.json";
 
 import { createScoutMcpServer } from "./scout-mcp.ts";
 import { SCOUT_MCP_CORE_TOOLS } from "./mesh-bridge.ts";
@@ -24,12 +25,18 @@ test("mcp:core catalog matches the tools the hosted bridge registers", async () 
     expect([...registered.keys()].sort()).toEqual(SCOUT_MCP_CORE_TOOL_CATALOG.map((tool) => tool.name).sort());
     for (const entry of SCOUT_MCP_CORE_TOOL_CATALOG) {
       const tool = registered.get(entry.name)!;
+      const portable = portableTools.find(candidate => candidate.name === entry.name)!;
+      expect(portable.description).toBe(tool.description);
       expect({ name: entry.name, title: tool.title }).toEqual({ name: entry.name, title: entry.title });
       expect({ name: entry.name, readOnly: tool.annotations?.readOnlyHint === true })
         .toEqual({ name: entry.name, readOnly: entry.access === "read" });
       expect(typeof tool.annotations?.destructiveHint).toBe("boolean");
       expect(entry.name.length).toBeLessThanOrEqual(64);
     }
+    const ask = registered.get("ask")!;
+    const portableAsk = portableTools.find(tool => tool.name === "ask")!;
+    expect(ask.inputSchema).toMatchObject({ properties: { on: { description: portableAsk.inputSchema.properties.on.description } } });
+    expect(portableAsk.inputSchema.properties.on.description).toContain("e.g. build-host");
   } finally {
     await client.close();
     await server.close();

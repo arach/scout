@@ -3256,7 +3256,7 @@ function resolveToolCurrentDirectory(
 export const SCOUT_MCP_INSTRUCTIONS = [
   "Scout carries work between agents on this machine and on the operator's other mesh machines.",
   "- Another agent should do something: `ask` (owned work, returns a receipt). An FYI only: `ask` with fyi=true.",
-  "- Work on another machine: `ask` with `on` (the machine, e.g. archie), `projectPath` (the folder on that machine) and `runtime` or `harness`. Scout starts a fresh session there and forwards the ask. Do not ssh in to launch an agent or copy briefs by hand.",
+  "- Work on another machine: `ask` with `on` (the machine, e.g. build-host), `projectPath` (the folder on that machine) and `runtime` or `harness`. Scout starts a fresh session there and forwards the ask. Do not ssh in to launch an agent or copy briefs by hand.",
   "- Which machines exist, what they hold: `hosts_list` (live; each machine's projects and the exact ask for it). Don't know an agent's name: `agents_search`. Never invent names.",
   "- After an ask: the receipt is proof it was accepted; `invocations_wait` / `invocations_get` follow it, including work running on another machine.",
   "- The operator: `ask` with operator=true for a task, fyi=true for news; notify=true requests a push for news.",
@@ -4286,7 +4286,7 @@ export function createScoutMcpServer(options: {
     {
       title: "Search Scout Agents",
       description:
-        "Search the live Scout broker and discovered agent inventory for routing candidates. Use this when the target is unknown or ambiguous, not as a required preflight for every send. When the query names a machine (e.g. archie), the result also says whether that machine answers, its projects, and the `ask` with `on` that starts fresh work there; offline agent cards do not mean the machine is down.",
+        "Search the live Scout broker and discovered agent inventory for routing candidates. Use this when the target is unknown or ambiguous, not as a required preflight for every send. When the query names a machine (e.g. build-host), the result also says whether that machine answers, its projects, and the `ask` with `on` that starts fresh work there; offline agent cards do not mean the machine is down.",
       inputSchema: z.object({
         query: z
           .string()
@@ -4402,7 +4402,7 @@ export function createScoutMcpServer(options: {
           .min(1)
           .optional()
           .describe(
-            "Mesh machine to start the session on (e.g. archie). Requires projectPath, read as a path on that machine (sent as typed, `~` expands there). Starts a fresh session; list machines with whoami or `scout machines`.",
+            "Mesh machine to start the session on (e.g. build-host). Requires projectPath, read as a path on that machine (sent as typed, `~` expands there). Starts a fresh session; list machines with whoami or `scout machines`.",
           ),
         aliasProject: z.string().optional().describe("Explicit project root for a to=alias:<name> target."),
         aliasHost: z.string().optional().describe("Explicit authority node id/name for a to=alias:<name> target."),
