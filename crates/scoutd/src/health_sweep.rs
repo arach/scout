@@ -56,6 +56,11 @@ pub struct Sweep {
     pub conditions: Vec<Condition>,
     attempts: u32,
     next_restart: u128,
+    last_restart: Option<u128>,
+    #[serde(skip)]
+    current_child_started_at: Option<u128>,
+    #[serde(skip)]
+    restart_before_decision: Option<u128>,
     ready_since: Option<u128>,
     last_notifications: std::collections::BTreeMap<String, u128>,
     last_escalation_notifications: std::collections::BTreeMap<String, EscalationNotice>,
@@ -142,10 +147,7 @@ impl Sweep {
             return false;
         }
         self.ready_since = None;
-        let overdue = self.conditions.iter().any(|c| {
-            c.condition == "startup-projection"
-                && now.saturating_sub(c.since) >= PROJECTION_OUTAGE_LIMIT
-        });
+        let overdue = self.projection_outage_due(now);
         if startup
             .and_then(|s| s.get("phase"))
             .and_then(|v| v.as_str())
@@ -192,9 +194,6 @@ impl Sweep {
         );
         if exhausted {
             self.escalate_projection(now, NoticeLevel::Manual, action);
-        } else if overdue && (!disk_failure || space) {
-            self.escalate_projection(now, NoticeLevel::Outage,
-                "Inspect Scout startup and supervisor logs; Scout will continue bounded recovery when possible");
         }
         let since = self
             .conditions
@@ -207,11 +206,35 @@ impl Sweep {
             || now.saturating_sub(since) < GRACE
             || now < self.next_restart
         {
+            if !exhausted && overdue && (!disk_failure || space) {
+                self.escalate_projection(now, NoticeLevel::Outage,
+                    "Inspect Scout startup and supervisor logs; Scout will continue bounded recovery when possible");
+            }
             return false;
         }
+        // Give the successor its own readiness window. Never issue an outage
+        // notice in the same pass that initiates automatic recovery.
+        self.restart_before_decision = self.last_restart;
+        self.last_restart = Some(now);
         self.attempts += 1;
         self.next_restart = now + (GRACE << (self.attempts - 1));
         true
+    }
+    pub fn base_started(&mut self, now: u128) {
+        // Runtime-only: a restored checkpoint cannot know this new child's age.
+        self.current_child_started_at = Some(now);
+    }
+    fn projection_outage_due(&self, now: u128) -> bool {
+        self.conditions
+            .iter()
+            .find(|c| c.condition == "startup-projection")
+            .is_some_and(|c| {
+                let anchor = c
+                    .since
+                    .max(self.last_restart.unwrap_or(0))
+                    .max(self.current_child_started_at.unwrap_or(0));
+                now.saturating_sub(anchor) >= PROJECTION_OUTAGE_LIMIT
+            })
     }
     #[cfg(test)]
     pub fn observe(&mut self, now: u128, health: Option<&str>, disk: Option<(u64, u64)>) -> bool {
@@ -293,13 +316,16 @@ impl Sweep {
     /// A decision is not an attempt until its checkpoint can be published.
     pub fn defer_restart(&mut self, now: u128) {
         self.attempts = self.attempts.saturating_sub(1);
+        self.last_restart = self.restart_before_decision.take();
         self.next_restart = now + GRACE;
     }
     pub fn due_notifications(&self, now: u128) -> Vec<String> {
+        let outage_due = self.projection_outage_due(now);
         self.conditions
             .iter()
             .filter(|c| {
-                c.escalated
+                (c.notice_level != NoticeLevel::Outage || outage_due)
+                    && c.escalated
                     && now >= c.notify_after
                     && (c.notified_at.is_none()
                         || c.notice_level > c.notified_level.unwrap_or_default())
@@ -409,6 +435,57 @@ mod tests {
     const READY: &str = r#"{"startup":{"mutationsAdmitted":true}}"#;
     const SPACE: Option<(u64, u64)> = Some((10 * GIB, 100 * GIB));
     #[test]
+    fn long_disk_full_recovery_is_silent_when_the_late_restart_succeeds() {
+        let mut s = Sweep::default();
+        s.observe(0, Some(FULL), Some((0, 100 * GIB)));
+        s.observe(120_000, Some(FULL), Some((0, 100 * GIB)));
+        s.conditions
+            .iter_mut()
+            .find(|c| c.condition == "startup-projection")
+            .unwrap()
+            .reserve_notice(120_000);
+        assert!(s.observe(660_000, Some(FULL), SPACE));
+        assert!(
+            s.due_notifications(660_000).is_empty(),
+            "starting recovery must not produce an outage notice"
+        );
+        assert!(!s.observe(690_000, None, SPACE));
+        assert!(s.due_notifications(690_000).is_empty());
+        s.observe(720_000, Some(READY), SPACE);
+        assert!(s.conditions.is_empty());
+        assert!(s.due_notifications(720_000).is_empty());
+    }
+    #[test]
+    fn new_child_defers_old_and_already_pending_outage_notices() {
+        for pending_outage in [false, true] {
+            let mut s = Sweep::default();
+            s.observe(0, Some(OTHER), SPACE);
+            assert!(s.observe(120_000, Some(OTHER), SPACE));
+            if pending_outage {
+                s.observe(720_000, None, SPACE);
+                assert_eq!(s.due_notifications(720_000), vec!["startup-projection"]);
+            }
+            let mut s: Sweep = serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
+            s.base_started(900_000);
+            s.observe(900_000, None, SPACE);
+            assert!(s.due_notifications(900_000).is_empty());
+            s.observe(1_499_999, None, SPACE);
+            assert!(s.due_notifications(1_499_999).is_empty());
+            s.observe(1_500_000, None, SPACE);
+            assert_eq!(s.due_notifications(1_500_000), vec!["startup-projection"]);
+        }
+    }
+    #[test]
+    fn failed_restart_checkpoint_does_not_reset_the_outage_deadline() {
+        let mut s = Sweep::default();
+        s.observe(0, Some(OTHER), SPACE);
+        assert!(s.observe(120_000, Some(OTHER), SPACE));
+        s.defer_restart(120_000);
+        s.observe(600_000, None, SPACE);
+        assert_eq!(s.due_notifications(600_000), vec!["startup-projection"]);
+        assert_eq!(s.last_restart, None);
+    }
+    #[test]
     fn projection_outage_escalates_after_ten_minutes_without_a_degraded_sample() {
         for health in [
             None,
@@ -420,19 +497,19 @@ mod tests {
             s.observe(0, Some(OTHER), SPACE);
             assert!(s.observe(120_000, Some(OTHER), SPACE));
             let mut s: Sweep = serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
-            assert!(!s.observe(599_999, health, SPACE));
-            assert!(s.due_notifications(599_999).is_empty());
-            assert!(!s.observe(600_000, health, SPACE));
-            assert_eq!(s.due_notifications(600_000), vec!["startup-projection"]);
+            assert!(!s.observe(719_999, health, SPACE));
+            assert!(s.due_notifications(719_999).is_empty());
+            assert!(!s.observe(720_000, health, SPACE));
+            assert_eq!(s.due_notifications(720_000), vec!["startup-projection"]);
             let c = s
                 .conditions
                 .iter_mut()
                 .find(|c| c.condition == "startup-projection")
                 .unwrap();
             assert!(c.action.contains("Inspect"));
-            c.reserve_notice(600_000);
-            assert!(!s.observe(630_000, health, SPACE));
-            assert!(s.due_notifications(630_000).is_empty());
+            c.reserve_notice(720_000);
+            assert!(!s.observe(750_000, health, SPACE));
+            assert!(s.due_notifications(750_000).is_empty());
         }
     }
     #[test]
@@ -515,15 +592,15 @@ mod tests {
         let mut s = Sweep::default();
         s.observe(0, Some(OTHER), SPACE);
         assert!(s.observe(120_000, Some(OTHER), SPACE));
-        s.observe(600_000, None, SPACE);
+        s.observe(720_000, None, SPACE);
         assert_eq!(s.conditions[0].notice_level, NoticeLevel::Outage);
-        s.conditions[0].reserve_notice(600_000);
-        assert!(s.observe(630_000, Some(OTHER), SPACE));
-        assert!(s.due_notifications(630_000).is_empty());
-        assert!(s.observe(870_000, Some(OTHER), SPACE));
-        assert!(!s.observe(900_000, Some(OTHER), SPACE));
+        s.conditions[0].reserve_notice(720_000);
+        assert!(s.observe(750_000, Some(OTHER), SPACE));
+        assert!(s.due_notifications(750_000).is_empty());
+        assert!(s.observe(990_000, Some(OTHER), SPACE));
+        assert!(!s.observe(1_020_000, Some(OTHER), SPACE));
         assert_eq!(s.conditions[0].notice_level, NoticeLevel::Manual);
-        assert_eq!(s.due_notifications(900_000), vec!["startup-projection"]);
+        assert_eq!(s.due_notifications(1_020_000), vec!["startup-projection"]);
     }
     #[test]
     fn disk_recovery_still_restarts_when_space_returns_after_ten_minutes() {

@@ -11,7 +11,9 @@ A bounded worker collects host observations and delivers notifications. The
 supervisor continues polling its owned children while this work is in progress.
 A result for a replaced base child is discarded. Shutdown cancels spawned probe
 commands and does not wait for the worker thread. A disconnected worker emits
-an explicit diagnostic and is replaced after 30 seconds. Outstanding delivery
+an explicit diagnostic with a failure count. Replacement starts after 30 seconds;
+repeat failures double the delay up to ten minutes. Successful observations
+spanning ten minutes reset the failure count. Outstanding delivery
 reservations are preserved because the failed worker might already have sent
 its notice. The slow-sweep deadline advances only when work is accepted.
 
@@ -19,7 +21,7 @@ its notice. The slow-sweep deadline advances only when work is accepted.
 | --- | --- | --- |
 | Startup projection degraded by SQLITE_FULL, ENOSPC, or equivalent text | 120 seconds | Wait for 2 GiB free space, then restart the owned base child once. |
 | Other startup projection error | 120 seconds | At most three owned-base restarts; subsequent retries wait 120 seconds, then 240 seconds. |
-| Existing projection incident still not mutation-ready | 10 minutes from `since` | Report a persistent outage, including unknown, failed or restoring health. This notice does not spend or replenish the restart budget. |
+| Existing projection incident still not mutation-ready | 10 minutes from the latest of `since`, recovery restart, or current child spawn | Report a persistent outage, including unknown, failed or restoring health. This notice does not spend or replenish the restart budget. |
 | Disk below max(2 GiB, min(5%, 10 GiB)) free | 60 seconds | Report low space and Scout's top three observed consumers. |
 | Disk below max(1 GiB, min(2%, 2 GiB)) free | 60 seconds | Mark the same disk condition critical and refresh its consumer inventory. |
 | Web expected but not running | 90 seconds | Report the cause. Never start or restart web from scoutd. |
@@ -92,9 +94,12 @@ must treat old `checkedAt` values as stale evidence, not as recovery.
 After a condition's grace, scoutd persists `notifiedAt` before dispatch.
 Startup projection notices also require escalation: the restart budget must be
 exhausted, a disk-related restart must be waiting for space, or an unresolved
-incident must reach ten minutes without mutation readiness. Missing health and
-other startup phases cannot suppress that deadline. A first restart that
-restores readiness within the deadline remains silent. At most one notification
+incident must reach ten minutes without mutation readiness after the latest of
+its original `since`, a recovery restart, or the current child's spawn. Missing
+health and other startup phases cannot suppress that deadline. A pass that
+issues a restart never adds an outage notice. The new child receives its own
+ten-minute readiness window, including after scoutd loads an old checkpoint.
+A restart that restores readiness within that window remains silent. At most one notification
 is queued per pass.
 
 The reservation includes the notice level. An outage or manual-repair escalation
@@ -157,7 +162,9 @@ The regular sweep rotates fixed Scout-owned child log names. A bounded tail is
 retained in `.1`, then the active append inode is truncated. Sweep and spawn-time
 rotators use the same nonblocking advisory lock on that inode. A competing
 rotator skips the pass rather than blocking or overwriting the retained tail;
-append writers do not need to take the lock. Symlinks and
+append writers do not need to take the lock. If advisory locking is unavailable,
+scoutd logs that once and falls back to the previous unlocked rotation. The
+ownership, inode, link and symlink guards still apply. Symlinks and
 multiply linked files are not truncated. Rotation occurs before notification
 state writes so that reclaimable log space can support diagnosis. If ENOSPC or
 EDQUOT prevents a snapshot, scoutd can discard the owned active log to reclaim

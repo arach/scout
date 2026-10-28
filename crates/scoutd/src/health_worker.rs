@@ -8,7 +8,46 @@ use super::{
 use std::{
     sync::mpsc::{self, Receiver, SyncSender},
     thread,
+    time::{Duration, Instant},
 };
+
+const WORKER_RETRY_MIN: Duration = Duration::from_secs(30);
+const WORKER_RETRY_MAX: Duration = Duration::from_secs(600);
+pub struct RestartBackoff {
+    pub failures: u32,
+    retry_at: Instant,
+    healthy_since: Option<Instant>,
+}
+impl RestartBackoff {
+    pub fn new(now: Instant) -> Self {
+        Self {
+            failures: 0,
+            retry_at: now,
+            healthy_since: None,
+        }
+    }
+    pub fn failed(&mut self, now: Instant) -> Duration {
+        self.failures = self.failures.saturating_add(1);
+        self.healthy_since = None;
+        let delay = (WORKER_RETRY_MIN * (1 << self.failures.saturating_sub(1).min(5)))
+            .min(WORKER_RETRY_MAX);
+        self.retry_at = now + delay;
+        delay
+    }
+    pub fn due(&self, now: Instant) -> bool {
+        now >= self.retry_at
+    }
+    pub fn started(&mut self) {
+        self.healthy_since = None;
+    }
+    pub fn observed(&mut self, now: Instant) {
+        // One successful job between deterministic panics is not recovery.
+        let since = *self.healthy_since.get_or_insert(now);
+        if now.duration_since(since) >= WORKER_RETRY_MAX {
+            self.failures = 0;
+        }
+    }
+}
 
 pub enum Job {
     Observe {
@@ -158,6 +197,27 @@ impl Worker {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+    #[test]
+    fn repeated_worker_failures_back_off_even_with_brief_successes() {
+        let mut now = Instant::now();
+        let mut backoff = RestartBackoff::new(now);
+        for (index, seconds) in [30, 60, 120, 240, 480, 600, 600].into_iter().enumerate() {
+            assert_eq!(backoff.failed(now), Duration::from_secs(seconds));
+            assert_eq!(backoff.failures, index as u32 + 1);
+            assert!(!backoff.due(now + Duration::from_secs(seconds - 1)));
+            now += Duration::from_secs(seconds);
+            assert!(backoff.due(now));
+            backoff.started();
+            backoff.observed(now + Duration::from_secs(1));
+            assert_eq!(backoff.failures, index as u32 + 1);
+        }
+        backoff.observed(now + WORKER_RETRY_MAX + Duration::from_secs(1));
+        assert_eq!(backoff.failures, 0);
+        assert_eq!(
+            backoff.failed(now + WORKER_RETRY_MAX + Duration::from_secs(1)),
+            WORKER_RETRY_MIN
+        );
+    }
     #[test]
     fn disconnected_worker_is_not_an_empty_channel_and_a_replacement_can_observe() {
         let mut worker = Worker::start_with(|_| panic!("injected health worker failure")).unwrap();

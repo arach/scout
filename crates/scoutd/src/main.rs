@@ -880,6 +880,8 @@ fn supervise_service_inner(
         }
     };
 
+    let base_spawned_at_ms = if testing { started_at_ms } else { epoch_ms() };
+
     let mut probe_restart_count = 0_u32;
     let mut probe_restart_delay = RESTART_MIN_DELAY;
     let mut last_probe_exit: Option<ChildExitTelemetry> = None;
@@ -981,8 +983,17 @@ fn supervise_service_inner(
     } else {
         health_worker::Worker::start(config.clone())
     };
-    let mut next_health_worker_start = clock_now!() + Duration::from_secs(30);
+    let mut health_worker_backoff = health_worker::RestartBackoff::new(clock_now!());
+    if !testing && health_worker.is_none() {
+        let delay = health_worker_backoff.failed(clock_now!());
+        eprintln!(
+            "[scoutd] health worker start failed #{}; retry in {}s",
+            health_worker_backoff.failures,
+            delay.as_secs()
+        );
+    }
     let mut health_sweep = load_health_sweep(config).unwrap_or_default();
+    health_sweep.base_started(base_spawned_at_ms);
     if !testing {
         prepare_health_reserve(config);
     }
@@ -1024,11 +1035,18 @@ fn supervise_service_inner(
             next_process_sweep = clock_now!() + PROCESS_SWEEP_INTERVAL;
         }
 
-        if !testing && health_worker.is_none() && clock_now!() >= next_health_worker_start {
+        if !testing && health_worker.is_none() && health_worker_backoff.due(clock_now!()) {
             health_worker = health_worker::Worker::start(config.clone());
-            next_health_worker_start = clock_now!() + Duration::from_secs(30);
             if health_worker.is_some() {
+                health_worker_backoff.started();
                 next_health_sweep = clock_now!();
+            } else {
+                let delay = health_worker_backoff.failed(clock_now!());
+                eprintln!(
+                    "[scoutd] health worker start failed #{}; retry in {}s",
+                    health_worker_backoff.failures,
+                    delay.as_secs()
+                );
             }
         }
         let mut collected = None;
@@ -1041,6 +1059,7 @@ fn supervise_service_inner(
                         observation,
                         base_pid,
                     } => {
+                        health_worker_backoff.observed(clock_now!());
                         if base_pid == child.id() {
                             collected = Some(observation);
                         }
@@ -1077,9 +1096,9 @@ fn supervise_service_inner(
                     .sweep_actions
                     .push((hooks.ticks, "worker-disconnected".into()));
             }
-            eprintln!("[scoutd] health worker disconnected; restarting in 30s; delivery reservations preserved");
+            let delay = health_worker_backoff.failed(clock_now!());
+            eprintln!("[scoutd] health worker disconnected #{}; restarting in {}s; delivery reservations preserved", health_worker_backoff.failures, delay.as_secs());
             health_worker = None;
-            next_health_worker_start = clock_now!() + Duration::from_secs(30);
             // Lost observations must not consume the next slow sweep.
             next_slow_sweep = clock_now!();
         }
@@ -1313,6 +1332,7 @@ fn supervise_service_inner(
                 restart_delay = doubled_delay(restart_delay);
                 runtime_build = configured_runtime_artifact(config);
                 child = spawn_base_process(config)?;
+                health_sweep.base_started(epoch_ms());
                 refresh_state!(
                     "base-started",
                     write_state!(
@@ -1597,6 +1617,37 @@ fn open_child_log(path: &Path) -> Result<fs::File, String> {
 }
 
 fn rotate_child_log_if_needed(path: &Path, logs_directory: &Path) -> Result<(), String> {
+    rotate_child_log_with_guard(path, logs_directory, |file| {
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    })
+}
+fn rotation_guard_allows(
+    result: io::Result<()>,
+    warned: &AtomicBool,
+    warn_unavailable: impl FnOnce(&io::Error),
+) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => false,
+        Err(error) => {
+            // Advisory locking is optional; preserve the pre-lock rotation
+            // behavior on filesystems that cannot provide it.
+            if !warned.swap(true, Ordering::Relaxed) {
+                warn_unavailable(&error);
+            }
+            true
+        }
+    }
+}
+fn rotate_child_log_with_guard(
+    path: &Path,
+    logs_directory: &Path,
+    lock: impl FnOnce(&fs::File) -> io::Result<()>,
+) -> Result<(), String> {
     if !scoutd_owned_child_log_path(path, logs_directory) {
         return Ok(());
     }
@@ -1630,11 +1681,10 @@ fn rotate_child_log_if_needed(path: &Path, logs_directory: &Path) -> Result<(), 
     }
     // Spawn-time rotation and the sweep share this nonblocking inode guard.
     // Append writers do not take it; only competing rotators are excluded.
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::WouldBlock {
-            eprintln!("[scoutd] log rotation guard unavailable; preserving log: {error}");
-        }
+    static UNAVAILABLE_WARNING: AtomicBool = AtomicBool::new(false);
+    if !rotation_guard_allows(lock(&file), &UNAVAILABLE_WARNING, |error| {
+        eprintln!("[scoutd] advisory log locking unavailable; rotating without a lock: {error}");
+    }) {
         return Ok(());
     }
     let current_len = file.metadata().map_err(|error| error.to_string())?.len();
@@ -5001,6 +5051,57 @@ mod tests {
     }
 
     #[test]
+    fn sweep_loop_long_disk_latch_recovers_without_an_outage_notice() {
+        use super::health_sweep::Observation;
+        let low = Observation {
+            health: Some(r#"{"startup":{"phase":"degraded","error":"SQLITE_FULL"}}"#.into()),
+            disk: Some((0, 100 << 30)),
+            ..Observation::default()
+        };
+        let freed = Observation {
+            disk: Some((10 << 30, 100 << 30)),
+            ..low.clone()
+        };
+        let booting = Observation {
+            disk: freed.disk,
+            ..Observation::default()
+        };
+        let ready = Observation {
+            health: Some(r#"{"startup":{"mutationsAdmitted":true}}"#.into()),
+            ..booting.clone()
+        };
+        let hooks = run_sweep_loop(
+            vec![(0, low), (6600, freed), (6900, booting), (7200, ready)],
+            7501,
+            None,
+        );
+        assert_eq!(
+            hooks.sweep_actions,
+            vec![
+                (600, "notify:local:disk".into()),
+                (1200, "notify:local:startup-projection".into()),
+                (6600, "restart-base".into())
+            ]
+        );
+        assert!(hooks.sweep_states.last().unwrap().1.is_empty());
+    }
+    #[test]
+    fn sweep_loop_gives_a_new_child_time_to_boot_with_an_old_checkpoint() {
+        use super::health_sweep::{Observation, Sweep};
+        let mut prior = Sweep::default();
+        prior.observe(
+            super::epoch_ms() - 1_200_000,
+            Some(r#"{"startup":{"phase":"degraded","error":"schema failed"}}"#),
+            None,
+        );
+        let hooks = run_sweep_loop(vec![(0, Observation::default())], 6301, Some(prior));
+        assert_eq!(
+            hooks.sweep_actions,
+            vec![(6000, "notify:local:startup-projection".into())]
+        );
+    }
+
+    #[test]
     fn sweep_loop_reports_an_unready_successor_after_ten_minutes() {
         use super::health_sweep::Observation;
         let broken = Observation {
@@ -5009,14 +5110,14 @@ mod tests {
         };
         let hooks = run_sweep_loop(
             vec![(0, broken), (1300, Observation::default())],
-            6301,
+            7501,
             None,
         );
         assert_eq!(
             hooks.sweep_actions,
             vec![
                 (1200, "restart-base".into()),
-                (6000, "notify:local:startup-projection".into())
+                (7200, "notify:local:startup-projection".into())
             ]
         );
     }
@@ -6436,6 +6537,39 @@ mod tests {
         assert!(rotated.len() <= CHILD_LOG_ROTATE_LIMIT as usize);
         assert!(rotated.ends_with(marker));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unsupported_rotation_locks_warn_once_and_allow_the_existing_rotation_path() {
+        let warned = std::sync::atomic::AtomicBool::new(false);
+        let count = std::cell::Cell::new(0);
+        for code in [libc::ENOTSUP, libc::EOPNOTSUPP, libc::ENOSYS, libc::EINVAL] {
+            assert!(super::rotation_guard_allows(
+                Err(std::io::Error::from_raw_os_error(code)),
+                &warned,
+                |_| count.set(count.get() + 1)
+            ));
+        }
+        assert_eq!(count.get(), 1);
+        assert!(!super::rotation_guard_allows(
+            Err(std::io::Error::from_raw_os_error(libc::EWOULDBLOCK)),
+            &warned,
+            |_| panic!("contention is not an unsupported lock")
+        ));
+        let root = unique_temp_path("health-unsupported-lock");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("stdout.log");
+        fs::write(&path, vec![b'x'; (CHILD_LOG_ROTATE_LIMIT * 2) as usize]).unwrap();
+        super::rotate_child_log_with_guard(&path, &root, |_| {
+            Err(std::io::Error::from_raw_os_error(libc::ENOTSUP))
+        })
+        .unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().len(), 0);
+        assert_eq!(
+            fs::read(rotated_child_log_path(&path)).unwrap(),
+            vec![b'x'; CHILD_LOG_ROTATE_LIMIT as usize]
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
