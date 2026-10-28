@@ -80,7 +80,7 @@ test("harness tool allowlist and reply prompts only name registered tools", asyn
         action: "consult", task: "Review", conversationId: "conversation", messageId: "request",
         ensureAwake: true, stream: false, createdAt: 1, metadata,
       }, "worker");
-      const names = [...prompt.matchAll(/(?:call|Use|Submit|and) `([a-z_]+)`/g)].map(match => match[1]!);
+      const names = [...prompt.matchAll(/(?:call|Use|Submit|and) `([a-z_]+)`/gi)].map(match => match[1]!);
       expect(names).toContain("reply");
       for (const name of names) expect({ name, registered: registered.has(name) }).toEqual({ name, registered: true });
     }
