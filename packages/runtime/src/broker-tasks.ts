@@ -20,6 +20,7 @@ export type BrokerTaskServiceOptions = {
   invocation: (id: string) => InvocationRequest | undefined;
   flight: (id: string) => FlightRecord | undefined;
   currentFlight: (invocationId: string) => FlightRecord | undefined;
+  openOperatorTasks: () => Iterable<InvocationRequest>;
   postMessage: (message: MessageRecord) => Promise<unknown>;
   withTaskImage?: <T>(message: MessageRecord, image: NonNullable<ScoutTaskReply["image"]>, commit: () => Promise<T>) => Promise<T>;
   recordFlight: (flight: FlightRecord, eligible?: () => boolean) => Promise<void>;
@@ -172,7 +173,7 @@ export class BrokerTaskService {
   }
   /** Derived deadlines survive daemon restart; callers run this on startup and periodically. */
   async expireOperatorTasks(): Promise<void> {
-    for (const invocation of Object.values(this.options.snapshot().invocations)) {
+    for (const invocation of this.options.openOperatorTasks()) {
       const deadline = invocation.metadata?.operatorAnswerDeadline;
       const flight = this.options.currentFlight(invocation.id);
       if (typeof invocation.metadata?.defaultAction !== "string" || invocation.metadata?.humanOwned !== true || typeof deadline !== "number" || deadline > this.now() || !flight || taskTerminal(flight)) continue;

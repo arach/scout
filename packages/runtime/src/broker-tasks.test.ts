@@ -89,6 +89,7 @@ async function taskFixture(state: FlightRecord["state"] = "running", extra: Reco
   const successors: any[] = [];
   let now = 100, interrupts = 0;
   const tasks = new BrokerTaskService({ nodeId: "node", operatorActorId: "operator", snapshot: () => h.runtime.snapshot(),
+    openOperatorTasks: () => h.journal.openOperatorTasks(),
     invocation: id => h.journal.getInvocation(id), flight: id => h.journal.getFlight(id), currentFlight: id => h.journal.getCurrentFlightForInvocation(id),
     postMessage: async message => { await beforePost?.(); return h.messages.postConversationMessage(message); }, recordFlight: (flight, eligible) => h.lifecycle.recordFlight(flight, eligible),
     accept: async input => { successors.push(input); return { accepted: true } as any; },
@@ -288,4 +289,22 @@ test("queued follow-up commits after dispatch's prompt read and is delivered to 
   expect(followup.audience).toMatchObject({ notify: ["worker"] });
   expect(h.frames.flat().filter(entry => entry.kind === "message.record" && entry.message.id === followup.id))
     .toMatchObject([{ message: { audience: { notify: ["worker"] } } }]);
+});
+
+test("operator expiry reads only the open-task index, never a registry snapshot", async () => {
+  const request = invocation("default", { humanOwned: true, defaultAction: "staging", operatorAnswerDeadline: 100 });
+  let current: FlightRecord = flight(request), reads = 0;
+  const tasks = new BrokerTaskService({ nodeId: "node", operatorActorId: "operator",
+    snapshot: () => { throw new Error("expiry scanned registry"); },
+    invocation: () => { throw new Error("expiry read historical invocation"); }, flight: () => undefined,
+    currentFlight: () => { reads++; return current; },
+    openOperatorTasks: () => current.state === "running" ? [request] : [],
+    recordFlight: async value => { current = value; }, now: () => 200,
+    postMessage: async () => {}, accept: async () => ({ accepted: true } as any),
+  });
+  await tasks.expireOperatorTasks();
+  expect(current.state).toBe("completed");
+  const after = reads;
+  for (let i = 0; i < 10; i++) await tasks.expireOperatorTasks();
+  expect(reads).toBe(after);
 });

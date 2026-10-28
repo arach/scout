@@ -1,7 +1,6 @@
 import { withManagedPermissionContext } from "./managed-permission.js";
 import { redactSecrets } from "@openscout/agent-sessions/secret-redaction";
 import { isCodexAppServerControlError } from "@openscout/agent-sessions/local";
-import { iterateMessageRecordsAsync } from "./broker-message-records.js";
 import { readRuntimeMessage } from "./broker-message-records.js";
 import {
   buildScoutReturnAddress,
@@ -174,6 +173,7 @@ async function invocationWithOriginatingMessageAttachments(
 }
 
 export type BrokerLocalInvocationServiceOptions = {
+  pendingTaskFollowups?: (invocationId: string) => Promise<MessageRecord[]>;
   nodeId: string;
   runtime: LocalInvocationRuntime;
   endpointResolver: LocalInvocationEndpointResolver;
@@ -511,7 +511,7 @@ export class BrokerLocalInvocationService {
       let invocationWithAttachments = await invocationWithOriginatingMessageAttachments(invocation, this.options.runtime);
       const followups: string[] = [];
       const evidence: unknown[] = [...((invocationWithAttachments.context?.[SCOUT_MESSAGE_ATTACHMENTS_CONTEXT_KEY] as unknown[] | undefined) ?? [])];
-      for await (const message of iterateMessageRecordsAsync(this.options.runtime.snapshot().messages, { stream: true, selection: { replyToMessageId: invocation.messageId } })) {
+      for (const message of await this.options.pendingTaskFollowups?.(invocation.id) ?? []) {
         const followup = message.metadata?.taskFollowup as { invocationId?: string; cancel?: boolean } | undefined;
         if (followup?.invocationId === invocation.id && !followup.cancel) {
           followups.push(message.body);

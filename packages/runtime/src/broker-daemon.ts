@@ -867,7 +867,7 @@ const durableRecords = new BrokerDurableRecordStore({
   completionCurrentFlight: id => journal.getCurrentFlightForInvocation(id),
   completionFlight: id => journal.getFlight(id),
   completionInvocation: id => journal.getInvocation(id),
-  authorizeReplyCompletion: (invocation, reply) => externalSessionService.authorizesReplyCompletion(invocation, reply) && t3Service.authorizesReplyCompletion(invocation, reply),
+  authorizeReplyCompletion: (invocation, reply): boolean => externalSessionService.authorizesReplyCompletion(invocation, reply) && t3Service.authorizesReplyCompletion(invocation, reply),
   runtime,
   durableStore,
   knownInvocations,
@@ -2025,7 +2025,7 @@ const messageService = new BrokerMessageService({
   }),
   completionCurrentFlight: id => journal.getCurrentFlightForInvocation(id),
   completionFlight: id => journal.getFlight(id),
-  authorizeReplyCompletion: (invocation, reply) => externalSessionService.authorizesReplyCompletion(invocation, reply) && t3Service.authorizesReplyCompletion(invocation, reply),
+  authorizeReplyCompletion: (invocation, reply): boolean => externalSessionService.authorizesReplyCompletion(invocation, reply) && t3Service.authorizesReplyCompletion(invocation, reply),
   activeLocalEndpointForAgent: (agentId) => localEndpointResolver.activeLocalEndpointForAgent(agentId),
 });
 
@@ -2202,6 +2202,7 @@ function recoverInvocationResultReplies(): void {
 }
 
 const localInvocationService = new BrokerLocalInvocationService({
+  pendingTaskFollowups: id => journal.pendingTaskFollowups(id),
   nodeId,
   isLocalAgentEndpointAlive,
   runtime,
@@ -2956,7 +2957,8 @@ const unavailableTargetService = new BrokerUnavailableTargetService({
 
 const requestReceipts = new BrokerRequestReceipts();
 const taskService = new BrokerTaskService({
-  nodeId, operatorActorId, snapshot: () => runtime.snapshot(),
+  nodeId, operatorActorId, snapshot: () => runtime.peek(),
+  openOperatorTasks: () => journal.openOperatorTasks(),
   invocation: id => knownInvocations.get(id) ?? journal.getInvocation(id),
   flight: id => journal.getFlight(id), currentFlight: id => journal.getCurrentFlightForInvocation(id),
   postMessage: postConversationMessage, recordFlight: persistFlight,
