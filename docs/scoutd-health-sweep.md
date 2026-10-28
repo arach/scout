@@ -21,7 +21,7 @@ its notice. The slow-sweep deadline advances only when work is accepted.
 | --- | --- | --- |
 | Startup projection degraded by SQLITE_FULL, ENOSPC, or equivalent text | 120 seconds | Wait for 2 GiB free space, then restart the owned base child once. |
 | Other startup projection error | 120 seconds | At most three owned-base restarts; subsequent retries wait 120 seconds, then 240 seconds. |
-| Existing projection incident still not mutation-ready | 10 minutes from the latest of `since`, recovery restart, or current child spawn | Report a persistent outage, including unknown, failed or restoring health. This notice does not spend or replenish the restart budget. |
+| Existing projection incident still not mutation-ready | 10 minutes from the latest of `since`, sweep recovery restart, or the initial child spawn in this supervisor lifetime | Report a persistent outage, including unknown, failed or restoring health. A disk latch waiting for space keeps its free-space notice instead. This notice does not spend or replenish the restart budget. |
 | Disk below max(2 GiB, min(5%, 10 GiB)) free | 60 seconds | Report low space and Scout's top three observed consumers. |
 | Disk below max(1 GiB, min(2%, 2 GiB)) free | 60 seconds | Mark the same disk condition critical and refresh its consumer inventory. |
 | Web expected but not running | 90 seconds | Report the cause. Never start or restart web from scoutd. |
@@ -95,12 +95,14 @@ After a condition's grace, scoutd persists `notifiedAt` before dispatch.
 Startup projection notices also require escalation: the restart budget must be
 exhausted, a disk-related restart must be waiting for space, or an unresolved
 incident must reach ten minutes without mutation readiness after the latest of
-its original `since`, a recovery restart, or the current child's spawn. Missing
-health and other startup phases cannot suppress that deadline. A pass that
-issues a restart never adds an outage notice. The new child receives its own
-ten-minute readiness window, including after scoutd loads an old checkpoint.
-A restart that restores readiness within that window remains silent. At most one notification
-is queued per pass.
+its original `since`, a sweep recovery restart, or the initial child spawn in
+this supervisor lifetime. Crash respawns do not extend the deadline. Missing
+health and other startup phases cannot suppress it, except while a disk-related
+restart is still waiting for space. That condition keeps its free-space notice.
+A pass that issues a restart never adds an outage notice. Sweep recovery and
+scoutd startup each grant a ten-minute readiness window, including after scoutd
+loads an old checkpoint. A restart that restores readiness within that window
+remains silent. At most one notification is queued per pass.
 
 The reservation includes the notice level. An outage or manual-repair escalation
 can notify after a lower-level space/recovery notice. Exhausted automatic recovery

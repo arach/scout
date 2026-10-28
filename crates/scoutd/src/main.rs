@@ -1332,7 +1332,8 @@ fn supervise_service_inner(
                 restart_delay = doubled_delay(restart_delay);
                 runtime_build = configured_runtime_artifact(config);
                 child = spawn_base_process(config)?;
-                health_sweep.base_started(epoch_ms());
+                // Crash respawns must not postpone an open projection outage.
+                // Only supervisor startup and sweep recovery grant a boot window.
                 refresh_state!(
                     "base-started",
                     write_state!(

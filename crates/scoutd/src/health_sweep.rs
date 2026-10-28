@@ -58,7 +58,7 @@ pub struct Sweep {
     next_restart: u128,
     last_restart: Option<u128>,
     #[serde(skip)]
-    current_child_started_at: Option<u128>,
+    initial_child_started_at: Option<u128>,
     #[serde(skip)]
     restart_before_decision: Option<u128>,
     ready_since: Option<u128>,
@@ -148,12 +148,22 @@ impl Sweep {
         }
         self.ready_since = None;
         let overdue = self.projection_outage_due(now);
+        let space = disk
+            .map(|(free, total)| free >= 2 * GIB && total > 0)
+            .unwrap_or(false);
         if startup
             .and_then(|s| s.get("phase"))
             .and_then(|v| v.as_str())
             != Some("degraded")
         {
-            if overdue {
+            // Unknown health cannot replace the actionable disk-latch notice.
+            // Once its restart is spent, an unready successor must still alert.
+            let waiting_for_space = !space
+                && self.attempts == 0
+                && self.conditions.iter().any(|c| {
+                    c.condition == "startup-projection" && projection_disk_failure(&c.cause)
+                });
+            if overdue && !waiting_for_space {
                 self.escalate_projection(now, NoticeLevel::Outage,
                 "Inspect Scout startup and supervisor logs; Scout has not become mutation-ready after 10 minutes");
             }
@@ -164,18 +174,7 @@ impl Sweep {
             .and_then(|v| v.as_str())
             .unwrap_or("Startup projection is unavailable")
             .to_owned();
-        let lower = cause.to_ascii_lowercase();
-        let disk_failure = [
-            "sqlite_full",
-            "enospc",
-            "database or disk is full",
-            "no space left",
-        ]
-        .iter()
-        .any(|s| lower.contains(s));
-        let space = disk
-            .map(|(free, total)| free >= 2 * GIB && total > 0)
-            .unwrap_or(false);
+        let disk_failure = projection_disk_failure(&cause);
         let exhausted = self.attempts >= if disk_failure { 1 } else { 3 }
             || self.conditions.iter().any(|c| {
                 c.condition == "startup-projection" && c.notice_level == NoticeLevel::Manual
@@ -221,8 +220,9 @@ impl Sweep {
         true
     }
     pub fn base_started(&mut self, now: u128) {
-        // Runtime-only: a restored checkpoint cannot know this new child's age.
-        self.current_child_started_at = Some(now);
+        // Register only the first child in this supervisor lifetime. A restored
+        // checkpoint gets a boot window, but crash respawns cannot slide it.
+        self.initial_child_started_at.get_or_insert(now);
     }
     fn projection_outage_due(&self, now: u128) -> bool {
         self.conditions
@@ -232,7 +232,7 @@ impl Sweep {
                 let anchor = c
                     .since
                     .max(self.last_restart.unwrap_or(0))
-                    .max(self.current_child_started_at.unwrap_or(0));
+                    .max(self.initial_child_started_at.unwrap_or(0));
                 now.saturating_sub(anchor) >= PROJECTION_OUTAGE_LIMIT
             })
     }
@@ -427,6 +427,17 @@ pub fn disk_space(path: &Path) -> Option<(u64, u64)> {
         (s.f_blocks as u64).saturating_mul(s.f_frsize as u64),
     ))
 }
+fn projection_disk_failure(cause: &str) -> bool {
+    let lower = cause.to_ascii_lowercase();
+    [
+        "sqlite_full",
+        "enospc",
+        "database or disk is full",
+        "no space left",
+    ]
+    .iter()
+    .any(|s| lower.contains(s))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,6 +445,68 @@ mod tests {
     const OTHER: &str = r#"{"startup":{"phase":"degraded","error":"schema failed"}}"#;
     const READY: &str = r#"{"startup":{"mutationsAdmitted":true}}"#;
     const SPACE: Option<(u64, u64)> = Some((10 * GIB, 100 * GIB));
+    #[test]
+    fn crash_respawns_cannot_postpone_an_open_projection_outage() {
+        for sweep_restart in [false, true] {
+            let mut s = Sweep::default();
+            s.base_started(0);
+            s.observe(0, Some(OTHER), SPACE);
+            let anchor = if sweep_restart {
+                assert!(s.observe(120_000, Some(OTHER), SPACE));
+                120_000
+            } else {
+                0
+            };
+            for now in (anchor + 30_000..=anchor + PROJECTION_OUTAGE_LIMIT).step_by(30_000) {
+                // Even an accidental repeated startup registration must not
+                // give each crashing child a fresh outage window.
+                s.base_started(now);
+                assert!(!s.observe(now, None, SPACE));
+                if now < anchor + PROJECTION_OUTAGE_LIMIT {
+                    assert!(s.due_notifications(now).is_empty());
+                }
+            }
+            assert_eq!(
+                s.due_notifications(anchor + PROJECTION_OUTAGE_LIMIT),
+                vec!["startup-projection"],
+                "30-second crash respawns must not slide the outage deadline"
+            );
+        }
+    }
+    #[test]
+    fn unknown_health_keeps_the_disk_latch_notice_until_recovery_can_start() {
+        let low = Some((GIB, 100 * GIB));
+        let mut s = Sweep::default();
+        s.observe(0, Some(FULL), low);
+        for c in &mut s.conditions {
+            c.reserve_notice(120_000);
+        }
+        let mut s: Sweep = serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
+        assert!(!s.observe(660_000, None, low));
+        let c = s
+            .conditions
+            .iter()
+            .find(|c| c.condition == "startup-projection")
+            .unwrap();
+        assert_eq!(c.notice_level, NoticeLevel::Recovery);
+        assert!(c.action.starts_with("Free at least 2 GiB"));
+        assert!(s.due_notifications(660_000).is_empty());
+        assert!(s.observe(690_000, Some(FULL), SPACE));
+        assert!(s.due_notifications(690_000).is_empty());
+        s.observe(1_289_999, None, SPACE);
+        assert!(s.due_notifications(1_289_999).is_empty());
+        // Falling below the threshold again cannot mask the failed successor.
+        s.observe(1_290_000, None, low);
+        assert_eq!(s.due_notifications(1_290_000), vec!["startup-projection"]);
+
+        let mut s = Sweep::default();
+        s.observe(0, Some(OTHER), low);
+        for c in &mut s.conditions {
+            c.reserve_notice(120_000);
+        }
+        s.observe(660_000, None, low);
+        assert_eq!(s.due_notifications(660_000), vec!["startup-projection"]);
+    }
     #[test]
     fn long_disk_full_recovery_is_silent_when_the_late_restart_succeeds() {
         let mut s = Sweep::default();
