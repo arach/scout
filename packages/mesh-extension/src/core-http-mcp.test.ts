@@ -101,3 +101,31 @@ test('external HTTP replies derive stable delivery keys and keep progress separa
   expect(f.calls[0]!.body.requestId).toBe(f.calls[1]!.body.requestId);
   expect(f.calls[2]!.body.requestId).not.toBe(f.calls[0]!.body.requestId);
 });
+
+test.each([
+  ['already_answered', 'task already has a final reply'],
+  ['completed', 'task is already completed'],
+])('portable MCP reply exposes only the typed task-closed diagnostic: %s', async (reason, detail) => {
+  const http = new RuntimeHttpClient({ brokerUrl: 'http://runtime.test', fetch: (async (_input, init) =>
+    init?.method === 'POST'
+      ? Response.json({ error: 'task_closed', taskId: 'task', flightId: 'flight', messageId: 'answer', reason, detail: 'private-transport-detail' }, { status: 409 })
+      : Response.json({ capabilities: ['ask-reply/1'] })) as typeof fetch });
+  const server = new CoreHttpAdapter({ client: http, principal }).server();
+  const client = new Client({ name: 'closed-reply', version: '1' });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  try {
+    await Promise.all([server.connect(b), client.connect(a)]);
+    for (const route of [{}, { sessionId: 'session', deliveryId: 'delivery' }]) {
+      const result = await client.callTool({ name: 'reply', arguments: { ref: 'task', body: 'done', ...route } });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain(detail);
+      expect(JSON.stringify(result.content)).not.toContain('private-transport-detail');
+    }
+  } finally { await client.close(); await server.close(); }
+});
+
+test('untyped task-closed errors keep their raw details redacted', async () => {
+  const client = new RuntimeHttpClient({ brokerUrl: 'http://runtime.test', fetch: (async () =>
+    Response.json({ error: 'task_closed', detail: 'private-transport-detail' }, { status: 409 })) as typeof fetch });
+  await expect(client.request('/v1/messages/reply', {})).rejects.toThrow('runtime request refused (409)');
+});

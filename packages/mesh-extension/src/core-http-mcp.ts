@@ -1,4 +1,4 @@
-import { validateTaskAsk, validateTaskReply, SCOUT_TASKS_CAPABILITY } from "@openscout/protocol";
+import { TaskClosedError, validateTaskAsk, validateTaskReply, SCOUT_TASKS_CAPABILITY } from "@openscout/protocol";
 import { principalSchema } from "./identity.ts";
 import { labelBrief, labelFeed, matchingLabelWorks } from "./label-views.ts";
 import { createHash, randomUUID } from 'node:crypto';
@@ -183,7 +183,8 @@ export class CoreHttpAdapter {
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       try { const result = await this.call(request.params.name, request.params.arguments, extra.signal);
         return { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result && typeof result === 'object' && !Array.isArray(result) ? result : { result } }; }
-      catch { return { isError: true, content: [{ type: 'text', text: `Scout tool ${request.params.name} failed; check arguments, consent and runtime availability.` }] }; }
+      catch (error) { return { isError: true, content: [{ type: 'text', text: error instanceof TaskClosedError
+        ? error.message : `Scout tool ${request.params.name} failed; check arguments, consent and runtime availability.` }] }; }
     });
     return server;
   }
