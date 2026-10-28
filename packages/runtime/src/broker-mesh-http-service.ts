@@ -103,14 +103,7 @@ export class BrokerMeshHttpService {
         };
       }
 
-      if (this.deps.recordAuthorityMessage && !existingMessage?.attachments?.some(a => a.blob)) {
-        const recorded = await this.deps.recordAuthorityMessage(bundle.message);
-        const message = recorded.duplicate ?? await readRuntimeMessage(this.deps.runtime, bundle.message.id);
-        if (!message) throw new Error(`mesh message ${bundle.message.id} was not committed`);
-        return { kind: recorded.duplicate ? "duplicate" as const : "ok" as const,
-          message, bundleEntries, messageEntries: recorded.entries, deliveries: recorded.deliveries };
-      }
-      if (existingMessage) {
+      if (existingMessage && sameCanonicalMessage(existingMessage, bundle.message)) {
         return {
           kind: "duplicate" as const,
           message: existingMessage,
@@ -118,6 +111,14 @@ export class BrokerMeshHttpService {
           messageEntries: [] as BrokerJournalEntry[],
           deliveries: [] as DeliveryIntent[],
         };
+      }
+
+      if (this.deps.recordAuthorityMessage && !existingMessage?.attachments?.some(a => a.blob)) {
+        const recorded = await this.deps.recordAuthorityMessage(bundle.message);
+        const message = recorded.duplicate ?? await readRuntimeMessage(this.deps.runtime, bundle.message.id);
+        if (!message) throw new Error(`mesh message ${bundle.message.id} was not committed`);
+        return { kind: recorded.duplicate ? "duplicate" as const : "ok" as const,
+          message, bundleEntries, messageEntries: recorded.entries, deliveries: recorded.deliveries };
       }
 
       const deliveries = this.deps.runtime.planMessage(bundle.message, { localOnly: true });

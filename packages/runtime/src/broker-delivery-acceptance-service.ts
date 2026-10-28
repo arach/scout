@@ -385,7 +385,14 @@ export class BrokerDeliveryAcceptanceService {
       : await readMessageRecord(this.options.runtimeSnapshot().messages, id);
     if (message?.actorId === requesterId && message.metadata?.requestId === requestId
       && message.metadata?.taskVersion === 1 && message.metadata?.taskFyiReceipt) {
-      return { ...(message.metadata.taskFyiReceipt as Omit<Extract<ScoutDeliverResponse, { kind: "delivery" }>, "message">), message };
+      const stored = message.metadata.taskFyiReceipt as {
+        routeKind: ScoutDeliverRouteKind; receipt: ReturnType<typeof buildDeliveryReceipt>;
+        conversationId?: string; conversation?: ConversationDefinition;
+      };
+      // Read old embedded receipts too; new records retain only the stable id.
+      const conversation = stored.conversation ?? this.options.runtimeSnapshot().conversations[stored.conversationId ?? message.conversationId];
+      if (!conversation) throw new Error("FYI receipt conversation is unavailable; do not redispatch this request");
+      return { kind: "delivery", accepted: true, routeKind: stored.routeKind, receipt: stored.receipt, conversation, message };
     }
     return recoverSessionInputDelivery(message, requesterId, requestId) ?? recoverAcceptedDelivery(message, requesterId, requestId);
   }
@@ -1379,7 +1386,7 @@ export class BrokerDeliveryAcceptanceService {
         const routeKind = this.options.brokerRouteKind(conversation);
         const receipt = buildDeliveryReceipt({ requestId: payload.requestId!, routeKind,
           requesterId: message.actorId, requesterNodeId: message.originNodeId!, targetLabel: this.options.metadataStringValue(message.metadata, "relayTarget") ?? "", conversationId: conversation.id, messageId: message.id });
-        message.metadata = { ...message.metadata, taskFyiReceipt: { kind: "delivery", accepted: true, routeKind, conversation, receipt } };
+        message.metadata = { ...message.metadata, taskFyiReceipt: { kind: "delivery", accepted: true, routeKind, conversationId: conversation.id, receipt } };
       }
     }
     if (payload.image) {
@@ -1416,7 +1423,7 @@ export function validateTaskDelivery(payload: ScoutDeliverRequest, operatorActor
     if (!imageMimes.has(upload.mediaType)) throw new Error("task evidence must be an image");
     validateAttachmentBytes(decodeAttachment(upload.data), upload.mediaType);
   }
-  if ((task.ref || task.continue) && targetIsNotTaskRef(payload.target))
+  if ((task.ref || task.continue) && (targetIsNotTaskRef(payload.target) || payload.targetAgentId || payload.targetLabel || payload.targetSessionId || payload.channel || payload.projectAgent))
     throw new Error("--ref and --continue cannot be combined with another recipient route");
   if (task.operator && (!isOperatorDeliveryTarget(payload, operatorActorId)
     || (payload.targetAgentId && payload.targetAgentId !== operatorActorId)

@@ -1697,6 +1697,8 @@ test.each([
   const h = createHarness({ isOperatorTarget: () => Boolean(route.task.operator),
     onPostedMessage: async message => { committed = message; }, readAcceptedMessage: async () => committed });
   await h.service.accept({ ...route, requestId: "fyi-recovery", requesterId: "agent-1", intent: "consult", body: "news" });
+  expect(committed!.metadata?.taskFyiReceipt).not.toHaveProperty("conversation");
+  expect(committed!.metadata?.taskFyiReceipt).toHaveProperty("conversationId");
   const recovered = await h.service.recoverReceipt("agent-1", "fyi-recovery");
   expect(recovered).toMatchObject({ accepted: true, message: { id: committed!.id } });
   expect(recovered && "flight" in recovered).toBe(false);
@@ -1736,4 +1738,12 @@ test("blocking operator questions have no deadline", async () => {
     target: { kind: "agent_label", label: "operator" }, task: { version: 1, operator: true } });
   expect(h.acceptedInvocations[0]?.metadata?.humanOwned).toBe(true);
   expect(h.acceptedInvocations[0]?.metadata?.operatorAnswerDeadline).toBeUndefined();
+});
+
+
+test.each([{ targetAgentId: "worker" }, { targetLabel: "worker" }, { targetSessionId: "session" }])("task refs refuse legacy recipient fields before effects %#", async legacy => {
+  const h = createHarness();
+  await expect(h.service.accept({ ...legacy, requestId: "conflict", intent: "consult", body: "context",
+    task: { version: 1, ref: "parent" } })).rejects.toThrow("another recipient route");
+  expect(h.localAgentSyncReasons).toHaveLength(0); expect(h.ensuredActors).toHaveLength(0);
 });

@@ -707,7 +707,7 @@ export class BrokerDurableRecordStore {
         if (late) message = { ...message, metadata: { ...message.metadata, late: true } };
         if (typedReply.kind === "final" && task && this.options.authorizeReplyCompletion
           && !this.options.authorizeReplyCompletion(task, message)) {
-          throw new Error("completion_reply_not_authorized: use the task's correlated session reply address");
+          throw new Error("completion_reply_not_authorized: use reply with the delivery's sessionId/deliveryId, task ref and replyToken when provided");
         }
         if (typedReply.kind === "final" && !late && !taskTerminal(durableReplyFlight)) taskEntries.push({ kind: "flight.record", flight: {
           ...durableReplyFlight, metadata: { ...durableReplyFlight.metadata, taskFinalReplyMessageId: message.id,

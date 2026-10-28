@@ -324,7 +324,7 @@ test("task suffixes need eight characters and ambiguous matches fail closed", as
   expect((await tasks.resolve("first-abcdefgh")).invocation.id).toBe("first");
 });
 
-test.each(["explicit", "cancel"])("remote %s supersedes an automatic result durably without retrying it", async winner => {
+test.each(["explicit", "cancel", "claimed"])("remote %s supersedes an automatic result durably without retrying it", async winner => {
   const authority = await fixture();
   const ingress = new BrokerMeshHttpService({ nodeId: "node", runtime: authority.runtime,
     runDurableWrite: authority.runWrite, applyMeshBundle: async () => [], applyProjectedEntries: async () => {},
@@ -371,6 +371,7 @@ test.each(["explicit", "cancel"])("remote %s supersedes an automatic result dura
   const outbox = makeOutbox();
   expect(await outbox.deliver(task.id)).toBe("failed"); // Network failure stays pending.
   if (winner === "explicit") await authority.messages.postConversationMessage(reply(0, "final", "explicit-winner"));
+  else if (winner === "claimed") await authority.records.recordMessage(reply(0, "final", "claimed-winner"));
   else await authority.lifecycle.recordFlight({ ...flight(task), state: "cancelled", completedAt: 4 });
   offline = false;
   expect(await outbox.deliver(task.id)).toBe("superseded");
