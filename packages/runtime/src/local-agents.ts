@@ -627,7 +627,7 @@ function buildLocalAgentTmuxProtocolPrompt(context: LocalAgentSystemPromptTempla
     "  - Capability requests should start with project path + harness/capability; let Scout route or create the worker instead of guessing generic names like claude.main",
     "  - Continue using returned refs/ids/session handles; name or pin a long-lived sibling only after the broker has routed a known-good worker",
     "  - Treat known offline / on-demand agents as wakeable: use send or ask first and let the broker wake them; only surface ambiguity or unknown-target failures to the operator",
-    "  - Use send only for tells/status where no reply or work is expected; use ask for replies, judgment, investigation, review, implementation, or ownership",
+    "  - Use ask --fyi only for news where no reply or task is expected; use ask for replies, judgment, investigation, review, implementation, or ownership",
     "  - If the meaning is 'do this and get back to me,' or you are unsure, use ask",
     `  - For asynchronous work, use ${context.relayCommand} ask --notify; do not downgrade the work to send merely to avoid blocking`,
     "  - When replying to an [ask:<id>] request, include the same [ask:<id>] tag in your reply",
@@ -659,7 +659,7 @@ function buildLocalAgentDirectProtocolPrompt(context: LocalAgentSystemPromptTemp
     "  - Capability requests should start with project path + harness/capability; let Scout route or create the worker instead of guessing generic names like claude.main",
     "  - Continue using returned refs/ids/session handles; name or pin a long-lived sibling only after the broker has routed a known-good worker",
     "  - Treat known offline / on-demand agents as wakeable: use send or ask first and let the broker wake them; only surface ambiguity or unknown-target failures to the operator",
-    "  - Use send only for tells/status where no reply or work is expected; use ask for replies, judgment, investigation, review, implementation, or ownership",
+    "  - Use ask --fyi only for news where no reply or task is expected; use ask for replies, judgment, investigation, review, implementation, or ownership",
     "  - If the meaning is 'do this and get back to me,' or you are unsure, use ask",
     `  - For asynchronous work, use ${context.relayCommand} ask --notify; do not downgrade the work to send merely to avoid blocking`,
     "  - Do not curl broker HTTP endpoints to read messages",
@@ -3433,6 +3433,7 @@ function isMessageAttachmentContextEntry(value: unknown): value is MessageAttach
     && (
       typeof attachment.url === "string"
       || typeof attachment.blobKey === "string"
+      || Boolean(attachment.blob?.sha256)
     );
 }
 
@@ -3500,6 +3501,12 @@ function buildInvocationAttachmentsPrompt(
 ): string | undefined {
   const attachments = invocationMessageAttachments(invocation)
     .map((attachment, index) => {
+      const context = attachment as MessageAttachment & { conversationId?: string; messageId?: string };
+      if (attachment.blob && context.conversationId && context.messageId) {
+        return `- ${attachment.fileName ?? attachment.id} (${attachment.mediaType}): read with attachments_read(${JSON.stringify({
+          conversationId: context.conversationId, messageId: context.messageId, blobId: attachment.blob.sha256, mode: "image",
+        })})`;
+      }
       const url = resolveAttachmentFetchUrl(attachment, env);
       if (!url) return null;
       const fileName = attachment.fileName?.trim();

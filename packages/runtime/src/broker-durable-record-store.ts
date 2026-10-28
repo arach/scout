@@ -1,4 +1,4 @@
-import { completionReply, flightCompletion } from "@openscout/protocol";
+import { completionReply, flightCompletion, flightSessionTrace } from "@openscout/protocol";
 import { taskTerminal, finishedTaskError, taskCompletionMessage } from "./broker-tasks.js";
 import { assertExplicitReplyAdmission, prepareCompletionAdmission } from "./broker-explicit-completion.js";
 import { messageWithAcceptedFlight } from "./broker-delivery-receipt-recovery.js";
@@ -678,6 +678,14 @@ export class BrokerDurableRecordStore {
         const participant = task?.conversationId && replySnapshot.conversations[task.conversationId]?.participantIds.includes(message.actorId);
         if (!task || !flight || (message.actorId !== task.requesterId && message.actorId !== "operator" && (!participant || followup.cancel))) throw new Error("task follow-up is not authorized");
         if ((!followup.cancel && (taskTerminal(flight) || flight.metadata?.taskFinalReplyMessageId)) || (followup.cancel && flight.state !== "cancelled")) throw finishedTaskError(task.id);
+        // Choose delivery under the writer, not from the sender's possibly queued
+        // observation: startup may already have passed the prompt snapshot.
+        if (!followup.cancel) message = { ...message,
+          audience: ["queued", "waking"].includes(flight.state) ? { delivery: "none" }
+            : { notify: [task.targetAgentId], reason: "thread_reply" },
+          metadata: { ...message.metadata,
+            targetSessionId: flightSessionTrace(flight).at(-1)?.sessionId ?? task.execution?.targetSessionId } };
+
       }
       const typedReply = completionReply(message);
       if (typedReply && durableReplyFlight) {

@@ -88,7 +88,7 @@ export class BrokerExternalSessionService {
       provider: endpoint.harness, nativeSessionId: endpoint.metadata?.nativeSessionId, state: endpoint.state,
       providerState: endpoint.metadata?.providerState, returnTransport: endpoint.transport === "mcp_poll" ? "mcp_poll" : endpoint.transport === "devin_cloud_cli" ? "cloud_cli" : "provider_api",
       wake: endpoint.transport === "mcp_poll" ? "none" : "resume_on_message",
-      ...(endpoint.transport === "mcp_poll" ? { instructions: "Poll sessions_poll with this sessionId. Acknowledge receipt with sessions_ack; reply to work with sessions_reply. Use this handle as replyToSessionId on every ask to receive the result here. Polling never wakes a stopped host." } : {}) };
+      ...(endpoint.transport === "mcp_poll" ? { instructions: "Poll sessions_poll with this sessionId. Acknowledge receipt with sessions_ack; reply to work with reply and its task ref. Use this handle as replyToSessionId on every ask to receive the result here. Polling never wakes a stopped host." } : {}) };
   }
   get(input: { ownerId: string; sessionId: string }) {
     const endpoint = this.ownedEndpoint(input.ownerId, input.sessionId);

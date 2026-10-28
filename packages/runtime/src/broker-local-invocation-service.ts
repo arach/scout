@@ -167,6 +167,7 @@ async function invocationWithOriginatingMessageAttachments(
         ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
         ...(attachment.url ? { url: attachment.url } : {}),
         ...(attachment.blobKey ? { blobKey: attachment.blobKey } : {}),
+        ...(attachment.blob ? { blob: attachment.blob, conversationId: invocation.conversationId, messageId: invocation.messageId } : {}),
       })),
     },
   };
@@ -509,12 +510,17 @@ export class BrokerLocalInvocationService {
     try {
       let invocationWithAttachments = await invocationWithOriginatingMessageAttachments(invocation, this.options.runtime);
       const followups: string[] = [];
-      for await (const message of iterateMessageRecordsAsync(this.options.runtime.snapshot().messages)) {
+      const evidence: unknown[] = [...((invocationWithAttachments.context?.[SCOUT_MESSAGE_ATTACHMENTS_CONTEXT_KEY] as unknown[] | undefined) ?? [])];
+      for await (const message of iterateMessageRecordsAsync(this.options.runtime.snapshot().messages, { stream: true, selection: { replyToMessageId: invocation.messageId } })) {
         const followup = message.metadata?.taskFollowup as { invocationId?: string; cancel?: boolean } | undefined;
-        if (followup?.invocationId === invocation.id && !followup.cancel) followups.push(message.body);
+        if (followup?.invocationId === invocation.id && !followup.cancel) {
+          followups.push(message.body);
+          evidence.push(...(message.attachments ?? []).map(attachment => ({ ...attachment, conversationId: message.conversationId, messageId: message.id })));
+        }
       }
       if (followups.length) invocationWithAttachments = { ...invocationWithAttachments,
-        task: `${invocationWithAttachments.task}\n\nTask follow-ups:\n${followups.join("\n\n")}` };
+        task: `${invocationWithAttachments.task}\n\nTask follow-ups:\n${followups.join("\n\n")}`,
+        context: { ...invocationWithAttachments.context, [SCOUT_MESSAGE_ATTACHMENTS_CONTEXT_KEY]: evidence } };
       // This is the last await before external submission. Cancellation can
       // arrive during attachment reads or any of the preceding durable writes.
       if (this.currentFlightIsTerminal(invocation.id)) {
