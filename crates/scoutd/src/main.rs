@@ -4330,9 +4330,23 @@ fn publish_health_sweep(config: &Config, sweep: &health_sweep::Sweep) -> Result<
     }
     result.map_err(|e| e.to_string())
 }
+fn health_stage_path(config: &Config) -> PathBuf {
+    static NONCE: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    let nonce = NONCE.get_or_init(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    });
+    // A recycled pid after reboot must not latch publication on an old temp.
+    config.runtime_directory.join(format!(
+        "scoutd-health.json.{}.{nonce}.tmp",
+        std::process::id()
+    ))
+}
 fn publish_health_sweep_once(config: &Config, sweep: &health_sweep::Sweep) -> io::Result<()> {
     let path = config.runtime_directory.join("scoutd-health.json");
-    let temp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    let temp = health_stage_path(config);
     let mut value = serde_json::to_value(sweep).map_err(io::Error::other)?;
     value["checkedAt"] = serde_json::json!(epoch_ms());
     let bytes = serde_json::to_vec(&value).map_err(io::Error::other)?;
@@ -6304,7 +6318,7 @@ mod tests {
         assert!(value["conditions"].as_array().unwrap().is_empty());
         let user = root.join("keep.txt");
         fs::write(&user, "keep").unwrap();
-        let temp = root.join(format!("scoutd-health.json.{}.tmp", std::process::id()));
+        let temp = super::health_stage_path(&config);
         std::os::unix::fs::symlink(&user, temp).unwrap();
         assert!(super::publish_health_sweep(&config, &sweep).is_err());
         assert_eq!(fs::read_to_string(user).unwrap(), "keep");
