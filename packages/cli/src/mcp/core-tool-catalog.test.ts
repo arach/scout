@@ -26,7 +26,7 @@ test("mcp:core catalog matches the tools the hosted bridge registers", async () 
     for (const entry of SCOUT_MCP_CORE_TOOL_CATALOG) {
       const tool = registered.get(entry.name)!;
       const portable = portableTools.find(candidate => candidate.name === entry.name)!;
-      expect(portable.description).toBe(tool.description);
+      expect(portable.description).toBe(tool.description ?? "");
       expect({ name: entry.name, title: tool.title }).toEqual({ name: entry.name, title: entry.title });
       expect({ name: entry.name, readOnly: tool.annotations?.readOnlyHint === true })
         .toEqual({ name: entry.name, readOnly: entry.access === "read" });
@@ -35,8 +35,8 @@ test("mcp:core catalog matches the tools the hosted bridge registers", async () 
     }
     const ask = registered.get("ask")!;
     const portableAsk = portableTools.find(tool => tool.name === "ask")!;
-    expect(ask.inputSchema).toMatchObject({ properties: { on: { description: portableAsk.inputSchema.properties.on.description } } });
-    expect(portableAsk.inputSchema.properties.on.description).toContain("e.g. build-host");
+    expect(ask.inputSchema).toMatchObject({ properties: { on: { description: portableAsk.inputSchema.properties.on!.description } } });
+    expect(portableAsk.inputSchema.properties.on!.description).toContain("e.g. build-host");
   } finally {
     await client.close();
     await server.close();
