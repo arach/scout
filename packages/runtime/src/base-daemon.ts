@@ -16,6 +16,7 @@ import {
 import {
   claimScoutPairingSupervision,
   isScoutPairingProcessRunning,
+  readLiveScoutPairingSupervisorPid,
   readScoutPairingProcessPid,
   readScoutPairingSupervisorIntent,
   releaseScoutPairingSupervision,
@@ -127,6 +128,7 @@ let pairingRestartGeneration: number | null = null;
 let pairingRestartDelayMs = RESTART_MIN_DELAY_MS;
 let pairingNextStartAt = 0;
 let pairingSupervisionClaimed = false;
+let pairingClaimRefused = false;
 let meshBridgeProcess: ChildProcess | null = null;
 let meshBridgeRunningKey: string | null = null;
 let meshBridgeSelectionKey: string | null = null;
@@ -879,19 +881,37 @@ async function reconcilePairingController(): Promise<void> {
   }
 }
 
-function startPairingSupervision(): void {
+function tryClaimPairingSupervision(): boolean {
   try {
     claimScoutPairingSupervision(process.pid, pairingPaths.supervisorPidPath);
   } catch (error) {
-    warn("pairing supervision is owned by another live process", error instanceof Error ? error.message : String(error));
-    return;
+    if (!pairingClaimRefused) {
+      warn("pairing supervision claim refused; retrying", error instanceof Error ? error.message : String(error));
+    }
+    pairingClaimRefused = true;
+    return false;
   }
+  if (pairingClaimRefused) log("pairing supervision claimed after the previous owner exited");
+  pairingClaimRefused = false;
   pairingSupervisionClaimed = true;
+  return true;
+}
+
+// Keeps trying the claim, so pairing comes back when a previous owner exits.
+// Re-reads the claim on each tick: when another live process holds it, this
+// base stands down, so two supervisors never run the relay at once.
+function startPairingSupervision(): void {
   pairingReconcileTimer = setInterval(() => {
-    void reconcilePairingController();
+    if (
+      pairingSupervisionClaimed
+      && readLiveScoutPairingSupervisorPid(pairingPaths.supervisorPidPath) !== process.pid
+    ) {
+      pairingSupervisionClaimed = false;
+    }
+    if (pairingSupervisionClaimed || tryClaimPairingSupervision()) void reconcilePairingController();
   }, PAIRING_RECONCILE_INTERVAL_MS);
   pairingReconcileTimer.unref();
-  void reconcilePairingController();
+  if (tryClaimPairingSupervision()) void reconcilePairingController();
 }
 
 function writeMeshBridgeState(state: Record<string, unknown>): void {
