@@ -321,12 +321,12 @@ export class BrokerExternalSessionService {
         if (input.ref !== invocation.id) throw new Error("external_reply_task_mismatch");
         if (!input.requestId?.trim() || !this.deps.replyTask) throw new Error("external task reply requires requestId and ask-reply/1");
         const messageId = taskMessageId(endpoint.agentId, input.requestId);
+        input.authorize?.();
         if (!input.progress) await this.deps.mutateDelivery(delivery.id, current => {
           if (current.metadata?.taskReplyMessageId && (current.metadata.taskReplyMessageId !== messageId
             || current.metadata.replyBodyHash !== digest(input.body))) throw new Error("task already has a final reply");
           return { ...current, metadata: { ...current.metadata, taskReplyMessageId: messageId, replyBodyHash: digest(input.body) } };
         });
-        input.authorize?.();
         const result = await this.deps.replyTask({ ref: invocation.id, senderId: endpoint.agentId,
           requestId: input.requestId, body: input.body, progress: input.progress, failed: input.failed,
           attachments: input.attachments, image: input.image });

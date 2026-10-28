@@ -44,7 +44,7 @@ export class BrokerTaskService {
     const candidates = Object.values(snapshot.flights).filter(item => item.id === ref || (ref.length >= 8 && item.id.endsWith(ref)) || item.invocationId === ref
       || item.metadata?.bindingRef === ref || (binding && item.invocationId === binding.metadata?.invocationId));
     if (!invocation && new Set(candidates.map(item => item.invocationId)).size > 1) throw new Error(`ambiguous task ${raw}; use the full invocation or flight ID`);
-    if (!invocation && candidates.length === 1) invocation = this.options.invocation(candidates[0]!.invocationId);
+    if (!invocation && candidates.length > 0) invocation = this.options.invocation(candidates[0]!.invocationId);
     const message = !invocation ? await resolveBrokerMessageRefAsync(snapshot, ref) : null;
     if (message) invocation = Object.values(snapshot.invocations).find(item => item.messageId === message.id);
     if (!invocation) throw new Error(message ? "an FYI has no task; use --to with a new ask" : `unknown task ${raw}; use an invocation, flight, task message or retained binding ref`);

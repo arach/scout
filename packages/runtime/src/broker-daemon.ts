@@ -864,6 +864,7 @@ const durableRecords = new BrokerDurableRecordStore({
     attachmentService.assertMessageAdmission(message);
   },
   localNodeId: nodeId,
+  operatorActorId,
   completionCurrentFlight: id => journal.getCurrentFlightForInvocation(id),
   completionFlight: id => journal.getFlight(id),
   completionInvocation: id => journal.getInvocation(id),

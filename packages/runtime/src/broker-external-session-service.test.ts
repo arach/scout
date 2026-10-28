@@ -330,3 +330,18 @@ test("external task replies retain correlation and use the canonical typed task 
   expect([...f.deliveries.values()][0]?.status).toBe("failed");
   await expect(service.reply({ ...address, progress: false, requestId: "second-final" })).rejects.toThrow("already has a final");
 });
+
+
+test("external reply authorization fails before reserving its final address", async () => {
+  const f = fixture();
+  const { invocation, endpoint } = await f.setup();
+  await f.service.dispatch(invocation, endpoint);
+  const calls: unknown[] = [];
+  const service = new BrokerExternalSessionService({ ...f.options, replyTask: async input => { calls.push(input); return { ok: true }; } });
+  const input = { ...f.taskAddress(), ownerId: "remote-owner", requestId: "denied", body: "done" };
+  await expect(service.reply({ ...input, authorize: () => { throw new Error("grant_inactive"); } })).rejects.toThrow("grant_inactive");
+  expect([...f.deliveries.values()][0]?.metadata?.taskReplyMessageId).toBeUndefined();
+  expect(calls).toHaveLength(0);
+  await service.reply({ ...input, requestId: "authorized" });
+  expect(calls).toHaveLength(1);
+});

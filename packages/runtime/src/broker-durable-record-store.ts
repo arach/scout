@@ -77,6 +77,7 @@ type RuntimeRecordStore = {
 
 export type BrokerDurableRecordStoreOptions = {
   localNodeId?: string;
+  operatorActorId?: string;
   assertMessageAdmission?: (message: MessageRecord) => void;
   completionCurrentFlight?: (invocationId: string) => FlightRecord | undefined;
   completionFlight?: (id: string) => FlightRecord | undefined;
@@ -677,7 +678,7 @@ export class BrokerDurableRecordStore {
         const task = this.options.completionInvocation?.(followup.invocationId) ?? replySnapshot.invocations[followup.invocationId];
         const flight = this.options.completionCurrentFlight?.(followup.invocationId) ?? this.options.runtime.flightForInvocation?.(followup.invocationId);
         const participant = task?.conversationId && replySnapshot.conversations[task.conversationId]?.participantIds.includes(message.actorId);
-        if (!task || !flight || (message.actorId !== task.requesterId && message.actorId !== "operator" && (!participant || followup.cancel))) throw new Error("task follow-up is not authorized");
+        if (!task || !flight || (message.actorId !== task.requesterId && message.actorId !== (this.options.operatorActorId ?? "operator") && (!participant || followup.cancel))) throw new Error("task follow-up is not authorized");
         if ((!followup.cancel && (taskTerminal(flight) || flight.metadata?.taskFinalReplyMessageId)) || (followup.cancel && flight.state !== "cancelled")) throw finishedTaskError(task.id);
         // Choose delivery under the writer, not from the sender's possibly queued
         // observation: startup may already have passed the prompt snapshot.
