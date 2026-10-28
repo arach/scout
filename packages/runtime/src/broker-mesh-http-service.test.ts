@@ -759,3 +759,16 @@ test("canonical mesh admission preserves exact legacy retries without client IDs
   expect(await h.service.receiveMessageBundle(messageBundle({ message: legacy }))).toMatchObject({ status: 200, body: { duplicate: true } });
   expect(h.committedEntries).toHaveLength(0);
 });
+
+test("canonical mesh admission cannot overwrite an existing blob message with a conflicting no-blob message", async () => {
+  const existing = message({ attachments: [{ id: "evidence", mediaType: "image/png",
+    blob: { sha256: "a".repeat(64), mediaType: "image/png", byteSize: 8 } }] });
+  const messages = { [existing.id]: existing };
+  const h = createHarness({ messages,
+    recordAuthorityMessage: async () => { throw new Error("blob retries must not enter canonical admission"); } });
+  await expect(h.service.receiveMessageBundle(messageBundle({ message: message({ body: "replacement" }) })))
+    .rejects.toThrow("conflicts with existing record");
+  expect(messages[existing.id]).toEqual(existing);
+  expect(h.committedEntries).toHaveLength(0);
+  expect(h.completedReplies).toHaveLength(0);
+});

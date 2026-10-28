@@ -126,6 +126,10 @@ export class BrokerMeshHttpService {
           message, bundleEntries, messageEntries: recorded.entries, deliveries: recorded.deliveries };
       }
 
+      if (existingMessage) {
+        throw new Error(`mesh message ${bundle.message.id} conflicts with existing record`);
+      }
+
       const deliveries = this.deps.runtime.planMessage(bundle.message, { localOnly: true });
       const messageEntries = await this.deps.commitEntries(
         [
