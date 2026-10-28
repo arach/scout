@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{ffi::CString, os::unix::ffi::OsStrExt, path::Path};
 const GIB: u64 = 1 << 30;
 const GRACE: u128 = 120_000;
+const NOTIFICATION_COOLDOWN: u128 = 30 * 60_000;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Condition {
@@ -23,14 +24,16 @@ pub struct Sweep {
     attempts: u32,
     next_restart: u128,
     ready_since: Option<u128>,
+    last_notifications: std::collections::BTreeMap<String, u128>,
 }
 impl Sweep {
     pub fn observe_all(&mut self, now: u128, observation: &Observation) -> bool {
         let disk = observation.disk;
 
         if let Some((free, total)) = disk {
-            let critical = free < GIB || (free as u128 * 100 < total as u128 * 2);
-            let low = critical || free < 2 * GIB || (free as u128 * 100 < total as u128 * 5);
+            let level = disk_level(Some((free, total)));
+            let critical = level == 2;
+            let low = level > 0;
             self.update(
                 "disk",
                 low.then(|| {
@@ -127,19 +130,21 @@ impl Sweep {
         .iter()
         .any(|s| lower.contains(s));
         let space = disk
-            .map(|(free, total)| {
-                free >= 2 * GIB && total > 0 && free as u128 * 100 >= total as u128 * 5
-            })
+            .map(|(free, total)| free >= 2 * GIB && total > 0)
             .unwrap_or(false);
         let exhausted = self.attempts >= if disk_failure { 1 } else { 3 };
         let action = if exhausted {
             "Repair the startup projection cause, then restart Scout"
         } else if disk_failure && !space {
-            "Free at least 2 GiB and 5% disk space; Scout will restart its owned base child"
+            "Free at least 2 GiB disk space; Scout will restart its owned base child"
         } else {
             "Scout will restart its owned base child after the startup grace period"
         };
-        self.update("startup-projection", Some((cause, action, exhausted)), now);
+        self.update(
+            "startup-projection",
+            Some((cause, action, exhausted || (disk_failure && !space))),
+            now,
+        );
         let since = self
             .conditions
             .iter()
@@ -178,7 +183,7 @@ impl Sweep {
         grace: u128,
     ) {
         if !active {
-            self.conditions.retain(|c| c.condition != id);
+            self.clear(id);
             return;
         }
         if let Some(c) = self.conditions.iter_mut().find(|c| c.condition == id) {
@@ -192,7 +197,7 @@ impl Sweep {
                 since: now,
                 escalated: true,
                 notified_at: None,
-                notify_after: now + grace,
+                notify_after: self.notification_time(id, now + grace),
             });
         }
     }
@@ -204,9 +209,22 @@ impl Sweep {
     pub fn due_notifications(&self, now: u128) -> Vec<String> {
         self.conditions
             .iter()
-            .filter(|c| c.notified_at.is_none() && now >= c.notify_after)
+            .filter(|c| c.escalated && c.notified_at.is_none() && now >= c.notify_after)
             .map(|c| c.condition.clone())
             .collect()
+    }
+    fn notification_time(&self, id: &str, after: u128) -> u128 {
+        self.last_notifications.get(id).map_or(after, |last| {
+            after.max(last.saturating_add(NOTIFICATION_COOLDOWN))
+        })
+    }
+    fn clear(&mut self, id: &str) {
+        if let Some(index) = self.conditions.iter().position(|c| c.condition == id) {
+            if let Some(at) = self.conditions[index].notified_at {
+                self.last_notifications.insert(id.into(), at);
+            }
+            self.conditions.remove(index);
+        }
     }
     fn update(&mut self, id: &str, value: Option<(String, &str, bool)>, now: u128) {
         let index = self.conditions.iter().position(|c| c.condition == id);
@@ -224,16 +242,16 @@ impl Sweep {
                 since: now,
                 escalated,
                 notified_at: None,
-                notify_after: now
-                    + if id == "startup-projection" {
+                notify_after: self.notification_time(
+                    id,
+                    now + if id == "startup-projection" {
                         GRACE
                     } else {
                         60_000
                     },
+                ),
             }),
-            (Some(i), None) => {
-                self.conditions.remove(i);
-            }
+            (Some(_), None) => self.clear(id),
             _ => {}
         }
     }
@@ -262,8 +280,8 @@ pub struct Finding {
 }
 pub fn disk_level(disk: Option<(u64, u64)>) -> u8 {
     match disk {
-        Some((free, total)) if free < GIB || (free as u128 * 100 < total as u128 * 2) => 2,
-        Some((free, total)) if free < 2 * GIB || (free as u128 * 100 < total as u128 * 5) => 1,
+        Some((free, total)) if free < GIB.max((total / 50).min(2 * GIB)) => 2,
+        Some((free, total)) if free < (2 * GIB).max((total / 20).min(10 * GIB)) => 1,
         _ => 0,
     }
 }
@@ -287,6 +305,67 @@ mod tests {
     const OTHER: &str = r#"{"startup":{"phase":"degraded","error":"schema failed"}}"#;
     const READY: &str = r#"{"startup":{"mutationsAdmitted":true}}"#;
     const SPACE: Option<(u64, u64)> = Some((10 * GIB, 100 * GIB));
+    #[test]
+    fn self_healing_projection_never_notifies_and_exhaustion_does() {
+        let mut s = Sweep::default();
+        s.observe(0, Some(OTHER), SPACE);
+        assert!(s.observe(120_000, Some(OTHER), SPACE));
+        assert!(s.due_notifications(120_000).is_empty());
+        s.observe(150_000, Some(READY), SPACE);
+        assert!(s.due_notifications(150_000).is_empty());
+        let mut s = Sweep::default();
+        for now in [0, 120_000, 240_000, 480_000] {
+            s.observe(now, Some(OTHER), SPACE);
+        }
+        assert!(s.due_notifications(480_000).is_empty());
+        s.observe(510_000, Some(OTHER), SPACE);
+        assert_eq!(s.due_notifications(510_000), vec!["startup-projection"]);
+        let mut s = Sweep::default();
+        s.observe(0, Some(FULL), Some((0, 1000 * GIB)));
+        s.observe(120_000, Some(FULL), Some((0, 1000 * GIB)));
+        assert!(s
+            .due_notifications(120_000)
+            .contains(&"startup-projection".into()));
+    }
+    #[test]
+    fn large_disk_thresholds_are_capped_and_two_gib_allows_recovery() {
+        for total in [228 * GIB, 1000 * GIB] {
+            assert_eq!(disk_level(Some((11 * GIB, total))), 0);
+            assert_eq!(disk_level(Some((3 * GIB, total))), 1);
+            assert_eq!(disk_level(Some((GIB, total))), 2);
+            let mut s = Sweep::default();
+            s.observe(0, Some(FULL), Some((GIB, total)));
+            assert!(s.observe(120_000, Some(FULL), Some((3 * GIB, total))));
+        }
+    }
+    #[test]
+    fn flapping_conditions_keep_a_persisted_notification_cooldown() {
+        for id in ["disk", "web", "relay", "version-skew"] {
+            let mut s = Sweep::default();
+            s.finding(id, true, "cause", "action", 0, 60_000);
+            assert_eq!(s.due_notifications(60_000), vec![id]);
+            s.conditions[0].notified_at = Some(60_000);
+            s.finding(id, false, "", "", 90_000, 60_000);
+            assert!(s.conditions.is_empty());
+            let bytes = serde_json::to_vec(&s).unwrap();
+            let mut s: Sweep = serde_json::from_slice(&bytes).unwrap();
+            s.finding(id, true, "cause", "action", 120_000, 60_000);
+            assert!(s.due_notifications(180_000).is_empty());
+            assert_eq!(
+                s.due_notifications(60_000 + NOTIFICATION_COOLDOWN),
+                vec![id]
+            );
+        }
+    }
+    #[test]
+    fn epoch_clock_ages_incidents_across_sleep_and_supervisor_restart() {
+        let epoch = 1_800_000_000_000;
+        let mut s = Sweep::default();
+        s.observe(epoch, Some(OTHER), SPACE);
+        let mut s: Sweep = serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
+        assert!(s.observe(epoch + 3_600_000, Some(OTHER), SPACE));
+        assert_eq!(s.conditions[0].since, epoch);
+    }
     #[test]
     fn disk_recovery_waits_for_space_and_restarts_once() {
         let mut s = Sweep::default();

@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::{
     env,
     fs::{self, OpenOptions},
-    io::Read,
+    io::{Read, Write},
     net::{SocketAddr, TcpStream},
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
@@ -17,6 +17,9 @@ use std::{
 };
 
 pub const SLOW_INTERVAL: Duration = Duration::from_secs(600);
+// Same surface contract as BrokerWebControlService.isHealthy. Probe only the
+// loopback port reported by this instance, never a URL from remote metadata.
+const WEB_HEALTH_PATH: &str = "/api/health";
 #[derive(Default)]
 pub struct Collector {
     level: u8,
@@ -56,7 +59,13 @@ impl Collector {
                     },
                 )
             });
-        let web = observe_web(app.is_some(), web_state, value.is_some(), entry.as_deref());
+        let web = collect_web(
+            app.is_some(),
+            web_state,
+            value.is_some(),
+            entry.as_deref(),
+            |port| web_healthy(config, port),
+        );
         let pairing = pairing_home(config);
         // No listener checks unless running is the explicit persisted intent.
         let intent = read_json(&pairing.join("supervisor.json"));
@@ -68,7 +77,7 @@ impl Collector {
         let relay_running = !relay_expected || relay_port(config).is_some_and(listener);
         let mut findings = Vec::new();
         if slow {
-            if let Some(finding) = version_skew(config, app.as_deref()) {
+            if let Some(finding) = version_skew(config) {
                 findings.push(finding);
             }
             let cleanup = maintenance(config, now, boot_time_ms());
@@ -103,13 +112,37 @@ impl Collector {
         }
     }
 }
+fn collect_web(
+    app_installed: bool,
+    web_state: Option<&Value>,
+    health_known: bool,
+    entry: Option<&Path>,
+    probe: impl FnOnce(u16) -> bool,
+) -> Option<ServiceObservation> {
+    if !health_known {
+        return None;
+    }
+    let external_healthy = web_state
+        .and_then(|v| v.get("port"))
+        .and_then(Value::as_u64)
+        .and_then(|n| u16::try_from(n).ok())
+        .is_some_and(probe);
+    observe_web(
+        app_installed,
+        web_state,
+        health_known,
+        entry,
+        external_healthy,
+    )
+}
 fn observe_web(
     app_installed: bool,
     web_state: Option<&Value>,
     health_known: bool,
     entry: Option<&Path>,
+    external_healthy: bool,
 ) -> Option<ServiceObservation> {
-    if !app_installed && !health_known {
+    if !health_known {
         return None;
     }
     let expected = app_installed
@@ -121,10 +154,11 @@ fn observe_web(
             .and_then(|v| v.get("state"))
             .and_then(Value::as_str)
             .is_some_and(|s| matches!(s, "starting" | "running" | "unavailable"));
-    let running = web_state
-        .and_then(|v| v.get("state"))
-        .and_then(Value::as_str)
-        == Some("running");
+    let running = external_healthy
+        || web_state
+            .and_then(|v| v.get("state"))
+            .and_then(Value::as_str)
+            == Some("running");
     let (cause, action) = if entry.is_none() {
         (
             "no web entry: legacy-app-services.json is missing".into(),
@@ -181,17 +215,88 @@ fn pairing_home(config: &Config) -> PathBuf {
         })
 }
 fn relay_port(config: &Config) -> Option<u16> {
-    env::var("OPENSCOUT_PAIRING_PORT")
-        .ok()
-        .and_then(|s| s.parse::<u16>().ok())
-        .or_else(|| {
-            read_json(&config.open_scout_home.join("config.json"))
-                .and_then(|v| v.pointer("/ports/pairing").and_then(Value::as_u64))
-                .and_then(|n| u16::try_from(n).ok())
-        })
-        .or_else(|| (super::launch_instance(&super::env_nonempty) == "prod").then_some(43130))
-        .and_then(|p| p.checked_add(1))
+    let ports = read_json(&config.open_scout_home.join("config.json"));
+    instance_service_port(
+        env::var("OPENSCOUT_PAIRING_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok()),
+        ports
+            .as_ref()
+            .and_then(|v| v.pointer("/ports/pairing"))
+            .and_then(Value::as_u64)
+            .and_then(|n| u16::try_from(n).ok()),
+        super::launch_instance(&super::env_nonempty) == "prod",
+        config.broker_port,
+    )
+    .and_then(|p| p.checked_add(1))
 }
+// Named instances use broker+20 for the pairing bridge, before the relay offset.
+fn instance_service_port(
+    explicit: Option<u16>,
+    configured: Option<u16>,
+    prod: bool,
+    broker: u16,
+) -> Option<u16> {
+    explicit.or(configured).or_else(|| {
+        if prod {
+            Some(43130)
+        } else {
+            broker.checked_add(20)
+        }
+    })
+}
+fn web_healthy(config: &Config, port: u16) -> bool {
+    let token = env::var("OPENSCOUT_WEB_AUTH_TOKEN").ok().or_else(|| {
+        read_bounded(&config.runtime_directory.join("web-auth-token"), 4096)
+            .and_then(|b| String::from_utf8(b).ok())
+    });
+    probe_web(port, token.as_deref())
+}
+fn probe_web(port: u16, token: Option<&str>) -> bool {
+    let budget = Duration::from_millis(300);
+    let deadline = Instant::now() + budget;
+    let Ok(mut stream) =
+        TcpStream::connect_timeout(&SocketAddr::from(([127, 0, 0, 1], port)), budget)
+    else {
+        return false;
+    };
+    let token = token.unwrap_or("").trim();
+    if token.contains(['\r', '\n']) {
+        return false;
+    }
+    let request = format!("GET {WEB_HEALTH_PATH} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n");
+    let result = (|| -> std::io::Result<Vec<u8>> {
+        stream.set_write_timeout(Some(budget))?;
+        stream.write_all(request.as_bytes())?;
+        let mut bytes = Vec::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() || bytes.len() > 16384 {
+                return Err(std::io::ErrorKind::TimedOut.into());
+            }
+            stream.set_read_timeout(Some(remaining))?;
+            let mut chunk = [0; 4096];
+            let count = stream.read(&mut chunk)?;
+            if count == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+        }
+        Ok(bytes)
+    })();
+    let Ok(bytes) = result else {
+        return false;
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        return false;
+    };
+    super::parse_http_status_code(&text) == Some(200)
+        && super::health_response_body(&text)
+            .ok()
+            .and_then(|body| serde_json::from_str::<Value>(&body).ok())
+            .is_some_and(|v| v["ok"] == true && v["surface"] == "openscout-web")
+}
+
 fn listener(port: u16) -> bool {
     TcpStream::connect_timeout(
         &SocketAddr::from(([127, 0, 0, 1], port)),
@@ -263,72 +368,59 @@ fn cli_package(path: Option<std::ffi::OsString>) -> Option<PathBuf> {
     }
     None
 }
-fn version_skew(config: &Config, app: Option<&Path>) -> Option<Finding> {
+fn workspace_root(dir: &Path) -> Option<PathBuf> {
+    let root = dir.parent()?.parent()?;
+    let runtime = read_json(&root.join("packages/runtime/package.json"))?;
+    let cli = read_json(&root.join("packages/cli/package.json"))?;
+    (runtime["name"] == "@openscout/runtime"
+        && cli["name"] == "@openscout/scout"
+        && root.join("package.json").is_file())
+    .then(|| root.to_path_buf())
+}
+fn version_skew(config: &Config) -> Option<Finding> {
     let service_dir = installed_plist(config)
         .and_then(|s| super::plist_string_value(&s, "OPENSCOUT_RUNTIME_PACKAGE_DIR"))
         .map(PathBuf::from)
         .unwrap_or_else(|| config.runtime_package_dir.clone());
-    let cli_dir = cli_package(env::var_os("PATH"));
-    let service = package_version(&service_dir);
-    let cli = cli_dir.as_deref().and_then(package_version);
-    let app_version = app.and_then(|p| {
-        let file = p.join("Contents/Info.plist");
-        read_bounded(&file, 65536)
-            .and_then(|b| String::from_utf8(b).ok())
-            .and_then(|s| super::plist_string_value(&s, "CFBundleShortVersionString"))
-            .or_else(|| {
-                capture(
-                    Command::new("/usr/bin/plutil")
-                        .args(["-extract", "CFBundleShortVersionString", "raw", "-o", "-"])
-                        .arg(file),
-                    Duration::from_secs(2),
-                    4096,
-                )
-                .ok()
-                .map(|s| s.trim().into())
-            })
-    });
-    let moved = cli_dir
-        .as_ref()
-        .is_some_and(|p| !super::paths_equivalent(p, &service_dir));
-    compare_versions(
-        service.as_deref(),
-        cli.as_deref(),
-        app_version.as_deref(),
-        moved,
-    )
+    let cli_dir = cli_package(env::var_os("PATH"))?;
+    compare_packages(&service_dir, &cli_dir)
 }
-fn compare_versions(
-    service: Option<&str>,
-    cli: Option<&str>,
-    app_version: Option<&str>,
-    moved: bool,
-) -> Option<Finding> {
-    let versions: Vec<&str> = [service, cli, app_version].into_iter().flatten().collect();
-    if !moved && !versions.windows(2).any(|v| v[0] != v[1]) {
+fn compare_packages(service_dir: &Path, cli_dir: &Path) -> Option<Finding> {
+    if let Some(workspace) = workspace_root(service_dir) {
+        if workspace_root(cli_dir).is_some_and(|p| super::paths_equivalent(&p, &workspace)) {
+            return None;
+        }
+        return Some(Finding {
+            id: "version-skew".into(),
+            cause: "Scout service uses a source checkout different from the CLI installation".into(),
+            action: "Use the CLI from the service checkout, or review the intended service ownership before changing installations".into(),
+        });
+    }
+    // Only compare builds of the same package. App and standalone runtime
+    // versions are independent; numerical inequality is not incompatibility.
+    let service = read_json(&service_dir.join("package.json"))?;
+    let cli = read_json(&cli_dir.join("package.json"))?;
+    if service["name"] != "@openscout/scout" || cli["name"] != service["name"] {
+        return None;
+    }
+    let moved = !super::paths_equivalent(service_dir, cli_dir);
+    let service_version = package_version(service_dir);
+    let cli_version = package_version(cli_dir);
+    if !moved && service_version == cli_version {
         return None;
     }
     Some(Finding {
         id: "version-skew".into(),
-        cause: format!(
-            "Scout version skew: service={}, CLI={}, app={}{}",
-            service.unwrap_or("unknown"),
-            cli.unwrap_or("unavailable"),
-            app_version.unwrap_or("not installed"),
-            if moved {
-                "; service and CLI install directories differ"
-            } else {
-                ""
-            }
-        ),
+        cause: format!("Scout package skew: service={}, CLI={}{}",
+            service_version.as_deref().unwrap_or("unknown"),
+            cli_version.as_deref().unwrap_or("unknown"),
+            if moved { "; service and CLI install directories differ" } else { "" }),
         action: if moved {
-            "From the new package, run OPENSCOUT_ALLOW_SHARED_SERVICE_REPOINT=1 scoutd install"
-        } else {
-            "Update Scout.app and the CLI to the same version, then restart Scout"
-        }
-        .into(),
+            "From the intended installed package, run OPENSCOUT_ALLOW_SHARED_SERVICE_REPOINT=1 scoutd install"
+        } else { "Update the service and CLI package, then restart Scout" }.into(),
     })
 }
+
 fn top_consumers(config: &Config) -> Vec<String> {
     let candidates = [
         ("base logs", config.support_directory.join("logs/base")),
@@ -399,6 +491,19 @@ fn bounded_size(root: &Path, remaining: &mut usize, deadline: Instant) -> (u64, 
 }
 /// Bounded subprocess used only on incident entry or the slow maintenance path.
 fn capture(command: &mut Command, timeout: Duration, limit: u64) -> Result<String, String> {
+    capture_until(command, timeout, limit, || {
+        super::SHUTDOWN_REQUESTED.load(super::Ordering::SeqCst)
+    })
+}
+fn capture_until(
+    command: &mut Command,
+    timeout: Duration,
+    limit: u64,
+    cancelled: impl Fn() -> bool,
+) -> Result<String, String> {
+    if cancelled() {
+        return Err("probe cancelled for shutdown".into());
+    }
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -407,6 +512,11 @@ fn capture(command: &mut Command, timeout: Duration, limit: u64) -> Result<Strin
         .map_err(|e| e.to_string())?;
     let deadline = Instant::now() + timeout;
     loop {
+        if cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("probe cancelled for shutdown".into());
+        }
         match child.try_wait() {
             Ok(Some(status)) => {
                 if !status.success() {
@@ -622,6 +732,9 @@ fn journal_temp(name: &str) -> Option<(u32, u128)> {
     Some((pid, stamp.parse().ok()?))
 }
 fn no_holders(path: &Path) -> bool {
+    if super::SHUTDOWN_REQUESTED.load(super::Ordering::SeqCst) {
+        return false;
+    }
     let mut child = match Command::new("/usr/sbin/lsof")
         .args(["-n", "-P", "-t", "--"])
         .arg(path)
@@ -635,6 +748,11 @@ fn no_holders(path: &Path) -> bool {
     };
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
+        if super::SHUTDOWN_REQUESTED.load(super::Ordering::SeqCst) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return false;
+        }
         match child.try_wait() {
             Ok(Some(status)) => {
                 let mut out = Vec::new();
@@ -696,6 +814,9 @@ pub(super) fn operator_notify_command(config: &Config, body: &str) -> Option<Com
 /// Invoke the exact CLI operator-notify implementation used by notify_operator.
 /// This keeps local-admin signing, caller registration and routing in their owner.
 pub fn notify(config: &Config, condition: &health_sweep::Condition, runtime_up: bool) -> bool {
+    if super::SHUTDOWN_REQUESTED.load(super::Ordering::SeqCst) {
+        return false;
+    }
     if super::launch_instance(&super::env_nonempty) != "prod"
         && super::env_truthy("OPENSCOUT_HEALTH_SWEEP_TEST_NO_NOTIFY")
     {
@@ -713,6 +834,9 @@ pub fn notify(config: &Config, condition: &health_sweep::Condition, runtime_up: 
         }
     }
 
+    if super::SHUTDOWN_REQUESTED.load(super::Ordering::SeqCst) {
+        return false;
+    }
     #[cfg(target_os = "macos")]
     {
         // Body travels as argv, not as executable AppleScript source.
@@ -891,41 +1015,124 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn versions_report_skew_or_install_move_and_clear_when_aligned() {
-        assert!(compare_versions(Some("1.2.3"), Some("1.2.3"), Some("1.2.3"), false).is_none());
-        let mismatch =
-            compare_versions(Some("1.2.2"), Some("1.2.3"), Some("1.2.3"), false).unwrap();
-        assert!(mismatch.cause.contains("service=1.2.2"));
-        let moved = compare_versions(Some("1.2.3"), Some("1.2.3"), None, true).unwrap();
+    fn checkout_packages_share_identity_despite_independent_versions() {
+        let root = fixture();
+        fs::create_dir_all(root.join("packages/runtime")).unwrap();
+        fs::create_dir_all(root.join("packages/cli")).unwrap();
+        fs::write(
+            root.join("package.json"),
+            r#"{"workspaces":["packages/*"]}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("packages/runtime/package.json"),
+            r#"{"name":"@openscout/runtime","version":"1.2.3"}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("packages/cli/package.json"),
+            r#"{"name":"@openscout/scout","version":"4.5.6"}"#,
+        )
+        .unwrap();
+        let service = root.join("packages/runtime");
+        let cli = root.join("packages/cli");
+        assert!(compare_packages(&service, &cli).is_none());
+        let installed = root.join("installed");
+        fs::create_dir(&installed).unwrap();
+        fs::copy(cli.join("package.json"), installed.join("package.json")).unwrap();
+        let mismatch = compare_packages(&service, &installed).unwrap();
+        assert!(!mismatch.action.contains("REPOINT"));
+        assert!(compare_packages(&installed, &installed).is_none());
+        let moved = compare_packages(&installed, &cli).unwrap();
         assert!(moved
             .action
-            .contains("OPENSCOUT_ALLOW_SHARED_SERVICE_REPOINT=1 scoutd install"));
-        assert!(compare_versions(Some("1.2.3"), Some("1.2.3"), None, false).is_none());
+            .contains("OPENSCOUT_ALLOW_SHARED_SERVICE_REPOINT=1"));
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn web_discovery_distinguishes_headless_app_missing_entry_and_runtime_intent() {
-        assert!(!observe_web(false, None, true, None).unwrap().expected);
-        assert!(observe_web(false, None, false, None).is_none());
-        let app = observe_web(true, None, false, None).unwrap();
-        assert!(app.expected);
-        assert!(!app.running);
-        assert_eq!(
-            app.cause,
-            "no web entry: legacy-app-services.json is missing"
-        );
-        assert_eq!(app.action, "open Scout.app once");
-        let intent = serde_json::json!({"expected":true,"state":"stopped"});
+    fn web_discovery_skips_unknown_health_and_accepts_external_health() {
         assert!(
-            observe_web(false, Some(&intent), true, None)
+            !observe_web(false, None, true, None, false)
                 .unwrap()
                 .expected
         );
-        let running = serde_json::json!({"expected":true,"state":"running"});
+        assert!(observe_web(false, None, false, None, false).is_none());
+        assert!(collect_web(true, None, false, None, |_| panic!(
+            "unknown health must not probe web"
+        ))
+        .is_none());
+        let app = observe_web(true, None, true, None, false).unwrap();
+        assert!(app.expected && !app.running);
+        assert_eq!(app.action, "open Scout.app once");
+        let intent = serde_json::json!({"expected":true,"state":"stopped"});
         assert!(
-            observe_web(false, Some(&running), true, None)
+            !observe_web(false, Some(&intent), true, None, false)
                 .unwrap()
                 .running
         );
+        assert!(
+            observe_web(false, Some(&intent), true, None, true)
+                .unwrap()
+                .running
+        );
+        let running = serde_json::json!({"expected":true,"state":"running"});
+        assert!(
+            observe_web(false, Some(&running), true, None, false)
+                .unwrap()
+                .running
+        );
+    }
+    #[test]
+    fn external_web_probe_checks_surface_not_just_a_listener() {
+        for (body, healthy) in [
+            (r#"{"ok":true,"surface":"openscout-web"}"#, true),
+            (r#"{"ok":true}"#, false),
+        ] {
+            let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = server.local_addr().unwrap().port();
+            let task = thread::spawn(move || {
+                let (mut stream, _) = server.accept().unwrap();
+                let mut request = [0; 4096];
+                let count = stream.read(&mut request).unwrap();
+                assert!(String::from_utf8_lossy(&request[..count]).contains("GET /api/health"));
+                write!(stream, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{body}\r\n0\r\n\r\n", body.len()).unwrap();
+            });
+            let snapshot = serde_json::json!({"expected": true, "state": "stopped", "port": port});
+            let web = collect_web(true, Some(&snapshot), true, None, |port| {
+                probe_web(port, Some("fixture-token"))
+            })
+            .unwrap();
+            assert_eq!(web.running, healthy);
+            assert!(web.expected);
+            task.join().unwrap();
+        }
+    }
+    #[test]
+    fn named_instance_pairing_uses_its_port_block_without_explicit_pairing_port() {
+        assert_eq!(instance_service_port(None, None, false, 24400), Some(24420));
+        assert_eq!(instance_service_port(None, None, false, 28000), Some(28020));
+        assert_eq!(
+            instance_service_port(None, Some(29020), false, 28000),
+            Some(29020)
+        );
+        assert_eq!(
+            instance_service_port(Some(30020), Some(29020), false, 28000),
+            Some(30020)
+        );
+        assert_eq!(instance_service_port(None, None, true, 43110), Some(43130));
+        assert_eq!(instance_service_port(None, None, false, 65530), None);
+    }
+    #[test]
+    fn shutdown_cancels_a_held_notification_probe_promptly() {
+        let start = Instant::now();
+        let result = capture_until(
+            Command::new("/bin/sleep").arg("10"),
+            Duration::from_secs(10),
+            1024,
+            || start.elapsed() >= Duration::from_millis(30),
+        );
+        assert!(result.unwrap_err().contains("cancelled"));
+        assert!(start.elapsed() < Duration::from_millis(500));
     }
     #[test]
     fn bounded_probe_deadline_terminates_only_the_spawned_probe_child() {

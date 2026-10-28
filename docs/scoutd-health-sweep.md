@@ -6,17 +6,21 @@ pairing, write app service configuration, or signal a pid found on disk.
 
 ## Conditions and actions
 
-The regular sweep runs every 30 seconds, starting at supervisor startup.
+The supervisor requests a regular sweep every 30 seconds, starting at startup.
+A bounded worker collects host observations and delivers notifications. The
+supervisor continues polling its owned children while this work is in progress.
+A result for a replaced base child is discarded. Shutdown cancels spawned probe
+commands and does not wait for the worker thread.
 
 | Condition | Grace | Action |
 | --- | --- | --- |
-| Startup projection degraded by SQLITE_FULL, ENOSPC, or equivalent text | 120 seconds | Wait for both 2 GiB and 5% free space, then restart the owned base child once. |
+| Startup projection degraded by SQLITE_FULL, ENOSPC, or equivalent text | 120 seconds | Wait for 2 GiB free space, then restart the owned base child once. |
 | Other startup projection error | 120 seconds | At most three owned-base restarts; subsequent retries wait 120 seconds, then 240 seconds. |
-| Disk below 2 GiB or 5% free | 60 seconds | Report low space and Scout's top three observed consumers. |
-| Disk below 1 GiB or 2% free | 60 seconds | Mark the same disk condition critical and refresh its consumer inventory. |
+| Disk below max(2 GiB, min(5%, 10 GiB)) free | 60 seconds | Report low space and Scout's top three observed consumers. |
+| Disk below max(1 GiB, min(2%, 2 GiB)) free | 60 seconds | Mark the same disk condition critical and refresh its consumer inventory. |
 | Web expected but not running | 90 seconds | Report the cause. Never start or restart web from scoutd. |
 | Pairing intent running without a relay listener | 90 seconds | Report the cause. Leave pairing claim retry to the runtime. |
-| Version skew | None; checked every 10 minutes | Report the service, CLI, and app versions and the repair action. |
+| Version skew | None; checked every 10 minutes | Report differing service and CLI package installations and the repair action. |
 | Unresolved Scout-owned stale files | None; checked every 10 minutes | Report preserved files that require operator inspection. |
 
 A mutation-ready health response removes a projection condition. Five minutes
@@ -31,7 +35,9 @@ health reports web intent. Bundle discovery checks the service's recorded
 and `/Applications/Scout.app`.
 
 Runtime health exposes explicit intent as `services.web.expected`. A core-only
-base does not request web startup without an entry. A direct web start request
+base retries entry discovery without requesting web startup until an entry is
+available. A missing or rejected entry cannot terminate base. Configuration
+failures are logged and retried, so a later app registration can recover. A direct web start request
 sets intent even if startup fails.
 
 If an expected web service has no entry, the condition says:
@@ -40,17 +46,25 @@ If an expected web service has no entry, the condition says:
 - Action: `open Scout.app once`
 
 scoutd does not write `legacy-app-services.json`. A headless host with neither
-an installed app nor runtime web intent has no web condition. An unknown health
-probe does not clear an existing runtime-intent-only web condition.
+an installed app nor runtime web intent has no web condition. Unknown runtime
+health skips web observation, including on hosts with an app installed. It does
+not create or clear a web incident. A bounded loopback `/api/health` probe on the
+runtime-reported web port accepts a healthy `openscout-web` surface even when
+the broker does not own that web process.
 
 ### Version skew
 
-The slow sweep reads the package directory in the service plist, resolves the
-first executable `scout` on PATH to its package, and reads the app's
-`CFBundleShortVersionString`. It does not execute the CLI on PATH.
+The slow sweep reads the package directory in the service plist and resolves
+the first executable `scout` on PATH to its package. It does not execute that CLI.
 
-A service/CLI directory mismatch is actionable even when versions match. The
-action names this one-time command, run from the new package:
+Runtime and CLI packages in the same source workspace share an installation
+identity. Their package versions can differ. A checkout service never recommends
+a shared-service repoint; a CLI from another installation requires an ownership
+review. The app version is independent and is not compared.
+
+For two installed `@openscout/scout` packages, a directory mismatch is actionable
+even when versions match. The action names this one-time command, run from the
+intended package:
 
 ```sh
 OPENSCOUT_ALLOW_SHARED_SERVICE_REPOINT=1 scoutd install
@@ -69,8 +83,18 @@ exposes the same object as `healthSweep`. Each active condition has:
 The object also has `checkedAt` and restart-budget checkpoints. Menu clients
 must treat old `checkedAt` values as stale evidence, not as recovery.
 
-After a condition's grace, scoutd persists `notifiedAt` before dispatch. A
-supervisor restart therefore does not resend the same incident. Dispatch uses
+After a condition's grace, scoutd persists `notifiedAt` before dispatch.
+Startup projection notices also require escalation: the restart budget must be
+exhausted or a disk-related restart must be waiting for space. A first restart
+that restores readiness is silent. At most one notification is queued per pass.
+Incident timestamps use epoch milliseconds, including across laptop sleep.
+
+A cleared condition retains a per-condition notification cooldown of 30 minutes
+in the checkpoint. Re-entry during that window does not send another notice,
+even after a supervisor restart. Conditions still clear on confirmed recovery.
+
+The persisted reservation prevents a supervisor restart from resending the
+same incident. Dispatch uses
 the service package's `scout notify` implementation, which shares the
 `sendScoutMessage` operator-signal path with MCP `notify_operator`. The command
 uses the supervised instance, not the ambient client instance. If the runtime
@@ -125,7 +149,11 @@ space. Other write errors do not authorize that emergency truncation.
 `SupervisionTestHooks` supplies health, disk, relay, web, and slow observations.
 It intercepts restart and notification actions. Loop tests cover detection,
 grace, bounded action, clear, notification retry, persisted deduplication, and
-slow-cadence scheduling. Filesystem tests cover cleanup and rotation guards.
+slow-cadence scheduling. Collector derivation tests cover checkout identity,
+external web health, unknown runtime health, and named-instance pairing ports.
+Worker tests hold host work while the supervisor polls and shuts down. Probe
+tests cover cancellation and deadlines. Filesystem tests cover cleanup and
+rotation guards, including retry after a partial ENOSPC write.
 
 Run the foreground recovery smoke test after building the checkout binary:
 
