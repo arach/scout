@@ -16,7 +16,7 @@ export function removedScoutVerbError(verb: string, original: string[]): ScoutCl
     const rest = args.filter(arg => arg !== "--tracked");
     candidates = tracked ? [command("ask", rest)] : [command("ask", rest), command("ask", ["--fyi", ...rest])];
   } else if (verb === "operator") {
-    const question = args.some(arg => ["--question", "-q"].includes(arg) || arg.startsWith("--question="));
+    const question = args.some(arg => ["--question", "-q", "--option", "--permission"].includes(arg) || arg.startsWith("--question=") || arg.startsWith("--option="));
     const rest = args.flatMap(arg => arg === "--question" || arg === "-q" || arg === "--message" ? [] : arg.startsWith("--question=") ? [arg.slice(11)] : arg.startsWith("--message=") ? [arg.slice(10)] : [arg]);
     candidates = [command("ask", ["--operator", ...(question ? [] : ["--fyi"]), ...rest])];
   } else if (verb === "notify" || verb === "speak") {

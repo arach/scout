@@ -22,11 +22,11 @@ export function parseReplyCommandOptions(args: string[]) {
     const arg = args[index]!;
     if (arg === "--") { parts.push(...args.slice(index + 1)); break; }
     if (arg === "--progress" || arg === "--failed") { result[arg.slice(2) as "progress" | "failed"] = true; continue; }
-    const flag = ["--ref", "--to", "--image", "--request-id", "--as", "--cwd"].find(flag => arg === flag || arg.startsWith(`${flag}=`));
+    const flag = ["--ref", "--to", "--image", "--request-id", "--as", "--cwd", "--context-root"].find(flag => arg === flag || arg.startsWith(`${flag}=`));
     if (flag) {
       const value = arg.startsWith(`${flag}=`) ? arg.slice(flag.length + 1) : args[++index];
       if (!value?.trim() || value.startsWith("--")) throw new Error(`${flag} needs a value`);
-      const key = ({ "--ref": "ref", "--to": "to", "--image": "image", "--request-id": "requestId", "--as": "sender", "--cwd": "cwd" } as const)[flag as "--ref"];
+      const key = ({ "--ref": "ref", "--to": "to", "--image": "image", "--request-id": "requestId", "--as": "sender", "--cwd": "cwd", "--context-root": "cwd" } as const)[flag as "--ref"];
       if (result[key]) throw new Error(`${flag} may appear only once`);
       result[key] = value; continue;
     }

@@ -39,19 +39,20 @@ test("scout wrapper exposes current ask routing help", () => {
     encoding: "utf8",
   });
 
-  assert.match(output, /--harness <runtime> with no target/);
-  assert.match(output, /--new/);
-  assert.match(output, /scout ask --harness codex/);
+  assert.match(output, /--project <path>/);
+  assert.match(output, /returns on acceptance/);
+  assert.match(output, /scout reply --ref/);
 });
 
-test("tracked send still completes through the command's forced-exit path", () => {
-  const output = execFileSync("bun", ["./bin/scout.mjs", "send", "--tracked", "--help"], {
-    cwd: packageDirectory,
-    env: isolatedEnvironment(),
-    encoding: "utf8",
-    timeout: 10_000,
+test("removed send fails with an argument-preserving rewrite before routing", () => {
+  assert.throws(() => execFileSync("bun", ["./bin/scout.mjs", "send", "--tracked", "--to", "worker", "review this"], {
+    cwd: packageDirectory, env: isolatedEnvironment(), encoding: "utf8", stdio: "pipe", timeout: 10_000,
+  }), error => {
+    assert.notEqual(error.status, 0);
+    assert.match(error.stderr.toString(), /Nothing was sent/);
+    assert.match(error.stderr.toString(), /scout ask --to worker 'review this'/);
+    return true;
   });
-  assert.match(output, /Usage: scout send/);
 });
 
 test("scout wrapper rejects unsupported ask session reuse before routing", () => {

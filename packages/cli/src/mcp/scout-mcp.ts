@@ -1328,6 +1328,9 @@ const askResultSchema = z.object({
 });
 
 const askReceiptSchema = z.object({
+  recording: z.literal("recorded").optional(),
+  notificationStatus: z.enum(["not_requested", "requested_unconfirmed"]).optional(),
+  workerInterrupted: z.boolean().optional(),
   completion: completionStateSchema.extend({ invocationId: z.string(), flightId: z.string() }).optional(),
   parentCompletion: z.object({ flightId: z.string(), revision: z.number().int().min(0) }).optional(),
   links: followLinksSchema.optional(),
@@ -3981,11 +3984,14 @@ export function createScoutMcpServer(options: {
   }, async ({ requestId, ref, to, progress, failed, body, senderId, currentDirectory, image, attachments, sessionId, deliveryId, replyToken }) => {
     validateTaskReply({ ref, to, progress, failed });
     if (sessionId || deliveryId || replyToken) {
-      if (!ref || !sessionId || !deliveryId || progress || failed || image || attachments)
+      if (!ref || !sessionId || !deliveryId)
         throw new Error("external reply requires the task ref and its exact sessionId/deliveryId return address");
       const ownerId = await resolveMcpSenderId(deps, undefined, options.defaultCurrentDirectory, env);
       const result = await aliasBrokerRequest("/v1/external-sessions/reply", {
-        method: "POST", body: JSON.stringify({ ownerId, sessionId, deliveryId, replyToken, body }),
+        method: "POST", body: JSON.stringify({ ownerId, sessionId, deliveryId, replyToken, body, ref,
+          requestId: requestId ?? `reply-${randomUUID()}`, progress, failed,
+          ...(image ? { image: await readTaskImage(resolve(options.defaultCurrentDirectory ?? process.cwd(), image)) } : {}),
+          ...(attachments ? { attachments: attachments.map((a, index) => ({ ...a, id: `attachment-${index}` })) } : {}) }),
       });
       return { content: createTextContent(result) };
     }

@@ -1687,3 +1687,30 @@ describe("two-verb acceptance", () => {
     expect(h.acceptedInvocations).toHaveLength(0); expect(h.postedMessages).toHaveLength(0);
   });
 });
+
+test.each([
+  { target: { kind: "agent_id" as const, agentId: "agent-1" }, task: { version: 1 as const, fyi: true } },
+  { target: { kind: "agent_label" as const, label: "operator" }, task: { version: 1 as const, fyi: true, operator: true } },
+  { target: { kind: "channel" as const, channel: "shared" }, task: { version: 1 as const, fyi: true } },
+])("FYI durable message recovers acceptance without a task or receipt sidecar %#", async route => {
+  let committed: MessageRecord | undefined;
+  const h = createHarness({ isOperatorTarget: () => Boolean(route.task.operator),
+    onPostedMessage: async message => { committed = message; }, readAcceptedMessage: async () => committed });
+  await h.service.accept({ ...route, requestId: "fyi-recovery", requesterId: "agent-1", intent: "consult", body: "news" });
+  const recovered = await h.service.recoverReceipt("agent-1", "fyi-recovery");
+  expect(recovered).toMatchObject({ accepted: true, message: { id: committed!.id } });
+  expect(recovered && "flight" in recovered).toBe(false);
+  expect(h.acceptedInvocations).toHaveLength(0);
+});
+
+test("malformed task evidence and conflicting wire routes fail before reservation", async () => {
+  const h = createHarness();
+  const input: ScoutDeliverRequest = { requestId: "invalid", intent: "consult", body: "news", requesterId: "agent-1",
+    target: { kind: "agent_id", agentId: "agent-1" }, task: { version: 1, fyi: true },
+    image: { data: "aGVsbG8=", mediaType: "image/png" } };
+  await expect(h.service.accept(input)).rejects.toThrow("attachment_mime_mismatch");
+  await expect(h.service.accept({ ...input, image: undefined, task: { version: 1, operator: true } })).rejects.toThrow("another recipient");
+  await expect(h.service.accept({ ...input, image: undefined, task: { version: 1, ref: "parent" } })).rejects.toThrow("another recipient");
+  expect(h.localAgentSyncReasons).toHaveLength(0);
+  expect(h.ensuredActors).toHaveLength(0);
+});

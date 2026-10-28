@@ -57,3 +57,12 @@ test("reply is final by default; progress and failure stay typed and out of body
   expect(() => parseReplyCommandOptions(["--ref", "inv-1", "--progress", "--failed", "broken"])).toThrow();
   expect(() => parseReplyCommandOptions(["done"])).toThrow();
 });
+
+test("missing values do not consume another flag and implicit asks are strict too", async () => {
+  for (const flag of ["--ref", "--harness", "--project", "--request-id"]) {
+    expect(() => parseAskCommandOptions([flag, "--fyi", "news"], "/repo")).toThrow("value");
+  }
+  const { parseImplicitAskCommandOptions } = await import("./options.ts");
+  expect(() => parseImplicitAskCommandOptions(["@worker", "--message-file", "brief.md"], "/repo")).toThrow("unknown flag");
+  expect(() => parseImplicitAskCommandOptions(["@worker", "--notify", "review"], "/repo")).toThrow("--notify now pushes");
+});

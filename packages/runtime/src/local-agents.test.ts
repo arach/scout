@@ -1581,3 +1581,16 @@ describe("waitForReadyComposer deadline", () => {
     expect(pane.elapsed()).toBe(0);
   });
 });
+
+test("canonical task images expose authorized attachment reads instead of invented public URLs", () => {
+  const prompt = buildLocalAgentNudge("worker", {
+    id: "inv-image", requesterId: "operator", requesterNodeId: "node", targetAgentId: "worker", action: "consult",
+    task: "Inspect this evidence", messageId: "msg-image", conversationId: "conversation", ensureAwake: true, stream: false, createdAt: 1,
+    context: { scoutMessageAttachments: [{ id: "image", mediaType: "image/png", blob: { sha256: "a".repeat(64), mediaType: "image/png", byteSize: 8 },
+      conversationId: "conversation", messageId: "msg-image" }] },
+  }, "flight-image");
+  expect(prompt).toContain("attachments_read");
+  expect(prompt).toContain('"messageId":"msg-image"');
+  expect(prompt).toContain('"conversationId":"conversation"');
+  expect(prompt).not.toContain("/api/blobs/");
+});

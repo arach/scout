@@ -2630,7 +2630,7 @@ function conversationDefinition(
   targetParticipantIds: string[] = [],
 ): ScoutBrokerConversationRecord {
   const requestedChannel = channel?.trim();
-  if (!requestedChannel) throw new Error("Delivery requires an explicit target or channel; use scout broadcast to tell everyone.");
+  if (!requestedChannel) throw new Error("Delivery requires an explicit target or channel; use scout ask --channel shared --fyi for shared news.");
   const normalizedChannel = scoutChannelName(requestedChannel);
   const naturalKey = scoutChannelNaturalKey(normalizedChannel);
   const broadcastParticipants = normalizedChannel === "broadcast" ? [

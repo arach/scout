@@ -1,3 +1,4 @@
+import { decodeAttachment, imageMimes, postWithAttachmentsSchema, validateAttachmentBytes } from "./attachment-contract.js";
 import { validateTaskAsk, taskNotificationPolicy, SCOUT_TASKS_CAPABILITY } from "@openscout/protocol";
 import { isExternalSessionEndpoint } from "./external-session-transport.js";
 import { acceptSessionInput, recoverSessionInputDelivery, validateSessionInputRequest, type SessionInputDeliveryOptions } from "./broker-session-input-delivery.js";
@@ -381,6 +382,10 @@ export class BrokerDeliveryAcceptanceService {
     const message = this.options.readAcceptedMessage
       ? await this.options.readAcceptedMessage(id)
       : await readMessageRecord(this.options.runtimeSnapshot().messages, id);
+    if (message?.actorId === requesterId && message.metadata?.requestId === requestId
+      && message.metadata?.taskVersion === 1 && message.metadata?.taskFyiReceipt) {
+      return { ...(message.metadata.taskFyiReceipt as Omit<Extract<ScoutDeliverResponse, { kind: "delivery" }>, "message">), message };
+    }
     return recoverSessionInputDelivery(message, requesterId, requestId) ?? recoverAcceptedDelivery(message, requesterId, requestId);
   }
 
@@ -734,6 +739,12 @@ export class BrokerDeliveryAcceptanceService {
         },
       };
       let flight: FlightRecord | undefined;
+      const operatorAcceptance: DeliveryAcceptanceEnvelope = {
+        version: 1, requesterId, requestId,
+        response: { kind: "delivery", accepted: true, routeKind, conversation, targetAgentId: this.options.operatorActorId },
+        receiptInput: { requestId, routeKind, requesterId, requesterNodeId, targetAgentId: this.options.operatorActorId,
+          targetLabel: "@operator", conversationId: conversation.id, messageId },
+      };
       if (payload.task && !payload.task.fyi) {
         const work = await (this.options.prepareDeliveryWorkItemIfNeeded ?? this.options.recordDeliveryWorkItemIfNeeded)({
           payload, requestId, requesterId, targetAgentId: this.options.operatorActorId, conversationId: conversation.id, createdAt });
@@ -748,6 +759,7 @@ export class BrokerDeliveryAcceptanceService {
             because: payload.task.because, notificationPolicy: taskNotificationPolicy(payload.task),
             replyToSessionId, replyMode: payload.invocationMetadata?.replyMode ?? "notify" },
         };
+        message.metadata = { ...message.metadata, scoutAcceptance: operatorAcceptance };
         flight = await this.acceptInvocation(invocation, message, payload, work.pendingCreation);
       } else await this.postMessage(message, payload);
       if (operatorSignal) {
@@ -774,6 +786,7 @@ export class BrokerDeliveryAcceptanceService {
         });
       }
       throwIfAborted(options.signal);
+      if (flight) return acceptedDeliveryResponse(message, operatorAcceptance, flight);
       return {
         kind: "delivery",
         accepted: true,
@@ -785,7 +798,6 @@ export class BrokerDeliveryAcceptanceService {
           requesterNodeId,
           targetAgentId: this.options.operatorActorId,
           targetLabel: "@operator",
-          ...(flight ? { flightId: flight.id } : {}),
           conversationId: conversation.id,
           messageId,
         }),
@@ -1360,6 +1372,15 @@ export class BrokerDeliveryAcceptanceService {
   }
 
   private async postMessage(message: MessageRecord, payload: ScoutDeliverRequest): Promise<unknown> {
+    if (payload.task?.fyi) {
+      const conversation = this.options.runtimeSnapshot().conversations[message.conversationId];
+      if (conversation) {
+        const routeKind = this.options.brokerRouteKind(conversation);
+        const receipt = buildDeliveryReceipt({ requestId: payload.requestId!, routeKind,
+          requesterId: message.actorId, requesterNodeId: message.originNodeId!, targetLabel: this.options.metadataStringValue(message.metadata, "relayTarget") ?? "", conversationId: conversation.id, messageId: message.id });
+        message.metadata = { ...message.metadata, taskFyiReceipt: { kind: "delivery", accepted: true, routeKind, conversation, receipt } };
+      }
+    }
     if (payload.image) {
       if (!this.options.withTaskImage) throw new Error("task image uploads are unavailable");
       return this.options.withTaskImage(message, payload.image, () => this.options.postConversationMessage(message));
@@ -1389,6 +1410,19 @@ async function firstMatchingMessage(records: Record<string, MessageRecord>, pred
 export function validateTaskDelivery(payload: ScoutDeliverRequest): void {
   const task = payload.task;
   if (!task) return;
+  if (payload.image) {
+    const upload = postWithAttachmentsSchema.shape.attachments.element.parse(payload.image);
+    if (!imageMimes.has(upload.mediaType)) throw new Error("task evidence must be an image");
+    validateAttachmentBytes(decodeAttachment(upload.data), upload.mediaType);
+  }
+  if ((task.ref || task.continue) && targetIsNotTaskRef(payload.target))
+    throw new Error("--ref and --continue cannot be combined with another recipient route");
+  if (task.operator && payload.target && !(
+    payload.target.kind === "agent_id" && payload.target.agentId === "operator"
+    || payload.target.kind === "agent_label" && payload.target.label.replace(/^@/, "") === "operator"))
+    throw new Error("--operator cannot be combined with another recipient route");
+  if ((payload.completion || payload.relation) && (task.fyi || task.operator || task.ref || task.continue))
+    throw new Error("completion contracts require a new agent task");
   if (task.version !== 1 || !payload.requestId?.trim()) throw new Error("task asks require version 1 and a stable requestId");
   const target = payload.target;
   validateTaskAsk(task, {
@@ -1399,4 +1433,8 @@ export function validateTaskDelivery(payload: ScoutDeliverRequest): void {
       || payload.projectAgent || payload.execution?.targetSessionId || payload.execution?.session),
     relation: Boolean(payload.relation),
   });
+}
+
+function targetIsNotTaskRef(target: ScoutDeliverRequest["target"]): boolean {
+  return Boolean(target && target.kind !== "binding_ref");
 }

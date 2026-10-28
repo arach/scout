@@ -26,6 +26,13 @@ test('core HTTP adapter reaches a protected isolated broker and records real ope
   expect(message?.actorId).toBe(p.agentId);
   const reply = await adapter.call('reply',{body:'isolated follow-up',to:message.id});
   expect(reply).toBeDefined();
+  const task = await adapter.call('ask',{operator:true,body:'Choose a deployment target',options:['staging','prod'],requestId:'operator-task'});
+  const accepted = await client.request('/v1/snapshot');
+  expect(accepted.invocations[task.ids.invocationId].metadata.humanOwned).toBe(true);
+  expect(task.flightId).toBeDefined();
+  await client.request('/v1/messages/reply',{ref:task.ids.invocationId,senderId:'operator',requestId:'operator-answer',body:'staging'});
+  const finished = await adapter.call('invocations_wait',{flightId:task.flightId,timeoutSeconds:1});
+  expect(finished.flight.state).toBe('completed');
   await broker.seedBasicConversation(h);
   const seeded = await client.request('/v1/snapshot');
   await client.request('/v1/agents',{...seeded.agents.fabric,id:'other-target',displayName:'Other target'});

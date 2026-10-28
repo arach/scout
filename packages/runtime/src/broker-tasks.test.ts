@@ -184,3 +184,24 @@ test("a committed harness result outbox can deliver after completion, but an exp
   await expect(answer()).rejects.toThrow("already completed");
   expect(Object.values(h.runtime.peek().messages).filter(m => m.replyToMessageId === "ask-parent")).toHaveLength(1);
 });
+
+test("canonical writer upgrades a stale queued follow-up to live-session delivery", async () => {
+  const { h } = await taskFixture("running");
+  const followup: MessageRecord = { ...reply(), id: "stale-followup", actorId: "operator", class: "status",
+    audience: { delivery: "none" }, body: "new context", metadata: { taskFollowup: { invocationId: "parent" } } };
+  await h.records.recordMessage(followup);
+  expect(h.runtime.peek().messages[followup.id]?.audience).toMatchObject({ notify: ["worker"] });
+});
+
+test("old remote task homes fail locally with a capability diagnostic before forwarding", async () => {
+  const { ask, answer } = await taskFixture("running", { taskHomeNodeId: "old-peer" });
+  await expect(ask()).rejects.toThrow("ask-reply/1");
+  await expect(answer()).rejects.toThrow("ask-reply/1");
+});
+
+test("successor launch overrides are separate from the predecessor route", async () => {
+  const { ask, successors } = await taskFixture("completed");
+  await ask({ task: { version: 1, continue: "parent", successor: { host: "build-peer", projectPath: "/project" } } });
+  expect(successors[0]).toMatchObject({ target: { kind: "project_path", host: "build-peer", projectPath: "/project" },
+    execution: { session: "new" }, invocationMetadata: { predecessorTaskId: "parent" } });
+});

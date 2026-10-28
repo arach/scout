@@ -917,6 +917,10 @@ export function parseAskCommandOptions(
 
   for (let index = 0; index < parsed.args.length; index += 1) {
     const current = parsed.args[index] ?? "";
+    const valueFlags = ["--ref", "--to", "--project", "--on", "--host", "--profile", "--runtime", "--harness", "--model", "--effort", "--reasoning-effort",
+      "--completion", "--join-to", "--continue-for", "--request-id", "--as", "--channel", "--alias-project", "--alias-host", "--session",
+      "--timeout", "--reply-mode", "--placement", "--label", "--labels", "--prompt-file", "--body-file"];
+    if (valueFlags.includes(current) && (!parsed.args[index + 1]?.trim() || parsed.args[index + 1]!.startsWith("--"))) missingFlagValue(current);
     if (current === "--") { messageParts.push(...parsed.args.slice(index + 1)); break; }
     const taskBoolean = ({ "--operator": "operator", "--fyi": "fyi", "--notify": "notify", "--cancel": "cancel", "--permission": "permission" } as const)[current as "--operator"];
     if (taskBoolean) { task[taskBoolean] = true; continue; }
@@ -1320,10 +1324,7 @@ export function parseImplicitAskCommandOptions(
       replyMode = "none";
       continue;
     }
-    if (current === "--notify") {
-      replyMode = "notify";
-      continue;
-    }
+    if (current === "--notify") throw new ScoutCliError("--notify now pushes to the operator; asks return on acceptance by default");
     if (current === "--placement" || current.startsWith("--placement=")) {
       const value = parseFlagValue(parsed.args, index, "--placement");
       if (value.value !== "background" && value.value !== "foreground" && value.value !== "attached") {
@@ -1361,6 +1362,8 @@ export function parseImplicitAskCommandOptions(
       index = value.nextIndex;
       continue;
     }
+    if (current === "--") { messageParts.push(...parsed.args.slice(index + 1)); break; }
+    if (current.startsWith("-")) throw new ScoutCliError(`unknown flag ${current}; run scout ask --help`);
     messageParts.push(current);
   }
 

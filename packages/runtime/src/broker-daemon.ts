@@ -2098,6 +2098,7 @@ const replyCompletionRecovery = new BrokerReplyCompletionRecovery({
 
 const externalSessionService = new BrokerExternalSessionService({
   nodeId,
+  replyTask: input => taskService.reply(input),
   connections: () => externalSessionConnections(process.env),
   transport: (connection) => devinSessionTransport(connection),
   endpoints: () => Object.values(runtime.snapshot().endpoints),

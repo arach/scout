@@ -723,7 +723,7 @@ describe("parseImplicitAskCommandOptions", () => {
 
   test("parses non-blocking ask reply modes", () => {
     const notify = parseImplicitAskCommandOptions(
-      ["--notify", "@talkie", "take", "another", "pass"],
+      ["--reply-mode", "notify", "@talkie", "take", "another", "pass"],
       "/tmp/workspace",
     );
     const noWait = parseImplicitAskCommandOptions(
