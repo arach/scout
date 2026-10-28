@@ -234,3 +234,28 @@ test("a typed final on a pre-upgrade task fences a racing harness result", async
   expect(h.journal.getCurrentFlightForInvocation("parent")).toMatchObject({ state: "completed", output: "result", metadata: { replyMessageId: reply().id } });
   expect(Object.values(h.runtime.peek().messages).filter(m => m.replyToMessageId === "ask-parent")).toHaveLength(1);
 });
+
+test("two nodes deliver a versioned task's automatic result through conversation authority once", async () => {
+  const authority = await fixture();
+  const forwarded: MessageRecord[] = [];
+  const worker = await fixture({ nodeId: "worker-node", mesh: {
+    authorityNodeForConversation: () => ({ id: "node" }),
+    forwardConversationMessageToAuthority: async (message: MessageRecord) => {
+      forwarded.push(message);
+      const result = await authority.messages.postConversationMessage(message);
+      return { ...result, forwarded: true, authorityNodeId: "node" };
+    }, forwardPeerBrokerDeliveries: async () => ({}) } });
+  const task = invocation("parent", { completion: undefined, taskVersion: 1, taskHomeNodeId: "node" });
+  await authority.accept(task); await worker.accept(task);
+  const { createInvocationResultReplyIntent, BrokerInvocationResultDeliveryService } = await import("./broker-invocation-result-delivery-service.js");
+  const intent = createInvocationResultReplyIntent(task.id, { ...reply(), metadata: { invocationId: task.id, flightId: "flight-parent" } });
+  await worker.lifecycle.recordFlight({ ...flight(task), state: "completed", output: intent.message.body, completedAt: intent.message.createdAt, metadata: { resultReply: intent } });
+  const outbox = new BrokerInvocationResultDeliveryService({ flightForInvocation: id => worker.journal.getCurrentFlightForInvocation(id),
+    postMessage: worker.messages.postConversationMessage, markDelivered: async () => true });
+  expect(await outbox.deliver(task.id)).toBe("delivered");
+  await worker.messages.postConversationMessage(intent.message);
+  expect(forwarded.every(message => !message.metadata?.completionReply)).toBe(true);
+  expect(authority.journal.getCurrentFlightForInvocation(task.id)?.state).toBe("completed");
+  expect(Object.values(authority.runtime.peek().messages).filter(m => m.replyToMessageId === task.messageId)).toHaveLength(1);
+  expect(worker.runtime.peek().messages[intent.message.id]).toBeUndefined();
+});

@@ -102,11 +102,13 @@ export class BrokerMessageService {
     authorityNodeId?: string;
     duplicate?: boolean;
   }> => {
-    message = taskCompletionMessage(message, this.deps.runtime.snapshot().invocations,
+    // Only the conversation authority may add task completion semantics. A
+    // worker's automatic result must cross the mesh as an ordinary reply.
+    const completionMessage = taskCompletionMessage(message, this.deps.runtime.snapshot().invocations,
       id => this.deps.completionCurrentFlight?.(id) ?? this.deps.runtime.flightForInvocation(id));
     const existing = await readMessageRecord(this.deps.runtime.peek().messages,message.id);
     if (existing) {
-      if (!isIdempotentMessageRetry(existing, message)) {
+      if (!isIdempotentMessageRetry(existing, completionMessage)) {
         throw new Error(`message id ${message.id} is already assigned to a different record`);
       }
       await this.completeInvocationsForBrokerReply(existing);
@@ -124,7 +126,7 @@ export class BrokerMessageService {
       if (!isFinalReplyForInvocation(message, invocation)) continue;
       const receipt = acceptedInvocationReply(this.deps.runtime.flightForInvocation(invocation.id), invocation);
       if (receipt?.message.id !== message.id) continue;
-      if (!isIdempotentMessageRetry(receipt.message, message)) {
+      if (!isIdempotentMessageRetry(receipt.message, completionMessage)) {
         // Legacy broker replies have no client ID; only their exact retry qualifies.
         if (!isDeepStrictEqual(receipt.message, message)) {
           throw new Error(`message id ${message.id} is already assigned to a different record`);
@@ -142,7 +144,7 @@ export class BrokerMessageService {
       const accepted = forwarded.message;
       if (accepted !== undefined) {
         if (!accepted || accepted.id !== message.id || !Number.isFinite(accepted.createdAt)
-          || !(isIdempotentMessageRetry(canonicalMessageRecord(accepted), canonicalMessageRecord(message))
+          || !(isIdempotentMessageRetry(canonicalMessageRecord(accepted), canonicalMessageRecord(completionMessage))
             || isDeepStrictEqual(canonicalMessageRecord(accepted), canonicalMessageRecord(message)))) {
           throw new Error(`authority ${forwarded.authorityNodeId} returned a conflicting canonical message for ${message.id}`);
         }
@@ -161,6 +163,7 @@ export class BrokerMessageService {
       };
     }
 
+    message = completionMessage;
     const { deliveries, entries, duplicate } = await this.deps.recordMessage(message, {
       enqueueProjection: false,
       dedupeExisting: true,
