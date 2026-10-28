@@ -11,7 +11,7 @@ The regular sweep runs every 30 seconds, starting at supervisor startup.
 | Condition | Grace | Action |
 | --- | --- | --- |
 | Startup projection degraded by SQLITE_FULL, ENOSPC, or equivalent text | 120 seconds | Wait for both 2 GiB and 5% free space, then restart the owned base child once. |
-| Other startup projection error | 120 seconds | At most three owned-base restarts, with 120/240/480-second retry intervals. |
+| Other startup projection error | 120 seconds | At most three owned-base restarts; subsequent retries wait 120 seconds, then 240 seconds. |
 | Disk below 2 GiB or 5% free | 60 seconds | Report low space and Scout's top three observed consumers. |
 | Disk below 1 GiB or 2% free | 60 seconds | Mark the same disk condition critical and refresh its consumer inventory. |
 | Web expected but not running | 90 seconds | Report the cause. Never start or restart web from scoutd. |
