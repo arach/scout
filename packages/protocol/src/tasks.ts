@@ -60,3 +60,22 @@ export function validateTaskReply(reply: Pick<ScoutTaskReply, "ref" | "to" | "pr
 export function taskNotificationPolicy(task: ScoutTaskAsk): ScoutNotificationPolicy {
   return { requested: !task.fyi || Boolean(task.notify), priority: task.defaultAction ? "normal" : "interrupting" };
 }
+
+/** A correlated authority refusal, not a transport failure or successful delivery. */
+export type TaskClosedRefusal = {
+  error: "task_closed";
+  taskId: string;
+  flightId: string;
+  messageId: string;
+  reason: "completed" | "failed" | "cancelled" | "already_answered";
+};
+export function taskClosedRefusal(value: unknown): TaskClosedRefusal | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const v = value as Record<string, unknown>;
+  return v.error === "task_closed" && [v.taskId, v.flightId, v.messageId].every(id => typeof id === "string" && id.length > 0)
+    && ["completed", "failed", "cancelled", "already_answered"].includes(v.reason as string) ? v as TaskClosedRefusal : undefined;
+}
+export class TaskClosedError extends Error {
+  constructor(readonly refusal: TaskClosedRefusal, detail: string) { super(detail); }
+  toJSON(): TaskClosedRefusal { return this.refusal; }
+}

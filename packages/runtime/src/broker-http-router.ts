@@ -10,7 +10,7 @@ import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
 import type { MeshDiagnostics } from "./mesh-diagnostics.js";
-import { completionReply } from "@openscout/protocol";
+import { TaskClosedError, completionReply } from "@openscout/protocol";
 import { PermissionDeliveryUnconfirmedError, type BrokerPermissionService } from "./broker-permission-service.js";
 import { BrokerBusyError } from "./broker-storage-pressure.js";
 import { handleBrokerHistoryRoute, type BrokerHistoryQueries } from "./broker-history-http-service.js";
@@ -163,7 +163,8 @@ import {
 import { normalizeConversationTitle } from "./conversation-title.js";
 
 function badRequest(response: RuntimeHttpResponseLike, error: unknown): void {
-  if (error instanceof BrokerBusyError) json(response, 503, { error: error.code, retryable: true, detail: error.message });
+  if (error instanceof TaskClosedError) json(response, 409, { ...error.toJSON(), detail: error.message });
+  else if (error instanceof BrokerBusyError) json(response, 503, { error: error.code, retryable: true, detail: error.message });
   else writeBadRequest(response, error);
 }
 

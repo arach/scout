@@ -1,3 +1,6 @@
+import { TaskClosedError } from "@openscout/protocol";
+import { BrokerMeshHttpService } from "./broker-mesh-http-service.js";
+import { forwardMeshMessage } from "./mesh-forwarding.js";
 import { BrokerTaskService } from "./broker-tasks.js";
 import { PassThrough } from "node:stream";
 import { EventEmitter } from "node:events";
@@ -74,7 +77,7 @@ async function fixture(options: { nodeId?: string; authorize?: (invocation: Invo
     const request = { ...invocation(id, { completion: undefined, completionRelation: { parentFlightId: "flight-parent", kind } }), requesterId: "worker", targetAgentId: "helper", metadata: { completion: undefined, completionLocalNodeId: "node", completionEndpointId: "endpoint-helper", completionRelation: { parentFlightId: "flight-parent", kind } } };
     return accept(request);
   }
-  return { accept, child, frames, get runtime() { return runtime; }, get records() { return records; }, get lifecycle() { return lifecycle; }, get messages() { return messages; }, get journal() { return journal; },
+  return { accept, child, frames, runWrite, get runtime() { return runtime; }, get records() { return records; }, get lifecycle() { return lifecycle; }, get messages() { return messages; }, get journal() { return journal; },
     failParentApply() { failApplyParent = true; },
     async reopen() { journal = new FileBackedBrokerJournal(path); await journal.load(); runtime = createInMemoryControlRuntime(journal.snapshot(), { localNodeId: nodeId }); configure(); },
   };
@@ -319,4 +322,64 @@ test("task suffixes need eight characters and ambiguous matches fail closed", as
   await expect(tasks.resolve("abcdefgh")).rejects.toThrow("ambiguous task");
   await expect(tasks.resolve("bcdefgh")).rejects.toThrow("unknown task");
   expect((await tasks.resolve("first-abcdefgh")).invocation.id).toBe("first");
+});
+
+test.each(["explicit", "cancel"])("remote %s supersedes an automatic result durably without retrying it", async winner => {
+  const authority = await fixture();
+  const ingress = new BrokerMeshHttpService({ nodeId: "node", runtime: authority.runtime,
+    runDurableWrite: authority.runWrite, applyMeshBundle: async () => [], applyProjectedEntries: async () => {},
+    recordAuthorityMessage: message => authority.records.recordMessageUnderWriter(message, { dedupeExisting: true }),
+    messageFor: async id => authority.runtime.peek().messages[id],
+    completeInvocationsForBrokerReply: authority.messages.completeInvocationsForBrokerReply,
+  } as any);
+  let attempts = 0, offline = true;
+  const worker = await fixture({ nodeId: "worker-node", mesh: {
+    authorityNodeForConversation: () => ({ id: "node" }),
+    forwardConversationMessageToAuthority: async (message: MessageRecord) => {
+      attempts++;
+      if (offline) throw new Error("authority offline");
+      const result = await forwardMeshMessage("http://authority.test", {
+        originNode: { id: "worker-node" }, actors: [], agents: [], bindings: [],
+        conversation: authority.runtime.peek().conversations[message.conversationId]!, message,
+      } as any, { peerFetch: async (_base, _path, init) => {
+        try {
+          const accepted = await ingress.receiveMessageBundle(JSON.parse(init!.body as string));
+          return Response.json(accepted.body, { status: accepted.status });
+        } catch (error) {
+          if (error instanceof TaskClosedError) return Response.json(error.toJSON(), { status: 409 });
+          throw error;
+        }
+      } });
+      return { ...result, forwarded: true, authorityNodeId: "node" };
+    }, forwardPeerBrokerDeliveries: async () => ({}) } });
+  const task = invocation("parent", { completion: undefined, taskVersion: 1, taskHomeNodeId: "node" });
+  await authority.accept(task); await worker.accept(task);
+  const { createInvocationResultReplyIntent, BrokerInvocationResultDeliveryService } = await import("./broker-invocation-result-delivery-service.js");
+  const intent = createInvocationResultReplyIntent(task.id, { ...reply(), metadata: { invocationId: task.id, flightId: "flight-parent" } });
+  await worker.lifecycle.recordFlight({ ...flight(task), state: "completed", output: intent.message.body, completedAt: intent.message.createdAt, metadata: { resultReply: intent } });
+  const makeOutbox = () => new BrokerInvocationResultDeliveryService({
+    flightForInvocation: (id: string) => worker.journal.getCurrentFlightForInvocation(id),
+    postMessage: worker.messages.postConversationMessage,
+    markDelivered: async () => { throw new Error("refused output must not be delivered"); },
+    markSuperseded: async (_id: string, _expected: unknown, refusal: unknown) => {
+      const current = worker.journal.getCurrentFlightForInvocation(task.id)!;
+      const updated = { ...current, metadata: { ...current.metadata, resultReply: { ...intent, status: "superseded", refusal } } };
+      await worker.journal.appendEntries({ kind: "flight.record", flight: updated });
+      await worker.runtime.upsertFlight(updated); return true;
+    },
+  } as any);
+  const outbox = makeOutbox();
+  expect(await outbox.deliver(task.id)).toBe("failed"); // Network failure stays pending.
+  if (winner === "explicit") await authority.messages.postConversationMessage(reply(0, "final", "explicit-winner"));
+  else await authority.lifecycle.recordFlight({ ...flight(task), state: "cancelled", completedAt: 4 });
+  offline = false;
+  expect(await outbox.deliver(task.id)).toBe("superseded");
+  expect(attempts).toBe(2);
+  expect(worker.journal.getCurrentFlightForInvocation(task.id)?.metadata?.resultReply).toMatchObject({ status: "superseded",
+    refusal: { error: "task_closed", taskId: task.id, messageId: intent.message.id } });
+  await worker.reopen();
+  const restarted = makeOutbox();
+  expect(restarted.recover(worker.journal.pendingInvocationResultFlights()).scheduled).toBe(0);
+  expect(await restarted.deliver(task.id)).toBe("stale");
+  expect(attempts).toBe(2);
 });

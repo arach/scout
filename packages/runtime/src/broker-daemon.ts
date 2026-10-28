@@ -798,6 +798,7 @@ const applyMeshBundleDurably = meshBundleService.applyBundle;
 const activeInvocationTasks = new Map<string, Promise<void>>();
 const knownInvocations = new Map<string, InvocationRequest>(Object.entries(initialSnapshot.invocations));
 const meshHttpService = new BrokerMeshHttpService({
+  recordAuthorityMessage: message => durableRecords.recordMessageUnderWriter(message, { dedupeExisting: true, localOnly: true, enqueueProjection: false }),
   nodeId,
   runtime,
   runDurableWrite,
@@ -857,7 +858,7 @@ const controlStreams = new BrokerControlStreamService({
 const operatorActorId = "operator";
 let attachmentService: BrokerAttachmentService | undefined;
 let attachmentBlobStore: AttachmentBlobStore | undefined;
-const durableRecords = new BrokerDurableRecordStore({
+const durableRecords: BrokerDurableRecordStore = new BrokerDurableRecordStore({
   assertMessageAdmission: message => {
     if (!message.attachments?.some(a => a.blob !== undefined)) return;
     if (!attachmentService) throw new AttachmentError("attachments_unavailable");
@@ -2185,6 +2186,14 @@ const invocationResultDeliveryService = new BrokerInvocationResultDeliveryServic
     const flight: FlightRecord = { ...current, metadata: {
       ...current.metadata, resultReply: { ...expected, status: "delivered", deliveredAt: Date.now() },
     } };
+    await durableStore.commitEntries({ kind: "flight.record", flight }, async () => { await runtime.upsertFlight(flight); });
+    return true;
+  }),
+  markSuperseded: (invocationId, expected, refusal) => durableStore.runWrite(async () => {
+    const current = runtime.flightForInvocation(invocationId);
+    if (!current || !matchesPendingInvocationResultReply(current, expected)) return false;
+    const flight: FlightRecord = { ...current, metadata: { ...current.metadata,
+      resultReply: { ...expected, status: "superseded", supersededAt: Date.now(), refusal } } };
     await durableStore.commitEntries({ kind: "flight.record", flight }, async () => { await runtime.upsertFlight(flight); });
     return true;
   }),

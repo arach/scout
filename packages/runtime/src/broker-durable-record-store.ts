@@ -649,7 +649,18 @@ export class BrokerDurableRecordStore {
       enqueueProjection?: boolean;
     } = {},
   ): Promise<{ deliveries: DeliveryIntent[]; entries: BrokerJournalEntry[]; duplicate?: MessageRecord }> => {
-    return this.options.durableStore.runWrite(async () => {
+    return this.options.durableStore.runWrite(() => this.recordMessageUnderWriter(message, options));
+  };
+
+  /** Internal composition seam: caller already holds the canonical durable writer. */
+  readonly recordMessageUnderWriter = async (
+    message: MessageRecord,
+    options: {
+      localOnly?: boolean;
+      dedupeExisting?: boolean;
+      enqueueProjection?: boolean;
+    } = {},
+  ): Promise<{ deliveries: DeliveryIntent[]; entries: BrokerJournalEntry[]; duplicate?: MessageRecord }> => {
       this.assertMessageAdmission(message);
       message = taskCompletionMessage(message, this.options.runtime.peek().invocations,
         id => this.options.completionCurrentFlight?.(id) ?? this.options.runtime.flightForInvocation?.(id));
@@ -727,7 +738,6 @@ export class BrokerDurableRecordStore {
         { enqueueProjection: options.enqueueProjection },
       );
       return { deliveries, entries };
-    });
   };
 
   readonly recordInvocation = async (
