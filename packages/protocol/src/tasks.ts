@@ -4,6 +4,8 @@ export type ScoutTaskAsk = {
   version: 1;
   ref?: string;
   continue?: string;
+  /** Successor launch overrides, transported separately from the predecessor route. */
+  successor?: { host?: string; projectPath?: string };
   cancel?: boolean;
   fyi?: boolean;
   operator?: boolean;
@@ -34,6 +36,7 @@ export function validateTaskAsk(task: ScoutTaskAsk, route: {
 }): void {
   const modes = [route.to, task.operator, route.channel, route.capability, task.ref, task.continue].filter(Boolean);
   if (modes.length !== 1) throw new Error("ask requires exactly one routing mode: --to, --operator, --channel, --project, --ref, or --continue");
+  if (task.successor && !task.continue) throw new Error("successor launch overrides require --continue");
   if (task.cancel && !task.ref) throw new Error("--cancel requires --ref");
   if (task.fyi && (task.ref || task.continue || task.cancel || route.capability)) throw new Error("--fyi cannot use --ref, --continue, --cancel or capability routing");
   if (route.execution && (task.ref || task.fyi)) throw new Error("execution flags cannot be combined with --ref or --fyi");

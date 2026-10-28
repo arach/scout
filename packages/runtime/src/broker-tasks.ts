@@ -76,8 +76,16 @@ export class BrokerTaskService {
     if (request.continue) {
       if (!taskTerminal(flight)) throw new Error(`task ${invocation.id} is unfinished; use --ref ${invocation.id}`);
       const context = `Previous task ${invocation.id} (${flight.state}):\n${flight.output ?? flight.error ?? flight.summary ?? "No result recorded."}`;
+      const overrides = request.successor;
+      const endpoint = Object.values(this.options.snapshot().endpoints).find(item => item.agentId === invocation.targetAgentId
+        && (item.projectRoot || item.cwd));
+      const projectPath = overrides?.projectPath ?? endpoint?.projectRoot ?? endpoint?.cwd;
+      if (overrides?.host && !projectPath) throw new Error("successor --on needs a known predecessor project; supply --project");
+      const target = overrides?.host || overrides?.projectPath
+        ? { kind: "project_path" as const, projectPath: projectPath!, ...(overrides.host ? { host: overrides.host } : {}) }
+        : { kind: "agent_id" as const, agentId: invocation.targetAgentId };
       return this.options.accept({ ...payload, task: { version: 1 },
-        target: { kind: "agent_id", agentId: invocation.targetAgentId }, targetAgentId: invocation.targetAgentId,
+        target, targetAgentId: target.kind === "agent_id" ? invocation.targetAgentId : undefined,
         body: `${context}\n\nSuccessor task:\n${payload.body}`, execution: { ...payload.execution, session: "new" },
         invocationMetadata: { ...payload.invocationMetadata, predecessorTaskId: invocation.id, predecessorState: flight.state } });
     }

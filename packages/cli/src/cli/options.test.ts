@@ -286,13 +286,13 @@ describe("parseAskCommandOptions", () => {
     expect(options.message).toBe("review this");
   });
 
-  test("parses reserved bare profile names as fresh current-project routes", () => {
+  test("parses explicit profiles as fresh current-project routes", () => {
     const fable = parseAskCommandOptions(
-      ["Fable", "to", "review", "this"],
+      ["--profile", "Fable", "review", "this"],
       "/tmp/workspace",
     );
     const opus = parseAskCommandOptions(
-      ["Opus", "with", "HIGH", "effort", "to", "fix", "the", "tests"],
+      ["--profile", "Opus", "--effort", "high", "fix", "the", "tests"],
       "/tmp/workspace",
     );
 
@@ -305,13 +305,13 @@ describe("parseAskCommandOptions", () => {
     expect(opus.message).toBe("fix the tests");
   });
 
-  test("preserves explicit effort flags on bare runtime profiles", () => {
+  test("preserves effort flags on explicit runtime profiles", () => {
     const effort = parseAskCommandOptions(
-      ["--effort", "high", "Opus", "to", "review", "this"],
+      ["--effort", "high", "--profile", "Opus", "review", "this"],
       "/tmp/workspace",
     );
     const reasoningEffort = parseAskCommandOptions(
-      ["--reasoning-effort=xhigh", "Fable", "to", "review", "this"],
+      ["--reasoning-effort=xhigh", "--profile", "Fable", "review", "this"],
       "/tmp/workspace",
     );
 
@@ -321,12 +321,12 @@ describe("parseAskCommandOptions", () => {
     expect(reasoningEffort.reasoningEffort).toBe("xhigh");
   });
 
-  test("rejects conflicting flag and natural-language efforts", () => {
+  test("rejects positional recipients instead of guessing a route", () => {
     expect(() =>
       parseAskCommandOptions(
-        ["--effort", "high", "Opus", "with", "xhigh", "effort", "to", "review", "this"],
+        ["Opus", "with", "xhigh", "effort", "to", "review", "this"],
         "/tmp/workspace",
-      )).toThrow("conflicting runtime profile efforts");
+      )).toThrow("exactly one routing mode");
   });
 
   test("parses explicit profile routes without overloading --to", () => {
@@ -351,7 +351,7 @@ describe("parseAskCommandOptions", () => {
 
   test("carries effort for Grok, which sets it over ACP", () => {
     const options = parseAskCommandOptions(
-      ["Grok", "with", "high", "effort", "to", "review", "this"],
+      ["--profile", "Grok", "--effort", "high", "review", "this"],
       "/tmp/workspace",
     );
 
@@ -359,31 +359,30 @@ describe("parseAskCommandOptions", () => {
     expect(options.reasoningEffort).toBe("high");
   });
 
-  test("normalizes the agent prefix to an exact existing handle", () => {
+  test("keeps an explicit agent handle", () => {
     const options = parseAskCommandOptions(
-      ["agent", "Composer", "Review!", "to", "fix", "the", "tests"],
+      ["--to", "composer-review", "fix", "the", "tests"],
       "/tmp/workspace",
     );
 
-    expect(options.existingTargetHandle).toBe("composer-review");
-    expect(options.targetLabel).toBeUndefined();
+    expect(options.targetLabel).toBe("composer-review");
     expect(options.message).toBe("fix the tests");
   });
 
-  test("allows prompt files to supply natural profile and existing-handle bodies", () => {
+  test("allows prompt files with explicit routes", () => {
     const profile = parseAskCommandOptions(
-      ["Fable", "--prompt-file=review.md"],
+      ["--profile", "Fable", "--prompt-file=review.md"],
       "/tmp/workspace",
     );
     const agent = parseAskCommandOptions(
-      ["agent", "Composer", "Review", "to", "--prompt-file=fix.md"],
+      ["--to", "composer-review", "--prompt-file=fix.md"],
       "/tmp/workspace",
     );
 
     expect(profile.runtimeProfile).toBe("fable");
     expect(profile.message).toBe("");
     expect(profile.promptFile).toBe("/tmp/workspace/review.md");
-    expect(agent.existingTargetHandle).toBe("composer-review");
+    expect(agent.targetLabel).toBe("composer-review");
     expect(agent.message).toBe("");
     expect(agent.promptFile).toBe("/tmp/workspace/fix.md");
   });
@@ -414,14 +413,15 @@ describe("parseAskCommandOptions", () => {
       "/tmp/workspace",
     );
 
-    expect(options.targetLabel).toBe("ref:7f3a9c21");
+    expect(options.task?.ref).toBe("7f3a9c21");
+    expect(options.targetLabel).toBeUndefined();
     expect(options.targetRef).toBe("7f3a9c21");
     expect(options.message).toBe("continue");
   });
 
-  test("accepts a composer route target", () => {
+  test("accepts an explicit recipient", () => {
     const options = parseAskCommandOptions(
-      [">>", "hudson", "review", "the", "parser"],
+      ["--to", "hudson", "review", "the", "parser"],
       "/tmp/workspace",
     );
 
@@ -429,9 +429,9 @@ describe("parseAskCommandOptions", () => {
     expect(options.message).toBe("review the parser");
   });
 
-  test("preserves harness-qualified session composer route targets", () => {
+  test("preserves harness-qualified session recipients", () => {
     const options = parseAskCommandOptions(
-      [">>", "session:codex:native-thread-123", "continue", "there"],
+      ["--to", "session:codex:native-thread-123", "continue", "there"],
       "/tmp/workspace",
     );
 
@@ -465,12 +465,12 @@ describe("parseAskCommandOptions", () => {
 
   test("parses foreground session placement independently from reply mode", () => {
     const options = parseAskCommandOptions(
-      ["--harness", "codex", "--foreground", "--notify", "review", "this"],
+      ["--harness", "codex", "--foreground", "review", "this"],
       "/tmp/workspace",
     );
 
     expect(options.placement).toBe("foreground");
-    expect(options.replyMode).toBe("notify");
+    expect(options.replyMode ?? "notify").toBe("notify");
     expect(options.session).toBe("new");
   });
 
@@ -511,7 +511,7 @@ describe("parseAskCommandOptions", () => {
     }));
 
     const literal = parseAskCommandOptions(
-      ["codex/gpt-5.6-sol/xhigh", "to", "review", "the", "diff"],
+      ["--runtime", "codex/gpt-5.6-sol/xhigh", "review", "the", "diff"],
       "/tmp/openscout",
     );
     expect(literal).toEqual(expect.objectContaining({
@@ -540,7 +540,7 @@ describe("parseAskCommandOptions", () => {
     )).toThrow("conflicting runtime model");
   });
 
-  test("narrows profile and natural RuntimeSpec launches to an explicit project", () => {
+  test("narrows profile and explicit RuntimeSpec launches to an explicit project", () => {
     expect(parseAskCommandOptions(
       ["--project", "../talkie", "--profile", "fable", "review"],
       "/tmp/openscout",
@@ -550,7 +550,7 @@ describe("parseAskCommandOptions", () => {
       message: "review",
     }));
     expect(parseAskCommandOptions(
-      ["--project", "../talkie", "codex/gpt-5.6-sol/xhigh", "to", "review"],
+      ["--project", "../talkie", "--runtime", "codex/gpt-5.6-sol/xhigh", "review"],
       "/tmp/openscout",
     )).toEqual(expect.objectContaining({
       projectPath: "/tmp/talkie",
@@ -579,9 +579,9 @@ describe("parseAskCommandOptions", () => {
       )).toThrow("invalid session: reuse");
   });
 
-  test("accepts a composer project path target", () => {
+  test("accepts a project path route", () => {
     const options = parseAskCommandOptions(
-      [">>", "project:../talkie", "compare", "auth"],
+      ["--project", "../talkie", "compare", "auth"],
       "/tmp/workspace",
     );
 
@@ -595,7 +595,7 @@ describe("parseAskCommandOptions", () => {
       parseAskCommandOptions(
         ["--to", "hudson", "--project", "../talkie", "review"],
         "/tmp/workspace",
-      )).toThrow("provide either --to/--ref or --project, not both");
+      )).toThrow("exactly one routing mode");
   });
 
   test("accepts repeated labels", () => {
@@ -994,7 +994,7 @@ describe("parseCardCreateCommandOptions", () => {
 test("CLI preserves a newly published model and effort without bundled-model legality checks", () => {
   const literal = parseAskCommandOptions(["--runtime", "codex/gpt-published-next/ultra", "review"], "/repo");
   expect(literal).toMatchObject({ harness: "codex", model: "gpt-published-next", reasoningEffort: "ultra", message: "review", session: "new" });
-  const natural = parseAskCommandOptions(["codex/gpt-published-next/max", "to", "review"], "/repo");
+  const natural = parseAskCommandOptions(["--runtime", "codex/gpt-published-next/max", "review"], "/repo");
   expect(natural).toMatchObject({ harness: "codex", model: "gpt-published-next", reasoningEffort: "max", message: "review", session: "new" });
 });
 
@@ -1003,7 +1003,7 @@ describe("explicit completion ask options", () => {
   test("keeps completion and join identity separate from the body", () => {
     expect(parseAskCommandOptions([
       "--to", "id:reviewer", "--completion", "explicit", "--join-to", "flight-parent",
-      "--request-id", "child-command", "--notify", "Review this",
+      "--request-id", "child-command", "Review this",
     ], "/tmp")).toMatchObject({
       completion: { mode: "explicit" }, relation: { kind: "joined", parentFlightId: "flight-parent" },
       requestId: "child-command", targetLabel: "id:reviewer", message: "Review this",

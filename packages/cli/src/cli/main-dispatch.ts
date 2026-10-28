@@ -1,3 +1,4 @@
+import { removedScoutVerbError } from "./removed-verbs.ts";
 import { prepareScoutExtensionContext } from "./extension-context-runner.ts";
 import { selectedScoutExtensionInvocation } from "./extension-context.ts";
 import { resolveEffectiveLocalConfig } from "@openscout/runtime/local-config";
@@ -58,6 +59,9 @@ async function main() {
       return;
     }
   }
+
+  const removed = removedScoutVerbError(command, commandArgs);
+  if (removed) throw removed;
 
   // Resolve reserved extensions before maintenance can refresh/restart core.
   const registration = findScoutCommandRegistration(command);

@@ -473,6 +473,7 @@ export class BrokerFlightLifecycleService {
     const now = this.now();
 
     for (const flight of Object.values(snapshot.flights)) {
+      if (snapshot.invocations[flight.invocationId]?.metadata?.humanOwned === true) continue;
       const reason = staleWorkingFlightReason(snapshot, flight, {
         isInvocationActive: this.options.isInvocationActive,
         now,

@@ -108,7 +108,7 @@ export function runAgentGuide(options: {
 
 /**
  * Read-only Scout MCP tools a harness can allow without a prompt. Everything
- * that sends or starts work (`ask`, `messages_send`, …) is left to the
+ * that sends or starts work (`ask`, `ask`, …) is left to the
  * harness's normal approval on purpose.
  */
 export const SCOUT_READ_ONLY_TOOLS = [
