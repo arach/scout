@@ -6573,6 +6573,23 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    fn rotate_child_log_eventually(path: &std::path::Path, directory: &std::path::Path) {
+        // A concurrent spawn can retain a locked file description until exec,
+        // even after this thread drops the handle from an earlier rotation.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            rotate_child_log_if_needed(path, directory).unwrap();
+            if fs::metadata(path).unwrap().len() == 0 {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "log rotation remained contended after dropping the lock"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn competing_log_rotation_skips_without_blocking_or_overwriting_the_tail() {
         use std::os::fd::AsRawFd;
@@ -6595,7 +6612,7 @@ mod tests {
         assert_eq!(held.metadata().unwrap().len(), CHILD_LOG_ROTATE_LIMIT * 2);
         assert!(!rotated_child_log_path(&path).exists());
         drop(held);
-        rotate_child_log_if_needed(&path, &root).unwrap();
+        rotate_child_log_eventually(&path, &root);
         rotate_child_log_if_needed(&path, &root).unwrap();
         assert_eq!(fs::metadata(&path).unwrap().len(), 0);
         assert_eq!(
@@ -6620,7 +6637,7 @@ mod tests {
         assert_eq!(fs::read_to_string(&user_data).unwrap(), "keep");
         assert_eq!(fs::metadata(&path).unwrap().len(), contents.len() as u64);
         fs::remove_file(rotated_child_log_path(&path)).unwrap();
-        rotate_child_log_if_needed(&path, &dir).unwrap();
+        rotate_child_log_eventually(&path, &dir);
         assert_eq!(fs::metadata(&path).unwrap().len(), 0);
         assert!(!scoutd_owned_child_log_path(&dir.join("user.log"), &dir));
         assert!(!scoutd_owned_child_log_path(
