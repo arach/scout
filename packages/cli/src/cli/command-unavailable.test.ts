@@ -129,7 +129,7 @@ test("built-ins retain maintenance and cannot be overridden by valid extensions"
 
 test("unknown verbs retain the implicit ask and unknown-help behavior", async () => {
   const f = fixture();
-  const ask = await f.run(["unregistered-fixture", "@fixture", "hello"]);
+  const ask = await f.run(["unregistered-fixture", "--to", "fixture", "hello"]);
   expect(ask.code).toBe(0); expect(ask.events).toEqual(["maintenance", "implicit_ask"]);
   const unknown = await f.run(["unregistered-fixture"]);
   expect(unknown.code).toBe(1); expect(unknown.events).toEqual(["maintenance"]);

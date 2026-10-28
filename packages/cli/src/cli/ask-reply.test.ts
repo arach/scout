@@ -64,5 +64,11 @@ test("missing values do not consume another flag and implicit asks are strict to
   }
   const { parseImplicitAskCommandOptions } = await import("./options.ts");
   expect(() => parseImplicitAskCommandOptions(["@worker", "--message-file", "brief.md"], "/repo")).toThrow("unknown flag");
-  expect(() => parseImplicitAskCommandOptions(["@worker", "--notify", "review"], "/repo")).toThrow("--notify now pushes");
+  expect(() => parseImplicitAskCommandOptions(["--to", "worker", "--notify", "review"], "/repo")).toThrow("--notify now pushes");
+});
+
+
+test("successors on another host require an explicit project on that host", () => {
+  expect(() => parseAskCommandOptions(["--continue", "inv-1", "--on", "peer", "review"], "/repo")).toThrow("needs --project");
+  expect(parseAskCommandOptions(["--continue", "inv-1", "--on", "peer", "--project", "~/repo", "review"], "/repo").projectPath).toBe("~/repo");
 });

@@ -37,6 +37,7 @@ export function validateTaskAsk(task: ScoutTaskAsk, route: {
   const modes = [route.to, task.operator, route.channel, route.capability, task.ref, task.continue].filter(Boolean);
   if (modes.length !== 1) throw new Error("ask requires exactly one routing mode: --to, --operator, --channel, --project, --ref, or --continue");
   if (task.successor && !task.continue) throw new Error("successor launch overrides require --continue");
+  if (task.successor?.host && !task.successor.projectPath?.trim()) throw new Error("successor --on requires --project <path on that host>");
   if (task.cancel && !task.ref) throw new Error("--cancel requires --ref");
   if (task.fyi && (task.ref || task.continue || task.cancel || route.capability)) throw new Error("--fyi cannot use --ref, --continue, --cancel or capability routing");
   if (route.execution && (task.ref || task.fyi)) throw new Error("execution flags cannot be combined with --ref or --fyi");

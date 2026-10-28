@@ -617,217 +617,29 @@ describe("parseAskCommandOptions", () => {
 });
 
 describe("parseImplicitAskCommandOptions", () => {
-  test("recognizes reserved profiles and exact agent-prefix targets", () => {
-    const opus = parseImplicitAskCommandOptions(
-      ["Opus", "xhigh", "to", "review", "this"],
-      "/tmp/workspace",
-    );
-    const agent = parseImplicitAskCommandOptions(
-      ["agent", "Composer", "Review", "to", "fix", "the", "tests"],
-      "/tmp/workspace",
-    );
-
-    expect(opus.runtimeProfile).toBe("opus");
-    expect(opus.reasoningEffort).toBe("xhigh");
-    expect(opus.message).toBe("review this");
-    expect(agent.existingTargetHandle).toBe("composer-review");
-    expect(agent.message).toBe("fix the tests");
+  test.each([
+    ["--to", "worker", "review"],
+    ["--operator", "--fyi", "news"],
+    ["--ref", "inv-1", "context"],
+    ["--continue", "inv-1", "next"],
+    ["--project", ".", "--harness", "codex", "review"],
+    ["--profile", "fable", "review"],
+    ["--runtime", "codex/gpt-5.6-sol/xhigh", "review"],
+  ])("uses the strict ask parser for %j", (...args) => {
+    expect(parseImplicitAskCommandOptions(args, "/tmp/workspace")).toEqual(parseAskCommandOptions(args, "/tmp/workspace"));
   });
-
-  test("allows prompt files to supply implicit natural target bodies", () => {
-    const profile = parseImplicitAskCommandOptions(
-      ["Opus", "--prompt-file=review.md"],
-      "/tmp/workspace",
-    );
-    const agent = parseImplicitAskCommandOptions(
-      ["agent", "Composer", "Review", "to", "--prompt-file=fix.md"],
-      "/tmp/workspace",
-    );
-
-    expect(profile.runtimeProfile).toBe("opus");
-    expect(profile.message).toBe("");
-    expect(profile.promptFile).toBe("/tmp/workspace/review.md");
-    expect(agent.existingTargetHandle).toBe("composer-review");
-    expect(agent.message).toBe("");
-    expect(agent.promptFile).toBe("/tmp/workspace/fix.md");
+  test("rejects positional recipients with a rewrite, and never extracts body mentions", () => {
+    expect(() => parseImplicitAskCommandOptions(["@worker", "--fyi", "news"], "/tmp/workspace")).toThrow("scout ask --to worker news");
+    const parsed = parseImplicitAskCommandOptions(["--to", "worker", "hey @other review this"], "/tmp/workspace");
+    expect(parsed.targetLabel).toBe("worker");
+    expect(parsed.message).toBe("hey @other review this");
+    for (const args of [["hey", "@worker", "review"], [">>", "worker", "review"], ["Opus", "to", "review"]]) {
+      expect(() => parseImplicitAskCommandOptions(args, "/tmp/workspace")).toThrow("exactly one routing mode");
+    }
   });
-
-  test("preserves flag effort for implicit bare profiles and rejects conflicts", () => {
-    const options = parseImplicitAskCommandOptions(
-      ["--effort", "high", "Opus", "to", "review", "this"],
-      "/tmp/workspace",
-    );
-
-    expect(options.runtimeProfile).toBe("opus");
-    expect(options.reasoningEffort).toBe("high");
-    expect(() =>
-      parseImplicitAskCommandOptions(
-        ["--reasoning-effort=medium", "Fable", "xhigh", "to", "review", "this"],
-        "/tmp/workspace",
-      )).toThrow("conflicting runtime profile efforts");
-  });
-
-  test("rejects effort for implicit ACP runtime profiles", () => {
-    expect(() =>
-      parseImplicitAskCommandOptions(
-        ["--effort", "high", "Kimi", "to", "review", "this"],
-        "/tmp/workspace",
-      )).toThrow("kimi runtime profile does not support reasoning effort through its ACP transport");
-  });
-
-  test("carries effort for an implicit Grok profile", () => {
-    const options = parseImplicitAskCommandOptions(
-      ["--effort", "high", "Grok", "to", "review", "this"],
-      "/tmp/workspace",
-    );
-
-    expect(options.runtimeProfile).toBe("grok");
-    expect(options.reasoningEffort).toBe("high");
-  });
-
-  test("extracts a target agent from natural language input", () => {
-    const options = parseImplicitAskCommandOptions(
-      ["hey", "@dewey", "can", "you", "review", "our", "docs?"],
-      "/tmp/workspace",
-    );
-
-    expect(options.agentName).toBeNull();
-    expect(options.targetLabel).toBe("dewey");
-    expect(options.message).toBe("hey can you review our docs?");
-    expect(options.currentDirectory).toBe("/tmp/workspace");
-  });
-
-  test("extracts shorthand harness and model target labels", () => {
-    const options = parseImplicitAskCommandOptions(
-      ["hey", "@lattices#codex?5.5", "can", "you", "review", "this?"],
-      "/tmp/workspace",
-    );
-
-    expect(options.targetLabel).toBe("lattices#codex?5.5");
-    expect(options.message).toBe("hey can you review this?");
-  });
-
-  test("parses ask flags before the freeform request", () => {
-    const options = parseImplicitAskCommandOptions(
-      ["--as", "vox", "--timeout", "900", "--label", "goal:ios-shell", "--context-root", "/tmp/repo", "@talkie", "take", "another", "pass"],
-      "/tmp/workspace",
-    );
-
-    expect(options.agentName).toBe("vox");
-    expect(options.timeoutSeconds).toBe(900);
-    expect(options.labels).toEqual(["goal:ios-shell"]);
-    expect(options.targetLabel).toBe("talkie");
-    expect(options.message).toBe("take another pass");
-    expect(options.currentDirectory).toBe("/tmp/repo");
-  });
-
-  test("parses non-blocking ask reply modes", () => {
-    const notify = parseImplicitAskCommandOptions(
-      ["--reply-mode", "notify", "@talkie", "take", "another", "pass"],
-      "/tmp/workspace",
-    );
-    const noWait = parseImplicitAskCommandOptions(
-      ["--no-wait", "@talkie", "start", "the", "longer", "run"],
-      "/tmp/workspace",
-    );
-
-    expect(notify.replyMode).toBe("notify");
-    expect(noWait.replyMode).toBe("none");
-  });
-
-  test("infers the current project for implicit harness-only asks", () => {
-    const options = parseImplicitAskCommandOptions(
-      ["--harness", "codex", "review", "this"],
-      "/tmp/workspace",
-    );
-
-    expect(options.projectPath).toBe("/tmp/workspace");
-    expect(options.targetLabel).toBeUndefined();
-    expect(options.harness).toBe("codex");
-    expect(options.session).toBe("new");
-    expect(options.message).toBe("review this");
-  });
-
-  test("parses exact runtime controls in implicit ask mode", () => {
-    expect(parseImplicitAskCommandOptions(
-      ["--runtime", "codex/gpt-5.6-sol/xhigh", "review", "the", "diff"],
-      "/tmp/openscout",
-    )).toEqual(expect.objectContaining({
-      projectPath: "/tmp/openscout",
-      runtimeLiteral: "codex/gpt-5.6-sol/xhigh",
-      harness: "codex",
-      model: "gpt-5.6-sol",
-      reasoningEffort: "xhigh",
-      session: "new",
-    }));
-  });
-
-  test("extracts a target agent from the composer route operator", () => {
-    const options = parseImplicitAskCommandOptions(
-      ["hey", ">>", "dewey", "can", "you", "review", "our", "docs?"],
-      "/tmp/workspace",
-    );
-
-    expect(options.targetLabel).toBe("dewey");
-    expect(options.message).toBe("hey can you review our docs?");
-  });
-
-  test("extracts a target handle from the composer route operator", () => {
-    const options = parseImplicitAskCommandOptions(
-      ["please", ">>", "⌖mw-talkie", "continue", "there"],
-      "/tmp/workspace",
-    );
-
-    expect(options.targetLabel).toBe("target:mw-talkie");
-    expect(options.message).toBe("please continue there");
-  });
-
-  test("preserves harness-qualified session targets in implicit route operators", () => {
-    const options = parseImplicitAskCommandOptions(
-      ["please", ">>", "session:codex:native-thread-123", "continue", "there"],
-      "/tmp/workspace",
-    );
-
-    expect(options.targetLabel).toBe("session:codex:native-thread-123");
-    expect(options.message).toBe("please continue there");
-  });
-
-  test("accepts a prompt file with only a composer route target", () => {
-    const options = parseImplicitAskCommandOptions(
-      [">>", "talkie", "--prompt-file", "handoff.md"],
-      "/tmp/workspace",
-    );
-
-    expect(options.targetLabel).toBe("talkie");
-    expect(options.message).toBe("");
-    expect(options.promptFile).toBe("/tmp/workspace/handoff.md");
-  });
-
-  test("accepts a prompt file with only an @agent mention", () => {
-    const options = parseImplicitAskCommandOptions(
-      ["@talkie", "--prompt-file", "handoff.md"],
-      "/tmp/workspace",
-    );
-
-    expect(options.targetLabel).toBe("talkie");
-    expect(options.message).toBe("");
-    expect(options.promptFile).toBe("/tmp/workspace/handoff.md");
-  });
-
-  test("rejects natural language input without a mention", () => {
-    expect(() =>
-      parseImplicitAskCommandOptions(
-        ["please", "review", "the", "docs"],
-        "/tmp/workspace",
-      )).toThrow("implicit ask requires >> target or an @agent mention");
-  });
-
-  test("rejects natural language input with multiple mentions", () => {
-    expect(() =>
-      parseImplicitAskCommandOptions(
-        ["@dewey", "check", "with", "@hudson", "about", "this"],
-        "/tmp/workspace",
-      )).toThrow("implicit ask supports exactly one @agent mention");
+  test("unknown flags and the old notify meaning fail in shortcuts too", () => {
+    expect(() => parseImplicitAskCommandOptions(["--to", "worker", "--message-file", "brief.md"], "/tmp/workspace")).toThrow("unknown flag");
+    expect(() => parseImplicitAskCommandOptions(["--to", "worker", "--notify", "review"], "/tmp/workspace")).toThrow("--notify now pushes");
   });
 });
 

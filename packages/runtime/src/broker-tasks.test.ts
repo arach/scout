@@ -259,3 +259,12 @@ test("two nodes deliver a versioned task's automatic result through conversation
   expect(Object.values(authority.runtime.peek().messages).filter(m => m.replyToMessageId === task.messageId)).toHaveLength(1);
   expect(worker.runtime.peek().messages[intent.message.id]).toBeUndefined();
 });
+
+
+test("cross-host successor never borrows a local endpoint project", async () => {
+  const { h, ask, successors } = await taskFixture("completed");
+  const endpoint = h.runtime.peek().endpoints["endpoint-worker"]!;
+  await h.runtime.upsertEndpoint({ ...endpoint, projectRoot: "/local-only-project" });
+  await expect(ask({ task: { version: 1, continue: "parent", successor: { host: "peer" } } })).rejects.toThrow("requires --project");
+  expect(successors).toHaveLength(0);
+});

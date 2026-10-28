@@ -77,10 +77,8 @@ export class BrokerTaskService {
       if (!taskTerminal(flight)) throw new Error(`task ${invocation.id} is unfinished; use --ref ${invocation.id}`);
       const context = `Previous task ${invocation.id} (${flight.state}):\n${flight.output ?? flight.error ?? flight.summary ?? "No result recorded."}`;
       const overrides = request.successor;
-      const endpoint = Object.values(this.options.snapshot().endpoints).find(item => item.agentId === invocation.targetAgentId
-        && (item.projectRoot || item.cwd));
-      const projectPath = overrides?.projectPath ?? endpoint?.projectRoot ?? endpoint?.cwd;
-      if (overrides?.host && !projectPath) throw new Error("successor --on needs a known predecessor project; supply --project");
+      if (overrides?.host && !overrides.projectPath?.trim()) throw new Error("successor --on requires --project <path on that host>");
+      const projectPath = overrides?.projectPath;
       const target = overrides?.host || overrides?.projectPath
         ? { kind: "project_path" as const, projectPath: projectPath!, ...(overrides.host ? { host: overrides.host } : {}) }
         : { kind: "agent_id" as const, agentId: invocation.targetAgentId };
