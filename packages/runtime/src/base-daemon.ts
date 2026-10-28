@@ -7,6 +7,7 @@ import { closeSync, existsSync, mkdirSync, openSync, writeFileSync, statSync } f
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveLegacyWebEntry } from "./legacy-app-services.js";
 
 import {
   buildLocalBrokerControlUrl,
@@ -598,6 +599,12 @@ async function startWebWhenBrokerIsReady(): Promise<void> {
   }
   webStartInFlight = true;
   try {
+    // A core-only host has no web intent, but an app may publish its entry later.
+    // Retry discovery without sending a start request until an entry exists.
+    if (!resolveLegacyWebEntry(process.env, dirname(fileURLToPath(import.meta.url)))) {
+      scheduleWebStartRetry();
+      return;
+    }
     if (!(await waitForBrokerHealth())) {
       warn("broker did not become healthy before web startup timeout");
       scheduleWebStartRetry();
@@ -629,6 +636,11 @@ async function startWebWhenBrokerIsReady(): Promise<void> {
       warn("web server startup failed", error instanceof Error ? error.message : String(error));
       scheduleWebStartRetry();
     }
+  } catch (error) {
+    // Resolver/configuration failures must not reject this fire-and-forget task
+    // and strand the broker, pairing and edge children when base exits.
+    warn("web entry discovery failed", error instanceof Error ? error.message : String(error));
+    scheduleWebStartRetry();
   } finally {
     webStartInFlight = false;
   }
