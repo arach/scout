@@ -10,12 +10,16 @@ The supervisor requests a regular sweep every 30 seconds, starting at startup.
 A bounded worker collects host observations and delivers notifications. The
 supervisor continues polling its owned children while this work is in progress.
 A result for a replaced base child is discarded. Shutdown cancels spawned probe
-commands and does not wait for the worker thread.
+commands and does not wait for the worker thread. A disconnected worker emits
+an explicit diagnostic and is replaced after 30 seconds. Outstanding delivery
+reservations are preserved because the failed worker might already have sent
+its notice. The slow-sweep deadline advances only when work is accepted.
 
 | Condition | Grace | Action |
 | --- | --- | --- |
 | Startup projection degraded by SQLITE_FULL, ENOSPC, or equivalent text | 120 seconds | Wait for 2 GiB free space, then restart the owned base child once. |
 | Other startup projection error | 120 seconds | At most three owned-base restarts; subsequent retries wait 120 seconds, then 240 seconds. |
+| Existing projection incident still not mutation-ready | 10 minutes from `since` | Report a persistent outage, including unknown, failed or restoring health. This notice does not spend or replenish the restart budget. |
 | Disk below max(2 GiB, min(5%, 10 GiB)) free | 60 seconds | Report low space and Scout's top three observed consumers. |
 | Disk below max(1 GiB, min(2%, 2 GiB)) free | 60 seconds | Mark the same disk condition critical and refresh its consumer inventory. |
 | Web expected but not running | 90 seconds | Report the cause. Never start or restart web from scoutd. |
@@ -78,20 +82,32 @@ The sweep only reports this command. It never runs it.
 exposes the same object as `healthSweep`. Each active condition has:
 
 - `condition`, `cause`, `action`, and `since`;
-- `escalated`, `notifiedAt`, and `notifyAfter`.
+- `escalated`, `notifiedAt`, and `notifyAfter`;
+- `noticeLevel` and `notifiedLevel`: `recovery`, `outage`, or `manual`;
+  `notifiedLevel` is null before a reservation.
 
 The object also has `checkedAt` and restart-budget checkpoints. Menu clients
 must treat old `checkedAt` values as stale evidence, not as recovery.
 
 After a condition's grace, scoutd persists `notifiedAt` before dispatch.
 Startup projection notices also require escalation: the restart budget must be
-exhausted or a disk-related restart must be waiting for space. A first restart
-that restores readiness is silent. At most one notification is queued per pass.
+exhausted, a disk-related restart must be waiting for space, or an unresolved
+incident must reach ten minutes without mutation readiness. Missing health and
+other startup phases cannot suppress that deadline. A first restart that
+restores readiness within the deadline remains silent. At most one notification
+is queued per pass.
+
+The reservation includes the notice level. An outage or manual-repair escalation
+can notify after a lower-level space/recovery notice. Exhausted automatic recovery
+therefore produces a new repair notice, not just the earlier instruction to free
+space. A late delivery result for a lower level cannot delay the new notice.
 Incident timestamps use epoch milliseconds, including across laptop sleep.
 
 A cleared condition retains a per-condition notification cooldown of 30 minutes
 in the checkpoint. Re-entry during that window does not send another notice,
-even after a supervisor restart. Conditions still clear on confirmed recovery.
+even after a supervisor restart. A higher-level escalation bypasses a lower-level
+cooldown, including after a brief ready sample; repeat same/lower-level notices
+remain subject to cooldown. Conditions still clear on confirmed recovery.
 
 The persisted reservation prevents a supervisor restart from resending the
 same incident. Dispatch uses
@@ -138,7 +154,10 @@ holder. Errors, timeouts, symlinks, hardlinks, and changed files are preserved.
 The scan examines at most 4096 directory entries and 20 orphan candidates.
 
 The regular sweep rotates fixed Scout-owned child log names. A bounded tail is
-retained in `.1`, then the active append inode is truncated. Symlinks and
+retained in `.1`, then the active append inode is truncated. Sweep and spawn-time
+rotators use the same nonblocking advisory lock on that inode. A competing
+rotator skips the pass rather than blocking or overwriting the retained tail;
+append writers do not need to take the lock. Symlinks and
 multiply linked files are not truncated. Rotation occurs before notification
 state writes so that reclaimable log space can support diagnosis. If ENOSPC or
 EDQUOT prevents a snapshot, scoutd can discard the owned active log to reclaim

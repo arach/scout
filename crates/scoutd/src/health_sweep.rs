@@ -3,7 +3,22 @@ use serde::{Deserialize, Serialize};
 use std::{ffi::CString, os::unix::ffi::OsStrExt, path::Path};
 const GIB: u64 = 1 << 30;
 const GRACE: u128 = 120_000;
+const PROJECTION_OUTAGE_LIMIT: u128 = 10 * 60_000;
 const NOTIFICATION_COOLDOWN: u128 = 30 * 60_000;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NoticeLevel {
+    #[default]
+    Recovery,
+    Outage,
+    Manual,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EscalationNotice {
+    level: NoticeLevel,
+    at: u128,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Condition {
@@ -16,6 +31,24 @@ pub struct Condition {
     pub notified_at: Option<u128>,
     #[serde(default)]
     pub notify_after: u128,
+    #[serde(default)]
+    pub notice_level: NoticeLevel,
+    #[serde(default)]
+    pub notified_level: Option<NoticeLevel>,
+}
+impl Condition {
+    pub fn reserve_notice(&mut self, now: u128) {
+        self.notified_at = Some(now);
+        self.notified_level = Some(self.notice_level);
+    }
+    pub fn delivery_matches(&self, since: u128, level: NoticeLevel) -> bool {
+        self.since == since && self.notice_level == level && self.notified_level == Some(level)
+    }
+    pub fn delivery_failed(&mut self, now: u128) {
+        self.notified_at = None;
+        self.notified_level = None;
+        self.notify_after = now + 300_000;
+    }
 }
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -25,6 +58,7 @@ pub struct Sweep {
     next_restart: u128,
     ready_since: Option<u128>,
     last_notifications: std::collections::BTreeMap<String, u128>,
+    last_escalation_notifications: std::collections::BTreeMap<String, EscalationNotice>,
 }
 impl Sweep {
     pub fn observe_all(&mut self, now: u128, observation: &Observation) -> bool {
@@ -108,11 +142,19 @@ impl Sweep {
             return false;
         }
         self.ready_since = None;
+        let overdue = self.conditions.iter().any(|c| {
+            c.condition == "startup-projection"
+                && now.saturating_sub(c.since) >= PROJECTION_OUTAGE_LIMIT
+        });
         if startup
             .and_then(|s| s.get("phase"))
             .and_then(|v| v.as_str())
             != Some("degraded")
         {
+            if overdue {
+                self.escalate_projection(now, NoticeLevel::Outage,
+                "Inspect Scout startup and supervisor logs; Scout has not become mutation-ready after 10 minutes");
+            }
             return false;
         }
         let cause = startup
@@ -132,7 +174,10 @@ impl Sweep {
         let space = disk
             .map(|(free, total)| free >= 2 * GIB && total > 0)
             .unwrap_or(false);
-        let exhausted = self.attempts >= if disk_failure { 1 } else { 3 };
+        let exhausted = self.attempts >= if disk_failure { 1 } else { 3 }
+            || self.conditions.iter().any(|c| {
+                c.condition == "startup-projection" && c.notice_level == NoticeLevel::Manual
+            });
         let action = if exhausted {
             "Repair the startup projection cause, then restart Scout"
         } else if disk_failure && !space {
@@ -145,6 +190,12 @@ impl Sweep {
             Some((cause, action, exhausted || (disk_failure && !space))),
             now,
         );
+        if exhausted {
+            self.escalate_projection(now, NoticeLevel::Manual, action);
+        } else if overdue && (!disk_failure || space) {
+            self.escalate_projection(now, NoticeLevel::Outage,
+                "Inspect Scout startup and supervisor logs; Scout will continue bounded recovery when possible");
+        }
         let since = self
             .conditions
             .iter()
@@ -173,6 +224,42 @@ impl Sweep {
             },
         )
     }
+    fn escalate_projection(&mut self, now: u128, level: NoticeLevel, action: &str) {
+        // A lower-level notice or brief ready sample cannot cool down a new
+        // escalation. Repeat notices at the same/lower level remain suppressed.
+        let previous = self
+            .conditions
+            .iter()
+            .find(|c| c.condition == "startup-projection" && c.notice_level < level)
+            .and_then(|c| {
+                c.notified_at
+                    .map(|at| (at, c.notified_level.unwrap_or_default()))
+            });
+        if let Some((at, level)) = previous {
+            self.remember_notice("startup-projection", at, level);
+        }
+        let after = self
+            .last_escalation_notifications
+            .get("startup-projection")
+            .filter(|last| last.level >= level)
+            .map_or(now, |last| {
+                now.max(last.at.saturating_add(NOTIFICATION_COOLDOWN))
+            });
+        if let Some(c) = self
+            .conditions
+            .iter_mut()
+            .find(|c| c.condition == "startup-projection")
+        {
+            if c.notice_level <= level {
+                if c.notice_level < level {
+                    c.notice_level = level;
+                    c.notify_after = after;
+                }
+                c.action = action.into();
+            }
+            c.escalated = true;
+        }
+    }
     fn finding(
         &mut self,
         id: &str,
@@ -197,6 +284,8 @@ impl Sweep {
                 since: now,
                 escalated: true,
                 notified_at: None,
+                notice_level: NoticeLevel::Recovery,
+                notified_level: None,
                 notify_after: self.notification_time(id, now + grace),
             });
         }
@@ -209,7 +298,12 @@ impl Sweep {
     pub fn due_notifications(&self, now: u128) -> Vec<String> {
         self.conditions
             .iter()
-            .filter(|c| c.escalated && c.notified_at.is_none() && now >= c.notify_after)
+            .filter(|c| {
+                c.escalated
+                    && now >= c.notify_after
+                    && (c.notified_at.is_none()
+                        || c.notice_level > c.notified_level.unwrap_or_default())
+            })
             .map(|c| c.condition.clone())
             .collect()
     }
@@ -218,12 +312,19 @@ impl Sweep {
             after.max(last.saturating_add(NOTIFICATION_COOLDOWN))
         })
     }
+    fn remember_notice(&mut self, id: &str, at: u128, level: NoticeLevel) {
+        self.last_notifications.insert(id.into(), at);
+        if level > NoticeLevel::Recovery {
+            self.last_escalation_notifications
+                .insert(id.into(), EscalationNotice { level, at });
+        }
+    }
     fn clear(&mut self, id: &str) {
         if let Some(index) = self.conditions.iter().position(|c| c.condition == id) {
-            if let Some(at) = self.conditions[index].notified_at {
-                self.last_notifications.insert(id.into(), at);
+            let c = self.conditions.remove(index);
+            if let Some(at) = c.notified_at {
+                self.remember_notice(id, at, c.notified_level.unwrap_or_default());
             }
-            self.conditions.remove(index);
         }
     }
     fn update(&mut self, id: &str, value: Option<(String, &str, bool)>, now: u128) {
@@ -242,6 +343,8 @@ impl Sweep {
                 since: now,
                 escalated,
                 notified_at: None,
+                notice_level: NoticeLevel::Recovery,
+                notified_level: None,
                 notify_after: self.notification_time(
                     id,
                     now + if id == "startup-projection" {
@@ -305,6 +408,130 @@ mod tests {
     const OTHER: &str = r#"{"startup":{"phase":"degraded","error":"schema failed"}}"#;
     const READY: &str = r#"{"startup":{"mutationsAdmitted":true}}"#;
     const SPACE: Option<(u64, u64)> = Some((10 * GIB, 100 * GIB));
+    #[test]
+    fn projection_outage_escalates_after_ten_minutes_without_a_degraded_sample() {
+        for health in [
+            None,
+            Some("not-json"),
+            Some(r#"{"startup":{"phase":"failed"}}"#),
+            Some(r#"{"startup":{"phase":"restoring"}}"#),
+        ] {
+            let mut s = Sweep::default();
+            s.observe(0, Some(OTHER), SPACE);
+            assert!(s.observe(120_000, Some(OTHER), SPACE));
+            let mut s: Sweep = serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
+            assert!(!s.observe(599_999, health, SPACE));
+            assert!(s.due_notifications(599_999).is_empty());
+            assert!(!s.observe(600_000, health, SPACE));
+            assert_eq!(s.due_notifications(600_000), vec!["startup-projection"]);
+            let c = s
+                .conditions
+                .iter_mut()
+                .find(|c| c.condition == "startup-projection")
+                .unwrap();
+            assert!(c.action.contains("Inspect"));
+            c.reserve_notice(600_000);
+            assert!(!s.observe(630_000, health, SPACE));
+            assert!(s.due_notifications(630_000).is_empty());
+        }
+    }
+    #[test]
+    fn exhausted_projection_gets_a_new_notice_after_the_space_notice() {
+        let mut s = Sweep::default();
+        s.observe(0, Some(FULL), Some((0, 100 * GIB)));
+        s.observe(120_000, Some(FULL), Some((0, 100 * GIB)));
+        assert!(s
+            .due_notifications(120_000)
+            .contains(&"startup-projection".into()));
+        s.conditions
+            .iter_mut()
+            .find(|c| c.condition == "startup-projection")
+            .unwrap()
+            .notified_at = Some(120_000);
+        // Old checkpoints reserved only a timestamp, with no action level.
+        let mut old = serde_json::to_value(&s).unwrap();
+        for c in old["conditions"].as_array_mut().unwrap() {
+            c.as_object_mut().unwrap().remove("noticeLevel");
+            c.as_object_mut().unwrap().remove("notifiedLevel");
+        }
+        old.as_object_mut()
+            .unwrap()
+            .remove("lastEscalationNotifications");
+        let mut s: Sweep = serde_json::from_value(old).unwrap();
+        assert!(s.observe(150_000, Some(FULL), SPACE));
+        assert!(!s.observe(180_000, Some(FULL), SPACE));
+        let s: Sweep = serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
+        assert_eq!(s.due_notifications(180_000), vec!["startup-projection"]);
+        assert!(s.conditions[0].action.contains("Repair"));
+    }
+    #[test]
+    fn brief_readiness_does_not_cool_down_a_new_manual_action() {
+        let mut s = Sweep::default();
+        s.observe(0, Some(FULL), Some((0, 100 * GIB)));
+        s.observe(120_000, Some(FULL), Some((0, 100 * GIB)));
+        s.conditions
+            .iter_mut()
+            .find(|c| c.condition == "startup-projection")
+            .unwrap()
+            .notified_at = Some(120_000);
+        assert!(s.observe(150_000, Some(FULL), SPACE));
+        s.observe(160_000, Some(READY), SPACE);
+        assert!(!s.observe(180_000, Some(FULL), SPACE));
+        assert_eq!(s.due_notifications(180_000), vec!["startup-projection"]);
+    }
+    #[test]
+    fn manual_notice_is_reserved_once_and_old_delivery_results_cannot_delay_it() {
+        let mut s = Sweep::default();
+        s.observe(0, Some(FULL), Some((0, 100 * GIB)));
+        s.observe(120_000, Some(FULL), Some((0, 100 * GIB)));
+        s.conditions
+            .iter_mut()
+            .find(|c| c.condition == "startup-projection")
+            .unwrap()
+            .reserve_notice(120_000);
+        assert!(s.observe(150_000, Some(FULL), SPACE));
+        s.observe(180_000, Some(FULL), SPACE);
+        let c = s
+            .conditions
+            .iter_mut()
+            .find(|c| c.condition == "startup-projection")
+            .unwrap();
+        assert!(!c.delivery_matches(0, NoticeLevel::Recovery));
+        c.reserve_notice(180_000);
+        assert!(c.delivery_matches(0, NoticeLevel::Manual));
+        assert!(!c.delivery_matches(1, NoticeLevel::Manual));
+        let mut s: Sweep = serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
+        assert!(s.due_notifications(180_001).is_empty());
+        s.observe(190_000, Some(READY), SPACE);
+        s.observe(200_000, Some(FULL), SPACE);
+        assert!(s.due_notifications(200_000).is_empty());
+        assert_eq!(
+            s.due_notifications(180_000 + NOTIFICATION_COOLDOWN),
+            vec!["startup-projection"]
+        );
+    }
+    #[test]
+    fn outage_notice_does_not_consume_the_later_manual_notice_or_restart_budget() {
+        let mut s = Sweep::default();
+        s.observe(0, Some(OTHER), SPACE);
+        assert!(s.observe(120_000, Some(OTHER), SPACE));
+        s.observe(600_000, None, SPACE);
+        assert_eq!(s.conditions[0].notice_level, NoticeLevel::Outage);
+        s.conditions[0].reserve_notice(600_000);
+        assert!(s.observe(630_000, Some(OTHER), SPACE));
+        assert!(s.due_notifications(630_000).is_empty());
+        assert!(s.observe(870_000, Some(OTHER), SPACE));
+        assert!(!s.observe(900_000, Some(OTHER), SPACE));
+        assert_eq!(s.conditions[0].notice_level, NoticeLevel::Manual);
+        assert_eq!(s.due_notifications(900_000), vec!["startup-projection"]);
+    }
+    #[test]
+    fn disk_recovery_still_restarts_when_space_returns_after_ten_minutes() {
+        let mut s = Sweep::default();
+        s.observe(0, Some(FULL), Some((0, 100 * GIB)));
+        s.observe(600_000, Some(FULL), Some((0, 100 * GIB)));
+        assert!(s.observe(900_000, Some(FULL), SPACE));
+    }
     #[test]
     fn self_healing_projection_never_notifies_and_exhaustion_does() {
         let mut s = Sweep::default();

@@ -2,7 +2,7 @@
 //! and all restart decisions remain on the supervisor thread.
 use super::{
     health_observations,
-    health_sweep::{Condition, Observation},
+    health_sweep::{Condition, NoticeLevel, Observation},
     Config,
 };
 use std::{
@@ -22,6 +22,7 @@ pub enum Job {
     },
 }
 pub enum Result {
+    Disconnected,
     Observed {
         observation: Observation,
         base_pid: u32,
@@ -29,6 +30,7 @@ pub enum Result {
     Notified {
         id: String,
         since: u128,
+        level: NoticeLevel,
         delivered: bool,
     },
 }
@@ -37,6 +39,7 @@ pub struct Worker {
     results: Receiver<Result>,
     observation_pending: bool,
     pub notification_pending: bool,
+    disconnected: bool,
 }
 impl Worker {
     pub fn start(config: Config) -> Option<Self> {
@@ -67,6 +70,7 @@ impl Worker {
                 delivered: health_observations::notify(&config, &condition, runtime_up),
                 id: condition.condition,
                 since: condition.since,
+                level: condition.notice_level,
             },
         })
     }
@@ -95,9 +99,10 @@ impl Worker {
             results,
             observation_pending: false,
             notification_pending: false,
+            disconnected: false,
         })
     }
-    pub fn observe(&mut self, slow: bool, now: u128, base_pid: u32) {
+    pub fn observe(&mut self, slow: bool, now: u128, base_pid: u32) -> bool {
         if !self.observation_pending
             && self
                 .jobs
@@ -109,7 +114,9 @@ impl Worker {
                 .is_ok()
         {
             self.observation_pending = true;
+            return true;
         }
+        false
     }
     pub fn notify(&mut self, condition: Condition, runtime_up: bool) -> bool {
         if self.notification_pending {
@@ -125,10 +132,23 @@ impl Worker {
         self.notification_pending
     }
     pub fn poll(&mut self) -> Option<Result> {
-        let result = self.results.try_recv().ok()?;
+        let result = match self.results.try_recv() {
+            Ok(result) => result,
+            Err(mpsc::TryRecvError::Empty) => return None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                if self.disconnected {
+                    return None;
+                }
+                self.disconnected = true;
+                self.observation_pending = false;
+                self.notification_pending = false;
+                return Some(Result::Disconnected);
+            }
+        };
         match &result {
             Result::Observed { .. } => self.observation_pending = false,
             Result::Notified { .. } => self.notification_pending = false,
+            Result::Disconnected => unreachable!("disconnect is returned above"),
         }
         Some(result)
     }
@@ -138,6 +158,40 @@ impl Worker {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+    #[test]
+    fn disconnected_worker_is_not_an_empty_channel_and_a_replacement_can_observe() {
+        let mut worker = Worker::start_with(|_| panic!("injected health worker failure")).unwrap();
+        assert!(worker.observe(true, 0, 42));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if matches!(worker.poll(), Some(Result::Disconnected)) {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!worker.observation_pending);
+        assert!(!worker.notification_pending);
+        assert!(worker.poll().is_none());
+        let mut replacement = Worker::start_with(|job| match job {
+            Job::Observe { base_pid, .. } => Result::Observed {
+                observation: Observation::default(),
+                base_pid,
+            },
+            _ => panic!("unexpected notification"),
+        })
+        .unwrap();
+        assert!(replacement.observe(true, 1, 42));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(Result::Observed { base_pid, .. }) = replacement.poll() {
+                assert_eq!(base_pid, 42);
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
     #[test]
     fn held_probes_and_delivery_do_not_block_supervision_or_grow_the_queue() {
         let (release, wait) = mpsc::channel();
@@ -150,9 +204,9 @@ mod tests {
         })
         .unwrap();
         let started = Instant::now();
-        worker.observe(true, 0, 42);
+        assert!(worker.observe(true, 0, 42));
         for _ in 0..1000 {
-            worker.observe(true, 0, 42);
+            assert!(!worker.observe(true, 0, 42));
             assert!(worker.poll().is_none());
         }
         let condition = Condition {
@@ -163,6 +217,8 @@ mod tests {
             escalated: true,
             notified_at: Some(0),
             notify_after: 0,
+            notice_level: NoticeLevel::Recovery,
+            notified_level: Some(NoticeLevel::Recovery),
         };
         assert!(worker.notify(condition.clone(), false));
         assert!(!worker.notify(condition, false));

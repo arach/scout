@@ -981,6 +981,7 @@ fn supervise_service_inner(
     } else {
         health_worker::Worker::start(config.clone())
     };
+    let mut next_health_worker_start = clock_now!() + Duration::from_secs(30);
     let mut health_sweep = load_health_sweep(config).unwrap_or_default();
     if !testing {
         prepare_health_reserve(config);
@@ -1023,10 +1024,19 @@ fn supervise_service_inner(
             next_process_sweep = clock_now!() + PROCESS_SWEEP_INTERVAL;
         }
 
+        if !testing && health_worker.is_none() && clock_now!() >= next_health_worker_start {
+            health_worker = health_worker::Worker::start(config.clone());
+            next_health_worker_start = clock_now!() + Duration::from_secs(30);
+            if health_worker.is_some() {
+                next_health_sweep = clock_now!();
+            }
+        }
         let mut collected = None;
+        let mut worker_disconnected = false;
         if let Some(worker) = health_worker.as_mut() {
             while let Some(result) = worker.poll() {
                 match result {
+                    health_worker::Result::Disconnected => worker_disconnected = true,
                     health_worker::Result::Observed {
                         observation,
                         base_pid,
@@ -1038,17 +1048,17 @@ fn supervise_service_inner(
                     health_worker::Result::Notified {
                         id,
                         since,
+                        level,
                         delivered,
                     } => {
                         // A delayed delivery result must not alter a new incident.
                         if let Some(condition) = health_sweep
                             .conditions
                             .iter_mut()
-                            .find(|c| c.condition == id && c.since == since)
+                            .find(|c| c.condition == id && c.delivery_matches(since, level))
                         {
                             if !delivered {
-                                condition.notified_at = None;
-                                condition.notify_after = epoch_ms() + 300_000;
+                                condition.delivery_failed(epoch_ms());
                             }
                             if let Err(error) = publish_health_sweep(config, &health_sweep) {
                                 eprintln!(
@@ -1059,6 +1069,19 @@ fn supervise_service_inner(
                     }
                 }
             }
+        }
+        if worker_disconnected {
+            #[cfg(test)]
+            if let Some(hooks) = test_hooks.as_mut() {
+                hooks
+                    .sweep_actions
+                    .push((hooks.ticks, "worker-disconnected".into()));
+            }
+            eprintln!("[scoutd] health worker disconnected; restarting in 30s; delivery reservations preserved");
+            health_worker = None;
+            next_health_worker_start = clock_now!() + Duration::from_secs(30);
+            // Lost observations must not consume the next slow sweep.
+            next_slow_sweep = clock_now!();
         }
         let sweep_due = clock_now!() >= next_health_sweep;
         if sweep_due || collected.is_some() {
@@ -1080,11 +1103,13 @@ fn supervise_service_inner(
             });
             #[cfg(not(test))]
             let injected: Option<health_sweep::Observation> = None;
-            if sweep_due {
-                if let Some(worker) = health_worker.as_mut() {
-                    worker.observe(slow, now, child.id());
-                }
-            }
+            let observation_scheduled = if sweep_due {
+                health_worker
+                    .as_mut()
+                    .map_or(testing, |worker| worker.observe(slow, now, child.id()))
+            } else {
+                false
+            };
             let observation = injected.or(collected);
             if let Some(observation) = observation {
                 let restart = health_sweep.observe_all(now, &observation);
@@ -1100,7 +1125,7 @@ fn supervise_service_inner(
                     == Some(true);
                 let delivery_busy = health_worker
                     .as_ref()
-                    .is_some_and(|w| w.notification_pending);
+                    .map_or(!testing, |w| w.notification_pending);
                 for id in health_sweep
                     .due_notifications(now)
                     .into_iter()
@@ -1116,7 +1141,7 @@ fn supervise_service_inner(
                         .unwrap();
                     // Persist the reservation before invoking any delivery path. A
                     // crash after display/recording cannot duplicate a notification.
-                    health_sweep.conditions[index].notified_at = Some(now);
+                    health_sweep.conditions[index].reserve_notice(now);
                     let reserved =
                         write_state!("health", publish_health_sweep(config, &health_sweep)).is_ok();
                     let condition = &health_sweep.conditions[index];
@@ -1149,10 +1174,8 @@ fn supervise_service_inner(
                         false
                     };
                     if !delivered {
-                        health_sweep.conditions[index].notified_at = None;
-                        // Failed delivery is retried with a persisted bounded delay,
-                        // not on every pass. No recovery notifications are sent.
-                        health_sweep.conditions[index].notify_after = now + 300_000;
+                        // Explicit failures retry after a persisted bounded delay.
+                        health_sweep.conditions[index].delivery_failed(now);
                     }
                 }
                 let persisted = write_state!("health", publish_health_sweep(config, &health_sweep));
@@ -1190,7 +1213,7 @@ fn supervise_service_inner(
                     }
                 }
             }
-            if slow {
+            if slow && observation_scheduled {
                 next_slow_sweep = clock_now!() + health_observations::SLOW_INTERVAL;
             }
             if sweep_due {
@@ -1605,8 +1628,21 @@ fn rotate_child_log_if_needed(path: &Path, logs_directory: &Path) -> Result<(), 
     {
         return Ok(());
     }
+    // Spawn-time rotation and the sweep share this nonblocking inode guard.
+    // Append writers do not take it; only competing rotators are excluded.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::WouldBlock {
+            eprintln!("[scoutd] log rotation guard unavailable; preserving log: {error}");
+        }
+        return Ok(());
+    }
+    let current_len = file.metadata().map_err(|error| error.to_string())?.len();
+    if current_len <= CHILD_LOG_ROTATE_LIMIT {
+        return Ok(());
+    }
     file.seek(SeekFrom::Start(
-        metadata.len().saturating_sub(CHILD_LOG_ROTATE_LIMIT),
+        current_len.saturating_sub(CHILD_LOG_ROTATE_LIMIT),
     ))
     .map_err(|error| format!("failed to seek log {}: {error}", path.display()))?;
     let mut retained_tail = Vec::new();
@@ -4899,6 +4935,7 @@ mod tests {
                 Job::Notify { condition, .. } => Result::Notified {
                     id: condition.condition,
                     since: condition.since,
+                    level: condition.notice_level,
                     delivered: false,
                 },
             }
@@ -4911,6 +4948,111 @@ mod tests {
         assert!(start.elapsed() < std::time::Duration::from_secs(2));
         // The worker remains held until after both owned children were reaped.
         release.send(()).unwrap();
+    }
+
+    #[test]
+    fn pending_observation_does_not_advance_the_slow_sweep_deadline() {
+        let (release, wait) = std::sync::mpsc::channel();
+        let mut worker = super::health_worker::Worker::start_with(move |job| {
+            wait.recv().unwrap();
+            match job {
+                super::health_worker::Job::Observe { base_pid, .. } => {
+                    super::health_worker::Result::Observed {
+                        observation: super::health_sweep::Observation::default(),
+                        base_pid,
+                    }
+                }
+                _ => panic!("unexpected notification"),
+            }
+        })
+        .unwrap();
+        assert!(worker.observe(true, 0, 42));
+        let hooks = run_sweep_loop_worker(Vec::new(), 601, None, true, Some(worker));
+        assert_eq!(
+            hooks.sweep_probe_ticks,
+            vec![(0, true), (300, true), (600, true)]
+        );
+        release.send(()).unwrap();
+    }
+
+    #[test]
+    fn supervisor_reports_a_dead_health_worker_without_losing_child_custody() {
+        let (done, dead) = std::sync::mpsc::channel::<()>();
+        let mut worker = super::health_worker::Worker::start_with(move |_| {
+            drop(done.clone());
+            panic!("injected health worker failure");
+        })
+        .unwrap();
+        worker.observe(true, 0, 42);
+        // Wait for the injected panic to unwind; no Scout service is started.
+        assert!(dead
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .is_err());
+        let hooks = run_sweep_loop_worker(Vec::new(), 100, None, true, Some(worker));
+        assert_eq!(hooks.observations, 100);
+        assert_eq!(
+            hooks
+                .sweep_actions
+                .iter()
+                .filter(|(_, a)| a == "worker-disconnected")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn sweep_loop_reports_an_unready_successor_after_ten_minutes() {
+        use super::health_sweep::Observation;
+        let broken = Observation {
+            health: Some(r#"{"startup":{"phase":"degraded","error":"schema failed"}}"#.into()),
+            ..Observation::default()
+        };
+        let hooks = run_sweep_loop(
+            vec![(0, broken), (1300, Observation::default())],
+            6301,
+            None,
+        );
+        assert_eq!(
+            hooks.sweep_actions,
+            vec![
+                (1200, "restart-base".into()),
+                (6000, "notify:local:startup-projection".into())
+            ]
+        );
+    }
+    #[test]
+    fn sweep_loop_reports_manual_repair_after_its_space_notice_and_failed_restart() {
+        use super::health_sweep::{NoticeLevel, Observation};
+        let broken = Observation {
+            health: Some(r#"{"startup":{"phase":"degraded","error":"SQLITE_FULL"}}"#.into()),
+            disk: Some((0, 100 << 30)),
+            ..Observation::default()
+        };
+        let space = Observation {
+            disk: Some((10 << 30, 100 << 30)),
+            ..broken.clone()
+        };
+        let hooks = run_sweep_loop(vec![(0, broken), (1500, space)], 2101, None);
+        assert_eq!(
+            hooks.sweep_actions,
+            vec![
+                (600, "notify:local:disk".into()),
+                (1200, "notify:local:startup-projection".into()),
+                (1500, "restart-base".into()),
+                (1800, "notify:local:startup-projection".into())
+            ]
+        );
+        let manual = hooks
+            .sweep_states
+            .iter()
+            .find(|(tick, _)| *tick == 1800)
+            .unwrap()
+            .1
+            .iter()
+            .find(|c| c.condition == "startup-projection")
+            .unwrap();
+        assert_eq!(manual.notified_level, Some(NoticeLevel::Manual));
+        assert!(manual.action.contains("Repair"));
     }
 
     #[test]
@@ -6294,6 +6436,38 @@ mod tests {
         assert!(rotated.len() <= CHILD_LOG_ROTATE_LIMIT as usize);
         assert!(rotated.ends_with(marker));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn competing_log_rotation_skips_without_blocking_or_overwriting_the_tail() {
+        use std::os::fd::AsRawFd;
+        let root = unique_temp_path("health-rotation-guard");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("stdout.log");
+        fs::write(&path, vec![b'x'; (CHILD_LOG_ROTATE_LIMIT * 2) as usize]).unwrap();
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        assert_eq!(
+            unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
+        let start = std::time::Instant::now();
+        rotate_child_log_if_needed(&path, &root).unwrap();
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        assert_eq!(held.metadata().unwrap().len(), CHILD_LOG_ROTATE_LIMIT * 2);
+        assert!(!rotated_child_log_path(&path).exists());
+        drop(held);
+        rotate_child_log_if_needed(&path, &root).unwrap();
+        rotate_child_log_if_needed(&path, &root).unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().len(), 0);
+        assert_eq!(
+            fs::read(rotated_child_log_path(&path)).unwrap(),
+            vec![b'x'; CHILD_LOG_ROTATE_LIMIT as usize]
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
