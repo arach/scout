@@ -207,6 +207,7 @@ const CHANNEL_INVITE_COMMAND_KINDS = new Set<string>([
 ]);
 
 export type BrokerHttpRouterDeps = {
+  tasks?: import("./broker-tasks.js").BrokerTaskService;
   /** Test/embedding seam; default uses only the bounded public scoutd repo capability. */
   readRepoDiff?: RepoDiffRead;
   attachments?: AttachmentHttpDeps;
@@ -2310,6 +2311,22 @@ export function createBrokerHttpRouter(
     return;
   }
 
+  if (method === "POST" && (url.pathname === "/v1/mesh/tasks/ask" || url.pathname === "/v1/mesh/tasks/reply")) {
+    try {
+      if (!deps.tasks) throw new Error("ask-reply/1 is unavailable on this runtime");
+      if (url.pathname.endsWith("/reply")) {
+        const input = await readRequestBody<import("@openscout/protocol").ScoutTaskReply>(request);
+        if (!input.ref) throw new Error("mesh task replies require --ref");
+        json(response, 200, await deps.tasks.reply(input));
+      } else {
+        const input = await readValidatedRequestBody(request, brokerDeliverRequestSchema);
+        if (!input.task?.ref && !input.task?.continue) throw new Error("mesh task asks require --ref or --continue");
+        json(response, 202, await deliveryAcceptanceService.accept(input));
+      }
+    } catch (error) { badRequest(response, error); }
+    return;
+  }
+
   if (method === "POST" && url.pathname === "/v1/mesh/invocations") {
     try {
       const bundle = await readRequestBody<MeshInvocationBundle>(request);
@@ -2616,7 +2633,13 @@ export function createBrokerHttpRouter(
 
   if (method === "POST" && (url.pathname === "/v1/messages" || url.pathname === "/v1/messages/reply")) {
     try {
-      let message = await readRequestBody<MessageRecord>(request);
+      const input = await readRequestBody<MessageRecord | import("@openscout/protocol").ScoutTaskReply>(request);
+      if (url.pathname === "/v1/messages/reply" && ("ref" in input || "to" in input)) {
+        if (!deps.tasks) throw new Error("ask-reply/1 is unavailable on this runtime");
+        json(response, 200, await deps.tasks.reply(input as import("@openscout/protocol").ScoutTaskReply));
+        return;
+      }
+      let message = input as MessageRecord;
       if (message.attachments?.some(a => a.blob !== undefined)) throw new Error("attachment_inline_write_required");
       if (url.pathname === "/v1/messages/reply" && (!message.requestId || !completionReply(message))) {
         throw new Error("explicit reply requires requestId and completionReply identity");

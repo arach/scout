@@ -290,6 +290,8 @@ export class BrokerFlightLifecycleService {
       if (eligible && !eligible()) return;
       const previous = this.options.journal.getFlight?.(flightToRecord.id) ?? this.options.runtime.snapshot().flights[flightToRecord.id];
       previousFlight = previous;
+      if (previous?.metadata?.taskFinalReplyMessageId && flightToRecord.metadata?.replyMessageId !== previous.metadata.taskFinalReplyMessageId
+        && invocation?.metadata?.taskVersion === 1) return;
       if (previous?.metadata?.completion !== undefined && (!invocation || !hasExplicitCompletion(invocation)
         || previous.invocationId !== flightToRecord.invocationId || previous.targetAgentId !== flightToRecord.targetAgentId
         || previous.requesterId !== flightToRecord.requesterId)) {

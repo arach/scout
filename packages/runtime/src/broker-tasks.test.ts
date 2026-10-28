@@ -1,0 +1,186 @@
+import { BrokerTaskService } from "./broker-tasks.js";
+import { PassThrough } from "node:stream";
+import { EventEmitter } from "node:events";
+import { BrokerDeliveryAcceptanceService } from "./broker-delivery-acceptance-service.js";
+import { createBrokerHttpRouter } from "./broker-http-router.js";
+import { afterEach, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { flightCompletion, type FlightRecord, type InvocationRequest, type MessageRecord } from "@openscout/protocol";
+import { createInMemoryControlRuntime } from "./broker.js";
+import { FileBackedBrokerJournal, type BrokerJournalEntry } from "./broker-journal.js";
+import { BrokerDurableRecordStore } from "./broker-durable-record-store.js";
+import { BrokerFlightLifecycleService } from "./broker-flight-lifecycle-service.js";
+import { BrokerMessageService } from "./broker-message-service.js";
+import { isFinalReplyForInvocation } from "./broker-conversation-helpers.js";
+import { planHistoryRotation } from "./history-rotation.js";
+
+const dirs: string[] = [];
+afterEach(async () => { await Promise.all(dirs.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
+function invocation(id = "parent", metadata: Record<string, unknown> = {}): InvocationRequest {
+  return { id, requestId: id, requesterId: "operator", requesterNodeId: "node", targetNodeId: "node", targetAgentId: "worker",
+    action: "consult", task: id, conversationId: "conversation", messageId: `ask-${id}`, createdAt: 1, ensureAwake: false, stream: false,
+    metadata: { completion: { mode: "explicit" }, completionLocalNodeId: "node", completionEndpointId: "endpoint-worker", ...metadata } };
+}
+function flight(request: InvocationRequest, id = `flight-${request.id}`): FlightRecord {
+  return { id, invocationId: request.id, requesterId: request.requesterId, targetAgentId: request.targetAgentId, state: "running", startedAt: 2 };
+}
+function reply(revision = 0, kind: "progress" | "final" = "final", id = `reply-${kind}-${revision}`): MessageRecord {
+  return { id, requestId: id, actorId: "worker", originNodeId: "node", conversationId: "conversation", replyToMessageId: "ask-parent",
+    class: "agent", body: "result", policy: "durable", visibility: "private", createdAt: 3,
+    metadata: { clientMessageId: id, completionReply: { kind, invocationId: "parent", flightId: "flight-parent", revision } } };
+}
+async function fixture() {
+  const directory = await mkdtemp(join(tmpdir(), "scout-explicit-completion-")); dirs.push(directory);
+  const path = join(directory, "journal.jsonl");
+  let journal = new FileBackedBrokerJournal(path); await journal.load();
+  let runtime = createInMemoryControlRuntime({}, { localNodeId: "node" });
+  let serial = Promise.resolve(), failApplyParent = false;
+  const runWrite = <T>(work: () => Promise<T>): Promise<T> => { const result = serial.then(work); serial = result.then(() => {}, () => {}); return result; };
+  const frames: BrokerJournalEntry[][] = [];
+  const commitEntries = async (entries: BrokerJournalEntry | BrokerJournalEntry[], apply: (entries: BrokerJournalEntry[]) => Promise<void>) => {
+    const list = Array.isArray(entries) ? entries : [entries]; await journal.appendEntries(list); frames.push(list); await apply(list); return list;
+  };
+  const durableStore = { runWrite, commitEntries, applyProjectedEntries: async () => {} };
+  let records: BrokerDurableRecordStore, lifecycle: BrokerFlightLifecycleService, messages: BrokerMessageService;
+  function configure() {
+    records = new BrokerDurableRecordStore({ localNodeId: "node", runtime: {
+      peek: () => runtime.peek(), planInvocation: request => runtime.planInvocation(request),
+      commitInvocation: (request, result) => runtime.commitInvocation(request, result),
+      upsertFlight: async (value, options) => { if (failApplyParent && value.id === "flight-parent") { failApplyParent = false; throw new Error("runtime apply failed"); } await runtime.upsertFlight(value, options); },
+      flightForInvocation: id => runtime.flightForInvocation(id),
+      planMessage: (message, options) => runtime.planMessage(message, options), commitMessage: (message, deliveries) => runtime.commitMessage(message, deliveries),
+      collaborationRecord: id => runtime.collaborationRecord(id),
+    } as any, durableStore, knownInvocations: new Map(), completionCurrentFlight: id => journal.getCurrentFlightForInvocation(id), completionFlight: id => journal.getFlight(id), completionInvocation: id => journal.getInvocation(id) });
+    lifecycle = new BrokerFlightLifecycleService({ runtime, journal, durableStore, invocationFor: id => journal.getInvocation(id),
+      updateDeliveryStatus: async () => {}, updateDeliveryStatusIf: async () => false, promoteInvocationFlightToWork: async () => {},
+      maybeForwardFlightToAuthority: async () => {}, isInvocationActive: () => false });
+    messages = new BrokerMessageService({ nodeId: "node", systemActorId: "system", runtime, createId: prefix => prefix,
+      mesh: { authorityNodeForConversation: () => null, forwardConversationMessageToAuthority: async () => { throw new Error("unexpected mesh"); }, forwardPeerBrokerDeliveries: async () => ({}) as any },
+      recordMessage: (message, options) => records.recordMessage(message, options), applyProjectedEntries: async () => {}, reconcileStaleLocalDeliveries: async () => {},
+      completionFlight: id => journal.getFlight(id), completionCurrentFlight: id => journal.getCurrentFlightForInvocation(id), persistFlight: lifecycle.recordFlight, persistAcceptedReply: async () => {}, activeLocalEndpointForAgent: () => undefined });
+  }
+  configure();
+  for (const agentId of ["worker", "helper"]) {
+    const endpoint = { id: `endpoint-${agentId}`, agentId, nodeId: "node", harness: "codex" as const, transport: "tmux" as const, state: "idle" as const, sessionId: "session" };
+    await runtime.upsertEndpoint(endpoint); await journal.appendEntries({ kind: "agent.endpoint.upsert", endpoint });
+  }
+  await runtime.upsertConversation({ id: "conversation", title: "Work", kind: "direct", participantIds: ["operator", "worker"], authorityNodeId: "node", visibility: "private", shareMode: "private" } as any);
+  await journal.appendEntries({ kind: "conversation.upsert", conversation: { id: "conversation", title: "Work", kind: "direct", participantIds: ["operator", "worker"], authorityNodeId: "node", visibility: "private", shareMode: "private" } as any });
+  async function accept(request = invocation()) { return records.recordInvocation(request, { flight: flight(request) }); }
+  async function child(id = "child", kind: "joined" | "continuation" = "joined") {
+    const request = { ...invocation(id, { completion: undefined, completionRelation: { parentFlightId: "flight-parent", kind } }), requesterId: "worker", targetAgentId: "helper", metadata: { completion: undefined, completionLocalNodeId: "node", completionEndpointId: "endpoint-helper", completionRelation: { parentFlightId: "flight-parent", kind } } };
+    return accept(request);
+  }
+  return { accept, child, frames, get runtime() { return runtime; }, get records() { return records; }, get lifecycle() { return lifecycle; }, get messages() { return messages; }, get journal() { return journal; },
+    failParentApply() { failApplyParent = true; },
+    async reopen() { journal = new FileBackedBrokerJournal(path); await journal.load(); runtime = createInMemoryControlRuntime(journal.snapshot(), { localNodeId: "node" }); configure(); },
+  };
+}
+
+async function taskFixture(state: FlightRecord["state"] = "running", extra: Record<string, unknown> = {}) {
+  const h = await fixture();
+  const request = invocation("parent", { completion: undefined, taskVersion: 1, ...extra });
+  await h.accept(request);
+  if (state !== "running") await h.lifecycle.recordFlight({ ...h.runtime.flightForInvocation("parent")!, state,
+    output: state === "completed" ? "earlier result" : undefined, completedAt: ["completed", "failed", "cancelled"].includes(state) ? 4 : undefined });
+  const successors: any[] = [];
+  let now = 100, interrupts = 0;
+  const tasks = new BrokerTaskService({ nodeId: "node", operatorActorId: "operator", snapshot: () => h.runtime.snapshot(),
+    invocation: id => h.journal.getInvocation(id), flight: id => h.journal.getFlight(id), currentFlight: id => h.journal.getCurrentFlightForInvocation(id),
+    postMessage: message => h.messages.postConversationMessage(message), recordFlight: (flight, eligible) => h.lifecycle.recordFlight(flight, eligible),
+    accept: async input => { successors.push(input); return { accepted: true } as any; },
+    interrupt: async () => { interrupts++; return true; }, now: () => now });
+  const ask = (patch: any = {}) => tasks.ask({ requestId: "followup", requesterId: "operator", target: { kind: "binding_ref", ref: "parent" },
+    intent: "consult", body: "scope change", task: { version: 1, ref: "parent" }, ...patch });
+  const answer = (patch: any = {}) => tasks.reply({ ref: "parent", senderId: "worker", requestId: "answer", body: "result", ...patch });
+  return { h, tasks, ask, answer, successors, get interrupts() { return interrupts; }, setNow(value: number) { now = value; } };
+}
+
+test.each(["queued", "waking", "running", "waiting"] as const)("follow-up on %s creates no invocation and returns its own receipt", async state => {
+  const { h, ask } = await taskFixture(state);
+  const before = Object.keys(h.runtime.snapshot().invocations);
+  const first = await ask(); expect(first).toMatchObject({ accepted: true, message: { body: "scope change" } });
+  await ask(); expect(Object.keys(h.runtime.snapshot().invocations)).toEqual(before);
+  expect(Object.values(h.runtime.peek().messages).filter(m => m.body === "scope change")).toHaveLength(1);
+  expect(h.runtime.flightForInvocation("parent")?.state).toBe(state);
+});
+test.each(["completed", "failed", "cancelled"] as const)("%s rejects ref and permits an authorized successor with outcome context", async state => {
+  const { ask, successors } = await taskFixture(state);
+  await expect(ask()).rejects.toThrow("--continue parent");
+  await ask({ task: { version: 1, continue: "parent" } });
+  expect(successors).toHaveLength(1); expect(successors[0].body).toContain(`(${state})`);
+  expect(successors[0].execution.session).toBe("new");
+});
+test("unfinished tasks reject continue; unauthorized follow-ups and cancellation fail", async () => {
+  const { ask } = await taskFixture();
+  await expect(ask({ task: { version: 1, continue: "parent" } })).rejects.toThrow("unfinished");
+  await expect(ask({ requesterId: "stranger" })).rejects.toThrow("not authorized");
+  await expect(ask({ requesterId: "worker", task: { version: 1, ref: "parent", cancel: true } })).rejects.toThrow("not authorized");
+});
+test("cancel explicitly closes work, reports interruption, and wins against a later final", async () => {
+  const f = await taskFixture(); const receipt = await f.ask({ task: { version: 1, ref: "parent", cancel: true } });
+  expect(receipt).toMatchObject({ message: { metadata: { workerInterrupted: true } }, flight: { state: "cancelled" } });
+  expect(f.interrupts).toBe(1); await expect(f.answer()).rejects.toThrow("task was cancelled");
+});
+test("progress stays open, failed closes, stable request retries are idempotent", async () => {
+  const { h, answer } = await taskFixture();
+  await answer({ progress: true, requestId: "progress" }); expect(h.runtime.flightForInvocation("parent")?.state).toBe("running");
+  await answer({ failed: true }); expect(h.runtime.flightForInvocation("parent")?.state).toBe("failed");
+  await answer({ failed: true });
+  await expect(answer({ requestId: "later" })).rejects.toThrow("already failed");
+});
+test("first final claims the writer before completion; automatic and explicit finals cannot both land", async () => {
+  const { h } = await taskFixture();
+  const first = { ...reply(), metadata: { ...reply().metadata, completionReply: undefined } };
+  await h.records.recordMessage(first);
+  await expect(h.messages.postConversationMessage(reply(0, "final", "second"))).rejects.toThrow("already has a final");
+  expect(Object.values(h.runtime.peek().messages).filter(m => m.replyToMessageId === "ask-parent")).toHaveLength(1);
+});
+test("follow-up loses if completion reached the writer first", async () => {
+  const { h, answer, ask } = await taskFixture(); await answer();
+  await expect(ask()).rejects.toThrow("finished");
+});
+test("only recipient may answer; FYI handles reject task operations", async () => {
+  const { h, tasks, answer } = await taskFixture();
+  await expect(answer({ senderId: "operator" })).rejects.toThrow("current recipient");
+  await h.records.recordMessage({ ...reply(), id: "msg-fyi", replyToMessageId: undefined, metadata: {}, body: "FYI" });
+  await expect(tasks.resolve("msg-fyi")).rejects.toThrow("FYI has no task");
+});
+test("operator default deadlines recover after restart and later answers are marked late", async () => {
+  const { h, tasks, answer, setNow } = await taskFixture("running", { humanOwned: true, defaultAction: "staging", operatorAnswerDeadline: 200 });
+  await tasks.expireOperatorTasks(); expect(h.runtime.flightForInvocation("parent")?.state).toBe("running");
+  await h.reopen(); setNow(201); await tasks.expireOperatorTasks();
+  expect(h.runtime.flightForInvocation("parent")).toMatchObject({ state: "completed", metadata: { operatorOutcome: "proceeded_with_default" } });
+  await answer(); expect(Object.values(h.runtime.peek().messages).some(m => m.metadata?.late === true)).toBe(true);
+  expect(h.runtime.flightForInvocation("parent")?.output).toBe("Proceeded with default: staging");
+});
+test("operator tasks expire without default and answer before deadline completes normally", async () => {
+  const first = await taskFixture("running", { humanOwned: true, operatorAnswerDeadline: 99 });
+  await first.tasks.expireOperatorTasks(); expect(first.h.runtime.flightForInvocation("parent")).toMatchObject({ state: "failed", metadata: { operatorOutcome: "expired" } });
+  const second = await taskFixture("running", { humanOwned: true, operatorAnswerDeadline: 200 });
+  await second.answer(); expect(second.h.runtime.flightForInvocation("parent")).toMatchObject({ state: "completed", metadata: { operatorOutcome: "answered" } });
+});
+
+test("cancel retries preserve interruption receipt after closure and restart", async () => {
+  const f = await taskFixture();
+  const payload = { task: { version: 1, ref: "parent", cancel: true } };
+  const first = await f.ask(payload);
+  await f.h.reopen();
+  expect(await f.ask(payload)).toMatchObject({ receipt: (first as any).receipt, message: { metadata: { workerInterrupted: true } } });
+  expect(f.interrupts).toBe(1);
+  expect(await f.tasks.recoverFollowup("operator", "followup")).toMatchObject({ receipt: (first as any).receipt });
+});
+
+test("a committed harness result outbox can deliver after completion, but an explicit late final cannot", async () => {
+  const { h, answer } = await taskFixture();
+  const { createInvocationResultReplyIntent, invocationResultMessageId } = await import("./broker-invocation-result-delivery-service.js");
+  const message = { ...reply(), id: invocationResultMessageId("parent"), metadata: { invocationId: "parent", flightId: "flight-parent" } };
+  const intent = createInvocationResultReplyIntent("parent", message);
+  await h.lifecycle.recordFlight({ ...h.runtime.flightForInvocation("parent")!, state: "completed",
+    output: message.body, completedAt: message.createdAt, metadata: { resultReply: intent } });
+  await h.messages.postConversationMessage(intent.message);
+  await expect(answer()).rejects.toThrow("already completed");
+  expect(Object.values(h.runtime.peek().messages).filter(m => m.replyToMessageId === "ask-parent")).toHaveLength(1);
+});

@@ -128,7 +128,7 @@ export class BrokerExternalSessionService {
         }
         const token = randomBytes(32).toString("base64url");
         const sessionId = runtimeSessionHandleForEndpoint(endpoint)!;
-        const body = `${invocation.task}\n\nScout reply address (coordination metadata):\n${JSON.stringify({ tool: "sessions_reply", sessionId, deliveryId: id, ...(endpoint.transport === "mcp_poll" ? {} : { replyToken: token }) })}\nWhen finished, call sessions_reply with that address and your final body. This completes the original Scout flight. Do not start another session.`;
+        const body = `${invocation.task}\n\nScout reply address (coordination metadata):\n${JSON.stringify({ tool: "reply", ref: invocation.id, sessionId, deliveryId: id, ...(endpoint.transport === "mcp_poll" ? {} : { replyToken: token }) })}\nWhen finished, call reply with that task ref and your final body. This completes the original Scout flight. Do not start another session.`;
         await this.deliver(endpoint, id, body, { invocationId: invocation.id, messageId: invocation.messageId,
           metadata: { ...(endpoint.transport === "mcp_poll" ? {} : { replyTokenHash: digest(token) }), sessionId } });
       }

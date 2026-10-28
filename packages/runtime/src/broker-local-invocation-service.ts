@@ -1,6 +1,7 @@
 import { withManagedPermissionContext } from "./managed-permission.js";
 import { redactSecrets } from "@openscout/agent-sessions/secret-redaction";
 import { isCodexAppServerControlError } from "@openscout/agent-sessions/local";
+import { iterateMessageRecordsAsync } from "./broker-message-records.js";
 import { readRuntimeMessage } from "./broker-message-records.js";
 import {
   buildScoutReturnAddress,
@@ -506,7 +507,14 @@ export class BrokerLocalInvocationService {
     // this endpoint (completion, empty reply, failure) keeps it.
     let liveEndpoint = runningEndpoint;
     try {
-      const invocationWithAttachments = await invocationWithOriginatingMessageAttachments(invocation, this.options.runtime);
+      let invocationWithAttachments = await invocationWithOriginatingMessageAttachments(invocation, this.options.runtime);
+      const followups: string[] = [];
+      for await (const message of iterateMessageRecordsAsync(this.options.runtime.snapshot().messages)) {
+        const followup = message.metadata?.taskFollowup as { invocationId?: string; cancel?: boolean } | undefined;
+        if (followup?.invocationId === invocation.id && !followup.cancel) followups.push(message.body);
+      }
+      if (followups.length) invocationWithAttachments = { ...invocationWithAttachments,
+        task: `${invocationWithAttachments.task}\n\nTask follow-ups:\n${followups.join("\n\n")}` };
       // This is the last await before external submission. Cancellation can
       // arrive during attachment reads or any of the preceding durable writes.
       if (this.currentFlightIsTerminal(invocation.id)) {

@@ -1,3 +1,4 @@
+import { taskCompletionMessage } from "./broker-tasks.js";
 import { hasExplicitCompletion } from "@openscout/protocol";
 import { explicitReplyMatchesFlight } from "./broker-explicit-completion.js";
 import { isIdempotentMessageRetry } from "./broker-message-idempotency.js";
@@ -101,6 +102,8 @@ export class BrokerMessageService {
     authorityNodeId?: string;
     duplicate?: boolean;
   }> => {
+    message = taskCompletionMessage(message, this.deps.runtime.snapshot().invocations,
+      id => this.deps.completionCurrentFlight?.(id) ?? this.deps.runtime.flightForInvocation(id));
     const existing = await readMessageRecord(this.deps.runtime.peek().messages,message.id);
     if (existing) {
       if (!isIdempotentMessageRetry(existing, message)) {
@@ -255,7 +258,7 @@ export class BrokerMessageService {
       this.deps.runtime.agent(invocation.targetAgentId)?.displayName,
     ), () => this.completionFlight(invocation, reply)?.id === flight.id);
     const completed = this.deps.runtime.flightForInvocation(invocation.id);
-    return completed?.id === flight.id && completed.state === "completed" && completed.metadata?.replyMessageId === reply.id;
+    return completed?.id === flight.id && ["completed", "failed"].includes(completed.state) && completed.metadata?.replyMessageId === reply.id;
   };
 
   /** Called for active flights only; accepted-message reads never resubmit work. */

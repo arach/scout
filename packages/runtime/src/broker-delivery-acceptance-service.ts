@@ -1,3 +1,4 @@
+import { validateTaskAsk, taskNotificationPolicy, SCOUT_TASKS_CAPABILITY } from "@openscout/protocol";
 import { isExternalSessionEndpoint } from "./external-session-transport.js";
 import { acceptSessionInput, recoverSessionInputDelivery, validateSessionInputRequest, type SessionInputDeliveryOptions } from "./broker-session-input-delivery.js";
 import { BrokerCommandAdmission } from "./broker-storage-pressure.js";
@@ -86,6 +87,10 @@ type ChannelAttentionPointerInput = {
 };
 
 export type BrokerDeliveryAcceptanceServiceOptions = SessionInputDeliveryOptions & {
+  withTaskImage?: <T>(message: MessageRecord, image: NonNullable<ScoutDeliverRequest["image"]>, commit: () => Promise<T>) => Promise<T>;
+  recoverTaskFollowup?: (actor: string, requestId: string) => Promise<ScoutDeliverResponse | null>;
+  taskAsk?: (payload: ScoutDeliverRequest) => Promise<ScoutDeliverResponse | null>;
+  checkTaskPeer?: (payload: ScoutDeliverRequest) => void;
   nodeId: string;
   operatorActorId: string;
   requestReceipts?: BrokerRequestReceipts;
@@ -331,6 +336,8 @@ export class BrokerDeliveryAcceptanceService {
     options: { signal?: AbortSignal; receiptReserved?: boolean; admissionReserved?: boolean } = {},
   ): Promise<ScoutDeliverResponse> {
     throwIfAborted(options.signal);
+    validateTaskDelivery(payload);
+    this.options.checkTaskPeer?.(payload);
     validateSessionInputRequest(payload);
     if (payload.sessionDelivery && (!this.options.requestReceipts || !this.options.submitSessionInput || !this.options.upsertSessionInputActor)) {
       throw new Error("session_input_unsupported: broker requires durable session input receipts");
@@ -368,6 +375,8 @@ export class BrokerDeliveryAcceptanceService {
       : this.options.runtimeSnapshot().invocations[invocationId];
     const recovered = recoverAcceptedInvocation(invocation, requesterId, requestId);
     if (recovered) return recovered;
+    const followup = await this.options.recoverTaskFollowup?.(requesterId, requestId);
+    if (followup) return followup;
     const id = deliveryRequestMessageId(requesterId, requestId);
     const message = this.options.readAcceptedMessage
       ? await this.options.readAcceptedMessage(id)
@@ -397,6 +406,21 @@ export class BrokerDeliveryAcceptanceService {
     if (payload.sessionDelivery) {
       const submitted = await acceptSessionInput(payload, { requesterId, requesterNodeId, createdAt }, this.options);
       if (submitted) return submitted;
+    }
+    if (payload.task) {
+      const special = await this.options.taskAsk?.(payload);
+      if (special) return special;
+      const task = payload.task;
+      const policy = task.operator ? taskNotificationPolicy(task) : undefined;
+      payload = { ...payload, intent: task.fyi ? "tell" : "consult", ensureAwake: task.fyi ? false : payload.ensureAwake,
+        ...(task.fyi ? { workItem: undefined, collaborationRecordId: undefined, execution: undefined, invocationMetadata: undefined } :
+          { workItem: payload.workItem ?? { title: payload.body.slice(0, 160) } }),
+        messageMetadata: { ...payload.messageMetadata, taskVersion: 1, ...(policy ? { notificationPolicy: policy } : {}) },
+        ...(task.operator ? { operatorSignal: task.fyi
+          ? { kind: "notify", blocking: false, replyExpectation: "none", notificationPolicy: policy }
+          : task.defaultAction ? { kind: "consult", blocking: false, replyExpectation: "optional", defaultAction: task.defaultAction, notificationPolicy: policy }
+          : { kind: "need", blocking: true, replyExpectation: "required", question: payload.body,
+            options: task.options, blockedReason: task.because, requestKind: task.permission ? "permission" : undefined, notificationPolicy: policy } } : {}) };
     }
     const initialSnapshot = this.options.runtimeSnapshot();
     let completionEndpointId: string | undefined;
@@ -496,7 +520,7 @@ export class BrokerDeliveryAcceptanceService {
       ? brokerOperatorSignalSchema.parse(payload.operatorSignal)
       : undefined;
     // These validations precede registration sync, work creation and all delivery effects.
-    if (operatorSignal) {
+    if (operatorSignal && !payload.task) {
       if (!this.options.isOperatorDeliveryTarget(payload)) {
         throw new RetryablePreEffectFailure("operator signals must target the operator directly");
       }
@@ -605,7 +629,7 @@ export class BrokerDeliveryAcceptanceService {
       const snapshot = this.options.runtimeSnapshot();
       const conversation = snapshot.conversations[replyTarget.conversationId];
       if (conversation) {
-        const messageId = this.options.createId("msg");
+        const messageId = payload.requestId ? deliveryRequestMessageId(requesterId, payload.requestId) : this.options.createId("msg");
         const routeKind = this.options.brokerRouteKind(conversation);
         const notifyTargets = replyTarget.actorId !== requesterId ? [replyTarget.actorId] : [];
         const message: MessageRecord = {
@@ -627,6 +651,7 @@ export class BrokerDeliveryAcceptanceService {
           createdAt,
           metadata: {
             ...(payload.messageMetadata ?? {}),
+          ...(payload.task && payload.requestId ? { requestId: payload.requestId, requestIntent: payload.task.fyi ? "tell" : "consult" } : {}),
             ...(labels.length ? { labels } : {}),
             relayChannel: conversation.kind === "direct" ? "dm" : conversation.id.replace(/^channel\./, ""),
             relayMessageId: messageId,
@@ -639,7 +664,7 @@ export class BrokerDeliveryAcceptanceService {
             }),
           },
         };
-        await this.options.postConversationMessage(message);
+        await this.postMessage(message, payload);
         throwIfAborted(options.signal);
         return {
           kind: "delivery",
@@ -669,7 +694,7 @@ export class BrokerDeliveryAcceptanceService {
         channel: deliveryChannel,
       });
       const snapshot = this.options.runtimeSnapshot();
-      const messageId = this.options.createId("msg");
+      const messageId = payload.requestId ? deliveryRequestMessageId(requesterId, payload.requestId) : this.options.createId("msg");
       const routeKind = this.options.brokerRouteKind(conversation);
       const notifyTargets = requesterId !== this.options.operatorActorId ? [this.options.operatorActorId] : [];
       const message: MessageRecord = {
@@ -692,6 +717,7 @@ export class BrokerDeliveryAcceptanceService {
         createdAt,
         metadata: {
           ...(payload.messageMetadata ?? {}),
+          ...(payload.task && payload.requestId ? { requestId: payload.requestId, requestIntent: payload.task.fyi ? "tell" : "consult" } : {}),
           ...(labels.length ? { labels } : {}),
           ...(operatorSignal
             ? { operatorSignal, operatorSignalId: messageId }
@@ -707,7 +733,23 @@ export class BrokerDeliveryAcceptanceService {
           }),
         },
       };
-      await this.options.postConversationMessage(message);
+      let flight: FlightRecord | undefined;
+      if (payload.task && !payload.task.fyi) {
+        const work = await (this.options.prepareDeliveryWorkItemIfNeeded ?? this.options.recordDeliveryWorkItemIfNeeded)({
+          payload, requestId, requesterId, targetAgentId: this.options.operatorActorId, conversationId: conversation.id, createdAt });
+        const invocation: InvocationRequest = {
+          id: deliveryRequestInvocationId(requesterId, requestId), requestId, requesterId, requesterNodeId,
+          targetAgentId: this.options.operatorActorId, targetNodeId: this.options.nodeId, action: "consult", task: payload.body,
+          conversationId: conversation.id, messageId, ensureAwake: false, stream: false, createdAt,
+          collaborationRecordId: work.collaborationRecordId,
+          metadata: { ...payload.invocationMetadata, taskVersion: 1, humanOwned: true, taskHomeNodeId: this.options.nodeId,
+            operatorAnswerDeadline: createdAt + (payload.task.window ?? 1800) * 1000,
+            defaultAction: payload.task.defaultAction, options: payload.task.options, permission: payload.task.permission,
+            because: payload.task.because, notificationPolicy: taskNotificationPolicy(payload.task),
+            replyToSessionId, replyMode: payload.invocationMetadata?.replyMode ?? "notify" },
+        };
+        flight = await this.acceptInvocation(invocation, message, payload, work.pendingCreation);
+      } else await this.postMessage(message, payload);
       if (operatorSignal) {
         if (operatorSignal.kind === "need") await this.options.recordOperatorNeed?.(message, operatorSignal);
         const requesterAgent = snapshot.agents[requesterId];
@@ -743,11 +785,13 @@ export class BrokerDeliveryAcceptanceService {
           requesterNodeId,
           targetAgentId: this.options.operatorActorId,
           targetLabel: "@operator",
+          ...(flight ? { flightId: flight.id } : {}),
           conversationId: conversation.id,
           messageId,
         }),
         conversation,
         message,
+        ...(flight ? { flight } : {}),
         targetAgentId: this.options.operatorActorId,
       };
     }
@@ -767,7 +811,7 @@ export class BrokerDeliveryAcceptanceService {
         channel: deliveryChannel,
       });
       const snapshot = this.options.runtimeSnapshot();
-      const messageId = this.options.createId("msg");
+      const messageId = payload.requestId ? deliveryRequestMessageId(requesterId, payload.requestId) : this.options.createId("msg");
       const routeKind = this.options.brokerRouteKind(conversation);
       const detail = `${this.options.titleCaseName(requesterId)} sent a ${
         expectsReply ? "request" : "message"
@@ -809,6 +853,7 @@ export class BrokerDeliveryAcceptanceService {
         createdAt,
         metadata: {
           ...(payload.messageMetadata ?? {}),
+          ...(payload.task && payload.requestId ? { requestId: payload.requestId, requestIntent: payload.task.fyi ? "tell" : "consult" } : {}),
           ...(labels.length ? { labels } : {}),
           requestId,
           ...(rejection
@@ -829,7 +874,7 @@ export class BrokerDeliveryAcceptanceService {
           }),
         },
       };
-      await this.options.postConversationMessage(message);
+      await this.postMessage(message, payload);
       throwIfAborted(options.signal);
       this.options.queueOperatorDeliveryIssue({
         kind: "unassigned_scout",
@@ -880,7 +925,7 @@ export class BrokerDeliveryAcceptanceService {
         channel: deliveryChannel,
       });
       const snapshot = this.options.runtimeSnapshot();
-      const messageId = this.options.createId("msg");
+      const messageId = payload.requestId ? deliveryRequestMessageId(requesterId, payload.requestId) : this.options.createId("msg");
       const routeKind = this.options.brokerRouteKind(conversation);
       const notifyTargets = conversation.kind === "direct"
         ? []
@@ -904,6 +949,7 @@ export class BrokerDeliveryAcceptanceService {
         createdAt,
         metadata: {
           ...(payload.messageMetadata ?? {}),
+          ...(payload.task && payload.requestId ? { requestId: payload.requestId, requestIntent: payload.task.fyi ? "tell" : "consult" } : {}),
           ...(labels.length ? { labels } : {}),
           relayChannel: deliveryChannel,
           relayMessageId: messageId,
@@ -914,7 +960,7 @@ export class BrokerDeliveryAcceptanceService {
           }),
         },
       };
-      await this.options.postConversationMessage(message);
+      await this.postMessage(message, payload);
       throwIfAborted(options.signal);
       return {
         kind: "delivery",
@@ -1024,6 +1070,13 @@ export class BrokerDeliveryAcceptanceService {
           label: resolved.session.label,
           endpoint: resolved.session.endpoint as AgentEndpoint | undefined,
         };
+    if (payload.task) {
+      const snapshot = this.options.runtimeSnapshot();
+      const endpoint = target.endpoint ?? this.options.homeEndpointForAgent(snapshot, target.actorId);
+      const peer = endpoint && snapshot.nodes[endpoint.nodeId];
+      if (endpoint && endpoint.nodeId !== this.options.nodeId && !peer?.capabilities?.includes(SCOUT_TASKS_CAPABILITY))
+        throw new Error(`target runtime requires ${SCOUT_TASKS_CAPABILITY}; upgrade it before dispatch`);
+    }
     const aliasResolution = resolved.aliasResolution;
     const sessionFork = resolved.kind === "resolved_session" ? resolved.sessionFork : undefined;
     const receiptSessionId = sessionFork?.sessionId
@@ -1178,7 +1231,7 @@ export class BrokerDeliveryAcceptanceService {
 
     if (!shouldDispatchTargetTurn) {
       throwIfAborted(options.signal);
-      await this.options.postConversationMessage(message);
+      await this.postMessage(message, payload);
       await postAttentionPointer();
       const receipt = buildDeliveryReceipt({
         requestId,
@@ -1256,6 +1309,7 @@ export class BrokerDeliveryAcceptanceService {
       ...(labels.length ? { labels } : {}),
       metadata: {
         ...invocationMetadata,
+        ...(payload.task ? { taskVersion: 1, taskHomeNodeId: this.options.nodeId } : {}),
         completion: payload.completion,
         completionRelation: payload.relation,
         completionLocalNodeId: payload.completion || payload.relation ? this.options.nodeId : undefined,
@@ -1296,13 +1350,29 @@ export class BrokerDeliveryAcceptanceService {
     // The original receipt and initial flight are recoverable from the same
     // atomic journal frame, even if the process dies before receipt-file save.
     throwIfAborted(options.signal);
-    const flight = await this.options.acceptInvocation(invocation, message, workResolution.pendingCreation);
+    const flight = await this.acceptInvocation(invocation, message, payload, workResolution.pendingCreation);
     if (payload.completion) invocation.metadata = { ...invocation.metadata, completionFlightId: flight.id };
     this.options.dispatchAcceptedInvocation(invocation).catch((error) => {
       this.options.warn?.(`[openscout-runtime] background dispatch failed for invocation ${invocation.id}:`, error);
     });
     void postAttentionPointer();
     return acceptedDeliveryResponse(message, acceptance, flight);
+  }
+
+  private async postMessage(message: MessageRecord, payload: ScoutDeliverRequest): Promise<unknown> {
+    if (payload.image) {
+      if (!this.options.withTaskImage) throw new Error("task image uploads are unavailable");
+      return this.options.withTaskImage(message, payload.image, () => this.options.postConversationMessage(message));
+    }
+    return this.options.postConversationMessage(message);
+  }
+  private async acceptInvocation(invocation: InvocationRequest, message: MessageRecord, payload: ScoutDeliverRequest,
+    work: DeliveryWorkItemResolution["pendingCreation"]): Promise<FlightRecord> {
+    if (payload.image) {
+      if (!this.options.withTaskImage) throw new Error("task image uploads are unavailable");
+      return this.options.withTaskImage(message, payload.image, () => this.options.acceptInvocation(invocation, message, work));
+    }
+    return this.options.acceptInvocation(invocation, message, work);
   }
 
   private now(): number {
@@ -1313,4 +1383,20 @@ export class BrokerDeliveryAcceptanceService {
 async function firstMatchingMessage(records: Record<string, MessageRecord>, predicate: (record: MessageRecord) => boolean, selection?: import("./broker-message-records.js").MessageSelection): Promise<MessageRecord | undefined> {
   for await (const record of iterateMessageRecordsAsync(records, { selection })) if (predicate(record)) return record;
   return undefined;
+}
+
+/** Before receipt reservation, route resolution, registration, or delivery. */
+export function validateTaskDelivery(payload: ScoutDeliverRequest): void {
+  const task = payload.task;
+  if (!task) return;
+  if (task.version !== 1 || !payload.requestId?.trim()) throw new Error("task asks require version 1 and a stable requestId");
+  const target = payload.target;
+  validateTaskAsk(task, {
+    to: !task.operator && !task.ref && !task.continue && target && !["channel", "broadcast", "project_path", "runtime_profile"].includes(target.kind) ? "recipient" : undefined,
+    channel: target?.kind === "channel" ? target.channel : payload.channel,
+    capability: target?.kind === "project_path" || target?.kind === "runtime_profile",
+    execution: Boolean(payload.execution?.harness || payload.execution?.model || payload.execution?.reasoningEffort || payload.execution?.placement
+      || payload.projectAgent || payload.execution?.targetSessionId || payload.execution?.session),
+    relation: Boolean(payload.relation),
+  });
 }

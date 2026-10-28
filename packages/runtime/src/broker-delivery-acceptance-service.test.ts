@@ -1651,3 +1651,39 @@ test("pure operator-signal rejection releases its receipt before any delivery ef
     expect(harness.acceptedInvocations).toEqual([]);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+describe("two-verb acceptance", () => {
+  test("FYI creates no invocation, flight or work", async () => {
+    const h = createHarness();
+    const result = await h.service.accept({ requestId: "fyi", intent: "consult", body: "Heads up", task: { version: 1, fyi: true },
+      target: { kind: "agent_id", agentId: "agent-1" }, requesterId: "operator" });
+    expect(result).toMatchObject({ accepted: true });
+    expect("flight" in result).toBe(false);
+    expect(h.acceptedInvocations).toHaveLength(0); expect(h.recordedWorkItemPayloads).toHaveLength(0);
+    expect(h.postedMessages).toHaveLength(1);
+  });
+  test("operator asks have a durable human-owned task, default deadline and stored push policy", async () => {
+    const h = createHarness({ isOperatorTarget: () => true, now: 100 });
+    const result = await h.service.accept({ requestId: "operator-ask", intent: "consult", body: "Which deployment?",
+      requesterId: "agent-1", target: { kind: "agent_label", label: "operator" }, task: { version: 1, operator: true, defaultAction: "staging", options: ["staging", "prod"] } });
+    expect(result).toMatchObject({ accepted: true, flight: { targetAgentId: "operator" } });
+    expect(h.acceptedInvocations[0]).toMatchObject({ metadata: { humanOwned: true, operatorAnswerDeadline: 1800100, defaultAction: "staging",
+      notificationPolicy: { requested: true, priority: "normal" } } });
+    expect(h.dispatchedInvocations).toHaveLength(0);
+    expect(h.operatorSignals[0]).toMatchObject({ signal: { notificationPolicy: { requested: true, priority: "normal" } } });
+  });
+  test.each([false, true])("operator FYI notify=%s stores policy and never creates work", async notify => {
+    const h = createHarness({ isOperatorTarget: () => true });
+    await h.service.accept({ requestId: "operator-fyi", intent: "consult", body: "Deploy finished", requesterId: "agent-1",
+      target: { kind: "agent_label", label: "operator" }, task: { version: 1, operator: true, fyi: true, notify } });
+    expect(h.acceptedInvocations).toHaveLength(0); expect(h.recordedWorkItemPayloads).toHaveLength(0);
+    expect(h.postedMessages[0]?.metadata?.notificationPolicy).toEqual({ requested: notify, priority: "interrupting" });
+  });
+  test("validation precedes receipt reservation and every routing effect", async () => {
+    const h = createHarness();
+    await expect(h.service.accept({ requestId: "bad", intent: "consult", body: "Please review",
+      task: { version: 1, notify: true }, target: { kind: "agent_id", agentId: "agent-1" } })).rejects.toThrow("--notify now pushes");
+    expect(h.ensuredActors).toHaveLength(0); expect(h.localAgentSyncReasons).toHaveLength(0);
+    expect(h.acceptedInvocations).toHaveLength(0); expect(h.postedMessages).toHaveLength(0);
+  });
+});
