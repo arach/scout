@@ -4,9 +4,10 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, uptime } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveOpenScoutPairingHomeForEnv } from "./support-paths.js";
 
@@ -74,9 +75,19 @@ export function updateScoutPairingSupervisorIntent(
   return readScoutPairingSupervisorIntent(intentPath);
 }
 
+// Absorbs small clock steps right after boot, so a pid file from this boot still counts.
+const PID_FILE_BOOT_SLACK_MS = 30_000;
+
+/**
+ * The pid recorded at `path`, or null. A file written before this boot names a
+ * process that ended with the previous boot, and the pid may now belong to any
+ * process, so it counts as absent.
+ */
 export function readScoutPairingProcessPid(path: string): number | null {
   if (!existsSync(path)) return null;
   try {
+    const bootTimeMs = Date.now() - uptime() * 1000;
+    if (statSync(path).mtimeMs < bootTimeMs - PID_FILE_BOOT_SLACK_MS) return null;
     const pid = Number.parseInt(readFileSync(path, "utf8").trim(), 10);
     return Number.isInteger(pid) && pid > 0 ? pid : null;
   } catch {

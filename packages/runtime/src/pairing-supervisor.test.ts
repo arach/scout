@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir, uptime } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -86,5 +86,16 @@ describe("pairing supervision ownership", () => {
     expect(existsSync(paths.supervisorPidPath)).toBe(true);
     releaseScoutPairingSupervision(process.pid, paths.supervisorPidPath);
     expect(existsSync(paths.supervisorPidPath)).toBe(false);
+  });
+
+  test("ignores a pid file from before this boot, even when that pid is alive now", () => {
+    const paths = createPaths();
+    writeFileSync(paths.supervisorPidPath, `${process.pid}\n`);
+    const beforeBootSeconds = (Date.now() - uptime() * 1000 - 120_000) / 1000;
+    utimesSync(paths.supervisorPidPath, beforeBootSeconds, beforeBootSeconds);
+
+    expect(readScoutPairingProcessPid(paths.supervisorPidPath)).toBeNull();
+    claimScoutPairingSupervision(process.pid + 1, paths.supervisorPidPath);
+    expect(readScoutPairingProcessPid(paths.supervisorPidPath)).toBe(process.pid + 1);
   });
 });
