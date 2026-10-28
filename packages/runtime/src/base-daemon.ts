@@ -7,6 +7,7 @@ import { closeSync, existsSync, mkdirSync, openSync, writeFileSync, statSync } f
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveLegacyWebEntry } from "./legacy-app-services.js";
 
 import {
   buildLocalBrokerControlUrl,
@@ -596,6 +597,9 @@ async function startWebWhenBrokerIsReady(): Promise<void> {
   }
   webStartInFlight = true;
   try {
+    // Core-only hosts have no web intent. An app install with missing entry is
+    // diagnosed by scoutd; never fabricate intent by repeatedly requesting start.
+    if (!resolveLegacyWebEntry(process.env, dirname(fileURLToPath(import.meta.url)))) return;
     if (!(await waitForBrokerHealth())) {
       warn("broker did not become healthy before web startup timeout");
       scheduleWebStartRetry();
