@@ -625,7 +625,7 @@ describe("parseImplicitAskCommandOptions", () => {
     ["--project", ".", "--harness", "codex", "review"],
     ["--profile", "fable", "review"],
     ["--runtime", "codex/gpt-5.6-sol/xhigh", "review"],
-  ])("uses the strict ask parser for %j", (...args) => {
+  ].map(args => [args]))("uses the strict ask parser for %j", (args) => {
     expect(parseImplicitAskCommandOptions(args, "/tmp/workspace")).toEqual(parseAskCommandOptions(args, "/tmp/workspace"));
   });
   test("rejects positional recipients with a rewrite, and never extracts body mentions", () => {

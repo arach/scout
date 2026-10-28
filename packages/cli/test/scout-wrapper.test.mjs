@@ -16,7 +16,7 @@ test("scout wrapper keeps short help focused and sends the full inventory to det
   assert.match(output, /\bstatus\b/);
   assert.match(output, /\bdoctor\b/);
   assert.match(output, /scout help --detail/);
-  assert.doesNotMatch(output, /Implicit ask shortcut:/);
+  assert.doesNotMatch(output, /Implicit ask shortcut/);
   assert.doesNotMatch(output, /\bscout dev\b/);
 
   const detailed = execFileSync("bun", ["./bin/scout.mjs", "help", "--detail"], {
@@ -26,8 +26,8 @@ test("scout wrapper keeps short help focused and sends the full inventory to det
   });
   assert.match(detailed, /\bpair\b/);
   assert.match(detailed, /\bserver\b/);
-  assert.match(detailed, /Implicit ask shortcut:/);
-  assert.match(detailed, /scout @agent your request/);
+  assert.match(detailed, /Implicit ask shortcut/);
+  assert.match(detailed, /positional recipients are errors; use --to <agent>/);
   assert.match(detailed, /Compatibility:/);
   assert.match(detailed, /\binit\b/);
 });
@@ -72,4 +72,15 @@ test("scout wrapper rejects unsupported ask session reuse before routing", () =>
       return true;
     },
   );
+});
+
+
+test("implicit positional recipients fail with an explicit route rewrite", () => {
+  assert.throws(() => execFileSync("bun", ["./bin/scout.mjs", "@worker", "--fyi", "news"], {
+    cwd: packageDirectory, env: isolatedEnvironment(), encoding: "utf8", stdio: "pipe", timeout: 10_000,
+  }), error => {
+    assert.notEqual(error.status, 0);
+    assert.match(error.stderr.toString(), /positional recipients were removed; use scout ask --to worker news/);
+    return true;
+  });
 });

@@ -48,8 +48,8 @@ export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
   { name: "reply", summary: "Answer a task or send task progress" },
 
   { name: "alias", summary: "Manage scoped broker-owned route aliases" },
-  { name: "wait", summary: "Wait for an ask by invocation, flight, message, or ref" },
-  { name: "flight", summary: "Follow an existing ask flight" },
+  { name: "wait", summary: "Wait for a task by invocation, flight, message, or ref" },
+  { name: "flight", summary: "Follow an existing task" },
   { name: "label", summary: "Watch, feed, or brief related work by label" },
   { name: "card", summary: "Create a dedicated reply-ready Scout agent card" },
   { name: "watch", summary: "Stream broker messages" },
