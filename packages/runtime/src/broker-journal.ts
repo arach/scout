@@ -2276,6 +2276,7 @@ export class FileBackedBrokerJournal {
    */
   historyRotationContext(): HistoryRotationContext {
     return {
+      queuedFollowupMessageIds: this.followupTaskByMessage.keys(),
       deliveries: this.state.deliveries.values(),
       dispatchJobs: this.state.invocationDispatchJobs.values(),
       collaborationEvents: this.state.collaborationEvents,
