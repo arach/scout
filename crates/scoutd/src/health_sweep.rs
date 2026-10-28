@@ -1,18 +1,23 @@
 //! Clock-driven policy. Only the supervisor's retained Child may be restarted.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{ffi::CString, os::unix::ffi::OsStrExt, path::Path};
 const GIB: u64 = 1 << 30;
 const GRACE: u128 = 120_000;
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Condition {
-    pub condition: &'static str,
+    pub condition: String,
     pub cause: String,
-    pub action: &'static str,
+    pub action: String,
     pub since: u128,
     pub escalated: bool,
+    #[serde(default)]
+    pub notified_at: Option<u128>,
+    #[serde(default)]
+    pub notify_after: u128,
 }
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct Sweep {
     pub conditions: Vec<Condition>,
     attempts: u32,
@@ -20,7 +25,9 @@ pub struct Sweep {
     ready_since: Option<u128>,
 }
 impl Sweep {
-    pub fn observe(&mut self, now: u128, health: Option<&str>, disk: Option<(u64, u64)>) -> bool {
+    pub fn observe_all(&mut self, now: u128, observation: &Observation) -> bool {
+        let disk = observation.disk;
+
         if let Some((free, total)) = disk {
             let critical = free < GIB || (free as u128 * 100 < total as u128 * 2);
             let low = critical || free < 2 * GIB || (free as u128 * 100 < total as u128 * 5);
@@ -40,7 +47,48 @@ impl Sweep {
                 now,
             );
         }
-        let value = health.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+        if disk.is_some() {
+            if let Some(condition) = self.conditions.iter_mut().find(|c| c.condition == "disk") {
+                if !observation.top_consumers.is_empty() {
+                    condition.cause.push_str(&format!(
+                        "; Scout top consumers: {}",
+                        observation.top_consumers.join(", ")
+                    ));
+                }
+            }
+        }
+        for (id, service, grace) in [
+            ("web", &observation.web, 90_000),
+            ("relay", &observation.relay, 90_000),
+        ] {
+            if let Some(service) = service {
+                self.finding(
+                    id,
+                    service.expected && !service.running,
+                    &service.cause,
+                    &service.action,
+                    now,
+                    grace,
+                );
+            }
+        }
+        if let Some(findings) = &observation.slow {
+            for id in ["version-skew", "stale-files", "temp-orphans"] {
+                let finding = findings.iter().find(|f| f.id == id);
+                self.finding(
+                    id,
+                    finding.is_some(),
+                    finding.map(|f| f.cause.as_str()).unwrap_or(""),
+                    finding.map(|f| f.action.as_str()).unwrap_or(""),
+                    now,
+                    0,
+                );
+            }
+        }
+        let value = observation
+            .health
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
         let startup = value.as_ref().and_then(|v| v.get("startup"));
         let ready = startup
             .and_then(|s| s.get("mutationsAdmitted"))
@@ -109,27 +157,114 @@ impl Sweep {
         self.next_restart = now + (GRACE << (self.attempts - 1));
         true
     }
-    fn update(&mut self, id: &'static str, value: Option<(String, &'static str, bool)>, now: u128) {
+    #[cfg(test)]
+    pub fn observe(&mut self, now: u128, health: Option<&str>, disk: Option<(u64, u64)>) -> bool {
+        self.observe_all(
+            now,
+            &Observation {
+                health: health.map(str::to_owned),
+                disk,
+                ..Observation::default()
+            },
+        )
+    }
+    fn finding(
+        &mut self,
+        id: &str,
+        active: bool,
+        cause: &str,
+        action: &str,
+        now: u128,
+        grace: u128,
+    ) {
+        if !active {
+            self.conditions.retain(|c| c.condition != id);
+            return;
+        }
+        if let Some(c) = self.conditions.iter_mut().find(|c| c.condition == id) {
+            c.cause = cause.chars().take(2048).collect();
+            c.action = action.chars().take(2048).collect();
+        } else {
+            self.conditions.push(Condition {
+                condition: id.into(),
+                cause: cause.chars().take(2048).collect(),
+                action: action.chars().take(2048).collect(),
+                since: now,
+                escalated: true,
+                notified_at: None,
+                notify_after: now + grace,
+            });
+        }
+    }
+    /// A decision is not an attempt until its checkpoint can be published.
+    pub fn defer_restart(&mut self, now: u128) {
+        self.attempts = self.attempts.saturating_sub(1);
+        self.next_restart = now + GRACE;
+    }
+    pub fn due_notifications(&self, now: u128) -> Vec<String> {
+        self.conditions
+            .iter()
+            .filter(|c| c.notified_at.is_none() && now >= c.notify_after)
+            .map(|c| c.condition.clone())
+            .collect()
+    }
+    fn update(&mut self, id: &str, value: Option<(String, &str, bool)>, now: u128) {
         let index = self.conditions.iter().position(|c| c.condition == id);
         match (index, value) {
             (Some(i), Some((cause, action, escalated))) => {
                 let c = &mut self.conditions[i];
-                c.cause = cause;
-                c.action = action;
+                c.cause = cause.chars().take(2048).collect();
+                c.action = action.chars().take(2048).collect();
                 c.escalated = escalated;
             }
             (None, Some((cause, action, escalated))) => self.conditions.push(Condition {
-                condition: id,
-                cause,
-                action,
+                condition: id.into(),
+                cause: cause.chars().take(2048).collect(),
+                action: action.chars().take(2048).collect(),
                 since: now,
                 escalated,
+                notified_at: None,
+                notify_after: now
+                    + if id == "startup-projection" {
+                        GRACE
+                    } else {
+                        60_000
+                    },
             }),
             (Some(i), None) => {
                 self.conditions.remove(i);
             }
             _ => {}
         }
+    }
+}
+#[derive(Clone, Debug, Default)]
+pub struct Observation {
+    pub health: Option<String>,
+    pub disk: Option<(u64, u64)>,
+    pub web: Option<ServiceObservation>,
+    pub relay: Option<ServiceObservation>,
+    pub top_consumers: Vec<String>,
+    pub slow: Option<Vec<Finding>>,
+}
+#[derive(Clone, Debug, Default)]
+pub struct ServiceObservation {
+    pub expected: bool,
+    pub running: bool,
+    pub cause: String,
+    pub action: String,
+}
+#[derive(Clone, Debug)]
+pub struct Finding {
+    pub id: String,
+    pub cause: String,
+    pub action: String,
+}
+pub fn disk_level(disk: Option<(u64, u64)>) -> u8 {
+    match disk {
+        Some((free, total)) if free < GIB || (free as u128 * 100 < total as u128 * 2) => 2,
+        Some((free, total)) if free < 2 * GIB || (free as u128 * 100 < total as u128 * 5) => 1,
+        _ => 0,
     }
 }
 /// Constant cost: no recursive directory walks.
@@ -192,6 +327,17 @@ mod tests {
         s.observe(140_000, Some(READY), SPACE);
         assert!(!s.observe(500_000, Some(FULL), SPACE));
         assert!(s.conditions[0].escalated);
+    }
+    #[test]
+    fn failed_checkpoint_does_not_spend_the_restart_budget() {
+        let mut s = Sweep::default();
+        s.observe(0, Some(OTHER), SPACE);
+        assert!(s.observe(120_000, Some(OTHER), SPACE));
+        s.defer_restart(120_000);
+        assert_eq!(s.attempts, 0);
+        assert!(!s.observe(239_999, Some(OTHER), SPACE));
+        assert!(s.observe(240_000, Some(OTHER), SPACE));
+        assert_eq!(s.attempts, 1);
     }
     #[test]
     fn disk_detects_changes_and_clears_without_runtime() {
