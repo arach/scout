@@ -41,8 +41,9 @@ export class BrokerTaskService {
     const directFlight = this.options.flight(ref);
     if (!invocation && directFlight) invocation = this.options.invocation(directFlight.invocationId);
     const binding = Object.values(snapshot.bindings).find(item => item.externalThreadId === ref || item.id === ref);
-    const candidates = Object.values(snapshot.flights).filter(item => item.id === ref || item.id.endsWith(ref) || item.invocationId === ref
+    const candidates = Object.values(snapshot.flights).filter(item => item.id === ref || (ref.length >= 8 && item.id.endsWith(ref)) || item.invocationId === ref
       || item.metadata?.bindingRef === ref || (binding && item.invocationId === binding.metadata?.invocationId));
+    if (!invocation && new Set(candidates.map(item => item.invocationId)).size > 1) throw new Error(`ambiguous task ${raw}; use the full invocation or flight ID`);
     if (!invocation && candidates.length === 1) invocation = this.options.invocation(candidates[0]!.invocationId);
     const message = !invocation ? await resolveBrokerMessageRefAsync(snapshot, ref) : null;
     if (message) invocation = Object.values(snapshot.invocations).find(item => item.messageId === message.id);

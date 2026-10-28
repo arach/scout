@@ -5254,9 +5254,9 @@ export function createScoutMcpServer(options: {
   server.registerTool(
     "invocations_get",
     {
-      title: "Get Scout Ask",
+      title: "Get Scout Task",
       description:
-        "Fetch the current broker flight state for a previously-created Scout ask or invocation. Use this with a flightId returned by ask to observe long-running work without blocking the original ask call.",
+        "Fetch the current broker flight state for a previously-created Scout task. Use this with a flightId returned by ask to observe long-running work without blocking the original ask call.",
       inputSchema: z.object({
         currentDirectory: z.string().optional(),
         flightId: z.string().min(1),
@@ -5302,9 +5302,9 @@ export function createScoutMcpServer(options: {
   server.registerTool(
     "invocations_wait",
     {
-      title: "Wait For Scout Ask",
+      title: "Wait For Scout Task",
       description:
-        "Wait briefly for a previously-created Scout ask flight to finish, then return the latest flight state. This is a bounded follow-up wait, not the long-running ask submission path.",
+        "Wait briefly for a previously-created Scout task to finish, then return the latest flight state. This is a bounded follow-up wait, not the long-running ask submission path.",
       inputSchema: z.object({
         currentDirectory: z.string().optional(),
         flightId: z.string().min(1),

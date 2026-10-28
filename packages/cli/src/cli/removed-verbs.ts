@@ -25,5 +25,6 @@ export function removedScoutVerbError(verb: string, original: string[]): ScoutCl
   } else {
     candidates = [command("ask", [...(verb === "broadcast" ? ["--channel", "shared"] : []), "--fyi", ...args])];
   }
-  return new ScoutCliError(`scout ${verb} was removed. Nothing was sent. Use:\n${candidates.map(value => `  ${value}`).join("\n")}`);
+  const note = verb === "speak" ? "\nSender-controlled speech was removed; speaking aloud is the operator’s device setting." : "";
+  return new ScoutCliError(`scout ${verb} was removed. Nothing was sent. Use:\n${candidates.map(value => `  ${value}`).join("\n")}${note}`);
 }

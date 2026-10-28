@@ -44,3 +44,11 @@ describe("renderScoutHelp", () => {
     expect(output).toContain("Troubleshooting: scout doctor");
   }
 });
+
+
+test("news uses FYI and help never teaches positional recipients", () => {
+  const help = renderScoutHelp(undefined, true);
+  expect(help).toContain('scout ask --operator --fyi "Ready to review"');
+  expect(help).not.toContain("scout @agent");
+  expect(help).not.toContain("current ask state");
+});

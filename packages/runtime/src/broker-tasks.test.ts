@@ -308,3 +308,15 @@ test("operator expiry reads only the open-task index, never a registry snapshot"
   for (let i = 0; i < 10; i++) await tasks.expireOperatorTasks();
   expect(reads).toBe(after);
 });
+
+
+test("task suffixes need eight characters and ambiguous matches fail closed", async () => {
+  const { h, tasks } = await taskFixture();
+  for (const id of ["first", "second"]) {
+    const request = invocation(id, { completion: undefined });
+    await h.records.recordInvocation(request, { flight: flight(request, `${id}-abcdefgh`) });
+  }
+  await expect(tasks.resolve("abcdefgh")).rejects.toThrow("ambiguous task");
+  await expect(tasks.resolve("bcdefgh")).rejects.toThrow("unknown task");
+  expect((await tasks.resolve("first-abcdefgh")).invocation.id).toBe("first");
+});

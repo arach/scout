@@ -859,8 +859,8 @@
   },
   {
     "name": "invocations_get",
-    "title": "Get Scout Ask",
-    "description": "Fetch the current broker flight state for a previously-created Scout ask or invocation. Use this with a flightId returned by ask to observe long-running work without blocking the original ask call.",
+    "title": "Get Scout Task",
+    "description": "Fetch the current broker flight state for a previously-created Scout task. Use this with a flightId returned by ask to observe long-running work without blocking the original ask call.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -890,8 +890,8 @@
   },
   {
     "name": "invocations_wait",
-    "title": "Wait For Scout Ask",
-    "description": "Wait briefly for a previously-created Scout ask flight to finish, then return the latest flight state. This is a bounded follow-up wait, not the long-running ask submission path.",
+    "title": "Wait For Scout Task",
+    "description": "Wait briefly for a previously-created Scout task to finish, then return the latest flight state. This is a bounded follow-up wait, not the long-running ask submission path.",
     "inputSchema": {
       "type": "object",
       "properties": {

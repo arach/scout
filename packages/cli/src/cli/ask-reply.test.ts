@@ -72,3 +72,8 @@ test("successors on another host require an explicit project on that host", () =
   expect(() => parseAskCommandOptions(["--continue", "inv-1", "--on", "peer", "review"], "/repo")).toThrow("needs --project");
   expect(parseAskCommandOptions(["--continue", "inv-1", "--on", "peer", "--project", "~/repo", "review"], "/repo").projectPath).toBe("~/repo");
 });
+
+
+test("speak tombstone explains that speech is controlled by the recipient device", () => {
+  expect(removedScoutVerbError("speak", ["hello"])!.message).toContain("Sender-controlled speech was removed");
+});

@@ -156,7 +156,7 @@ function parseFlagValue(args: string[], index: number, flag: string): { value: s
   const current = args[index] ?? "";
   if (current === flag) {
     const value = args[index + 1];
-    if (!value || value.startsWith("--")) {
+    if (!value) {
       missingFlagValue(flag);
     }
     return { value, nextIndex: index + 1 };
@@ -875,6 +875,11 @@ function parseTargetableMessageCommandOptions(
   };
 }
 
+function parseAskFlagValue(args: string[], index: number, flag: string): { value: string; nextIndex: number } {
+  if (args[index] === flag && (!args[index + 1]?.trim() || args[index + 1]!.startsWith("--"))) missingFlagValue(flag);
+  return parseFlagValue(args, index, flag);
+}
+
 export function parseAskCommandOptions(
   args: string[],
   defaultCurrentDirectory: string,
@@ -917,16 +922,12 @@ export function parseAskCommandOptions(
 
   for (let index = 0; index < parsed.args.length; index += 1) {
     const current = parsed.args[index] ?? "";
-    const valueFlags = ["--ref", "--to", "--project", "--on", "--host", "--profile", "--runtime", "--harness", "--model", "--effort", "--reasoning-effort",
-      "--completion", "--join-to", "--continue-for", "--request-id", "--as", "--channel", "--alias-project", "--alias-host", "--session",
-      "--timeout", "--reply-mode", "--placement", "--label", "--labels", "--prompt-file", "--body-file"];
-    if (valueFlags.includes(current) && (!parsed.args[index + 1]?.trim() || parsed.args[index + 1]!.startsWith("--"))) missingFlagValue(current);
     if (current === "--") { messageParts.push(...parsed.args.slice(index + 1)); break; }
     const taskBoolean = ({ "--operator": "operator", "--fyi": "fyi", "--notify": "notify", "--cancel": "cancel", "--permission": "permission" } as const)[current as "--operator"];
     if (taskBoolean) { task[taskBoolean] = true; continue; }
     const taskValue = ["--continue", "--default-action", "--window", "--option", "--because", "--image"].find(flag => current === flag || current.startsWith(`${flag}=`));
     if (taskValue) {
-      const value = parseFlagValue(parsed.args, index, taskValue);
+      const value = parseAskFlagValue(parsed.args, index, taskValue);
       if (!value.value.trim() || value.value.startsWith("--")) missingFlagValue(taskValue);
       if (taskValue === "--continue") { if (task.continue) throw new ScoutCliError("--continue may appear only once"); task.continue = value.value; }
       if (taskValue === "--default-action") task.defaultAction = value.value;
@@ -937,7 +938,7 @@ export function parseAskCommandOptions(
       index = value.nextIndex; continue;
     }
     if (current === "--completion" || current.startsWith("--completion=")) {
-      const value = parseFlagValue(parsed.args, index, "--completion");
+      const value = parseAskFlagValue(parsed.args, index, "--completion");
       if (value.value !== "explicit") throw new ScoutCliError("--completion must be explicit");
       completion = { mode: "explicit" };
       index = value.nextIndex;
@@ -946,7 +947,7 @@ export function parseAskCommandOptions(
     if (current === "--join-to" || current.startsWith("--join-to=")
       || current === "--continue-for" || current.startsWith("--continue-for=")) {
       const flag = current.startsWith("--join-to") ? "--join-to" : "--continue-for";
-      const value = parseFlagValue(parsed.args, index, flag);
+      const value = parseAskFlagValue(parsed.args, index, flag);
       if (relation) throw new ScoutCliError("--join-to and --continue-for are mutually exclusive and may appear only once");
       if (!value.value.trim()) throw new ScoutCliError(`${flag} requires a parent flight id`);
       relation = { kind: flag === "--join-to" ? "joined" : "continuation", parentFlightId: value.value.trim() };
@@ -954,20 +955,20 @@ export function parseAskCommandOptions(
       continue;
     }
     if (current === "--request-id" || current.startsWith("--request-id=")) {
-      const value = parseFlagValue(parsed.args, index, "--request-id");
+      const value = parseAskFlagValue(parsed.args, index, "--request-id");
       requestId = value.value.trim();
       if (!requestId || requestId.length > 256) throw new ScoutCliError("--request-id must contain 1 to 256 characters");
       index = value.nextIndex;
       continue;
     }
     if (current === "--as" || current.startsWith("--as=")) {
-      const value = parseFlagValue(parsed.args, index, "--as");
+      const value = parseAskFlagValue(parsed.args, index, "--as");
       agentName = value.value;
       index = value.nextIndex;
       continue;
     }
     if (current === "--to" || current.startsWith("--to=")) {
-      const value = parseFlagValue(parsed.args, index, "--to");
+      const value = parseAskFlagValue(parsed.args, index, "--to");
       if (!value.value.trim() || value.value.startsWith("--")) missingFlagValue("--to");
       targetLabel ??= value.value;
       targets.push(value.value);
@@ -975,13 +976,13 @@ export function parseAskCommandOptions(
       continue;
     }
     if (current === "--profile" || current.startsWith("--profile=")) {
-      const value = parseFlagValue(parsed.args, index, "--profile");
+      const value = parseAskFlagValue(parsed.args, index, "--profile");
       runtimeProfile = parseRuntimeProfileFlag(value.value);
       index = value.nextIndex;
       continue;
     }
     if (current === "--runtime" || current.startsWith("--runtime=")) {
-      const value = parseFlagValue(parsed.args, index, "--runtime");
+      const value = parseAskFlagValue(parsed.args, index, "--runtime");
       const runtime = parseRuntimeLiteralFlag(value.value);
       runtimeLiteral = value.value;
       runtimeLiteralHarness = runtime.harness;
@@ -991,7 +992,7 @@ export function parseAskCommandOptions(
       continue;
     }
     if (current === "--model" || current.startsWith("--model=")) {
-      const value = parseFlagValue(parsed.args, index, "--model");
+      const value = parseAskFlagValue(parsed.args, index, "--model");
       model = value.value.trim();
       explicitModelFlag = true;
       if (!model) missingFlagValue("--model");
@@ -1000,14 +1001,14 @@ export function parseAskCommandOptions(
     }
     const effortFlag = flagNameFor(current, ["--effort", "--reasoning-effort"]);
     if (effortFlag) {
-      const value = parseFlagValue(parsed.args, index, effortFlag);
+      const value = parseAskFlagValue(parsed.args, index, effortFlag);
       reasoningEffort = parseRuntimeProfileEffortFlag(value.value);
       explicitEffortFlag = true;
       index = value.nextIndex;
       continue;
     }
     if (current === "--ref" || current.startsWith("--ref=")) {
-      const value = parseFlagValue(parsed.args, index, "--ref");
+      const value = parseAskFlagValue(parsed.args, index, "--ref");
       if (targetRef) throw new ScoutCliError("--ref may appear only once");
       targetRef = value.value.replace(/^ref:/, "");
       task.ref = targetRef;
@@ -1015,7 +1016,7 @@ export function parseAskCommandOptions(
       continue;
     }
     if (current === "--project" || current.startsWith("--project=")) {
-      const value = parseFlagValue(parsed.args, index, "--project");
+      const value = parseAskFlagValue(parsed.args, index, "--project");
       rawProjectPath = value.value;
       projectPath = resolveInputFilePath(parsed.currentDirectory, value.value);
       index = value.nextIndex;
@@ -1023,39 +1024,39 @@ export function parseAskCommandOptions(
     }
     if (current === "--on" || current.startsWith("--on=") || current === "--host" || current.startsWith("--host=")) {
       const flag = current.startsWith("--host") ? "--host" : "--on";
-      const value = parseFlagValue(parsed.args, index, flag);
+      const value = parseAskFlagValue(parsed.args, index, flag);
       if (!value.value.trim() || value.value.startsWith("--")) missingFlagValue(flag);
       onHost = value.value.trim();
       index = value.nextIndex;
       continue;
     }
     if (current === "--channel" || current.startsWith("--channel=")) {
-      const value = parseFlagValue(parsed.args, index, "--channel");
+      const value = parseAskFlagValue(parsed.args, index, "--channel");
       channel = value.value;
       index = value.nextIndex;
       continue;
     }
     if (current === "--harness" || current.startsWith("--harness=")) {
-      const value = parseFlagValue(parsed.args, index, "--harness");
+      const value = parseAskFlagValue(parsed.args, index, "--harness");
       harness = value.value;
       explicitHarnessFlag = true;
       index = value.nextIndex;
       continue;
     }
     if (current === "--alias-project" || current.startsWith("--alias-project=")) {
-      const value = parseFlagValue(parsed.args, index, "--alias-project");
+      const value = parseAskFlagValue(parsed.args, index, "--alias-project");
       aliasProject = resolveInputFilePath(parsed.currentDirectory, value.value);
       index = value.nextIndex;
       continue;
     }
     if (current === "--alias-host" || current.startsWith("--alias-host=")) {
-      const value = parseFlagValue(parsed.args, index, "--alias-host");
+      const value = parseAskFlagValue(parsed.args, index, "--alias-host");
       aliasHost = value.value;
       index = value.nextIndex;
       continue;
     }
     if (current === "--session" || current.startsWith("--session=")) {
-      const value = parseFlagValue(parsed.args, index, "--session");
+      const value = parseAskFlagValue(parsed.args, index, "--session");
       session = mergeAskSessionPreference(
         session,
         parseAskSessionPreference(value.value),
@@ -1068,7 +1069,7 @@ export function parseAskCommandOptions(
       continue;
     }
     if (current === "--timeout" || current.startsWith("--timeout=")) {
-      const value = parseFlagValue(parsed.args, index, "--timeout");
+      const value = parseAskFlagValue(parsed.args, index, "--timeout");
       const parsedTimeout = Number.parseInt(value.value, 10);
       if (!Number.isFinite(parsedTimeout) || parsedTimeout <= 0) {
         throw new ScoutCliError(`invalid timeout: ${value.value}`);
@@ -1078,7 +1079,7 @@ export function parseAskCommandOptions(
       continue;
     }
     if (current === "--reply-mode" || current.startsWith("--reply-mode=")) {
-      const value = parseFlagValue(parsed.args, index, "--reply-mode");
+      const value = parseAskFlagValue(parsed.args, index, "--reply-mode");
       if (value.value !== "inline" && value.value !== "notify" && value.value !== "none") {
         throw new ScoutCliError(`invalid reply mode: ${value.value}`);
       }
@@ -1091,7 +1092,7 @@ export function parseAskCommandOptions(
       continue;
     }
     if (current === "--placement" || current.startsWith("--placement=")) {
-      const value = parseFlagValue(parsed.args, index, "--placement");
+      const value = parseAskFlagValue(parsed.args, index, "--placement");
       if (value.value !== "background" && value.value !== "foreground" && value.value !== "attached") {
         throw new ScoutCliError(`invalid placement: ${value.value}`);
       }
@@ -1112,7 +1113,7 @@ export function parseAskCommandOptions(
     }
     const labelFlag = flagNameFor(current, ["--label", "--labels"]);
     if (labelFlag) {
-      const value = parseFlagValue(parsed.args, index, labelFlag);
+      const value = parseAskFlagValue(parsed.args, index, labelFlag);
       appendLabelValues(labels, value.value);
       index = value.nextIndex;
       continue;
@@ -1122,7 +1123,7 @@ export function parseAskCommandOptions(
       if (promptFile) {
         throw new ScoutCliError("prompt file was provided more than once");
       }
-      const value = parseFlagValue(parsed.args, index, fileFlag);
+      const value = parseAskFlagValue(parsed.args, index, fileFlag);
       promptFile = resolveInputFilePath(parsed.currentDirectory, value.value);
       index = value.nextIndex;
       continue;
