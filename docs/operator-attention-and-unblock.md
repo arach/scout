@@ -207,8 +207,19 @@ machine-local runtime route `POST /v1/permissions/decide`. The runtime owns the
 pending live callback, records an actuation attempt, rejects duplicate/stale
 answers, and sends only to that process. The Requests page and Scoutbot share
 this API through `useRequestActions`. No background resume, fork, or project hook
-is installed. A runtime restart loses the live callback: surviving records cannot
-be actuated and return a conflict requiring the operator to open the session.
+is installed.
+
+A runtime restart loses the live callback. Each record names the node that wrote
+it, and the runtime reconciles the open records of its own node that no process
+waits on: once at startup, then every minute. If the session's pane still shows
+the same prompt (compared without the cursor), the runtime rebinds the record to
+that pane and watches it until the prompt is answered or leaves. The flight that
+raised it has ended, so an answer goes only to the session. Otherwise the runtime
+declines the record and records why. A decision on a record with no waiter tries
+the same rebinding first. When nothing can answer the request, the route returns
+`410` with `outcome: "ended"` and `sessionOpen`. A record with a recorded
+actuation attempt is never rebound, and records from another node are never
+touched.
 
 Permission scope is not invented:
 

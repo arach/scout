@@ -1,6 +1,6 @@
 import { BrokerAssistantClaims, protectAssistantService, ASSISTANT_CLAIM_HEADER } from "./broker-assistant-claims.js";
 import { meshApprovalsConfigPath, readMeshApprovalsConfig, writeMeshApprovalsConfig } from "./mesh-approvals.js";
-import { PermissionDeliveryUnconfirmedError } from "./broker-permission-service.js";
+import { PermissionDeliveryUnconfirmedError, PermissionRequestEndedError } from "./broker-permission-service.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1548,6 +1548,13 @@ test("permission decision conflicts do not become successful receipts", async ()
   const harness = createHarness({ permissionService: { decide: async () => { throw new Error("Permission request changed"); } } as unknown as NonNullable<BrokerHttpRouterDeps["permissionService"]> });
   const result = await requestRouter(harness, "POST", "/v1/permissions/decide", { body: { requestId: "p", version: "v", decision: "once" } });
   expect(result.response.status).toBe(409); expect(result.body).toEqual({ error: "Permission request changed", outcome: "refused" });
+});
+
+test("a permission request nothing can answer is ended, not refused", async () => {
+  const harness = createHarness({ permissionService: { decide: async () => { throw new PermissionRequestEndedError("The session no longer shows this prompt.", true); } } as unknown as NonNullable<BrokerHttpRouterDeps["permissionService"]> });
+  const result = await requestRouter(harness, "POST", "/v1/permissions/decide", { body: { requestId: "p", version: "v", decision: "once" } });
+  expect(result.response.status).toBe(410);
+  expect(result.body).toEqual({ error: "The session no longer shows this prompt.", outcome: "ended", sessionOpen: true });
 });
 
 test("unconfirmed permission actuation is not a refused decision", async () => {

@@ -69,6 +69,7 @@ import {
   type InvocationRequest,
   type MessageRecord,
   type NodeDefinition,
+  type QuestionRecord,
   type ScoutDispatchEnvelope,
   type ScoutDispatchRecord,
   AGENT_HARNESSES,
@@ -147,6 +148,7 @@ import {
   listScoutLaunchedTmuxSessions,
   observeLocalAgentEndpointSession,
   loadRegisteredLocalAgentBindings,
+  reattachTmuxPermission,
   shutdownLocalSessionEndpoint,
   shouldDisableGeneratedCodexEndpoint,
   sleepLocalAgentSession,
@@ -2910,10 +2912,18 @@ const operatorAttentionService = new BrokerOperatorAttentionService({
 
 const permissionService = new BrokerPermissionService({
   operatorId: operatorActorId,
+  nodeId,
   createId: () => createRuntimeId("permission"),
   record: recordCollaborationDurably,
   read: id => { const record = runtime.collaborationRecord(id); return record?.kind === "question" ? record : undefined; },
+  requests: () => Object.values(runtime.snapshot().collaborationRecords)
+    .filter((record): record is QuestionRecord => record.kind === "question" && record.state === "open"),
   flight: id => runtime.flightForInvocation(id),
+  localInvocation: id => {
+    const invocation = knownInvocations.get(id);
+    return Boolean(invocation) && (invocation?.targetNodeId ?? nodeId) === nodeId;
+  },
+  reattach: reattachTmuxPermission,
   transition: (id, state, requestId) => transitionInvocation(id, {
     state, summary: requestId ? "Waiting on permission" : "Permission wait resolved; continuing live session.",
     metadata: { permissionRequestId: requestId, waitingOnPermission: Boolean(requestId), nextMoveOwnerId: requestId ? operatorActorId : null },
@@ -2926,6 +2936,21 @@ const permissionService = new BrokerPermissionService({
   }),
 });
 configureManagedPermissionHandler((invocation, prompt) => permissionService.wait(invocation, prompt));
+
+/** A restart loses every live permission waiter. Rebind each request to its session, or settle it. */
+function reconcilePermissionRequests(reason: "startup" | "periodic"): void {
+  if (shuttingDown) return;
+  permissionService.reconcile()
+    .then(({ adopted, closed, failed }) => {
+      if (adopted.length || closed.length) {
+        console.log(`[openscout-runtime] ${reason} permission reconcile ${JSON.stringify({ adopted, closed })}`);
+      }
+      if (failed.length) console.warn(`[openscout-runtime] ${reason} permission reconcile left open ${JSON.stringify(failed)}`);
+    })
+    .catch((error) => {
+      console.error(`[openscout-runtime] ${reason} permission reconcile failed:`, error);
+    });
+}
 
 const unavailableTargetService = new BrokerUnavailableTargetService({
   nodeId,
@@ -3771,6 +3796,7 @@ setTimeout(() => {
   sweepIdleCardlessSessions().catch((error) => {
     console.error("[openscout-runtime] initial cardless session sweep failed:", error);
   });
+  reconcilePermissionRequests("startup");
   sweepRegistryRetention()
     .catch((error) => {
       console.error("[openscout-runtime] initial registry retention sweep failed:", error);
@@ -3860,6 +3886,8 @@ if (startupTrafficGate.snapshot().mutationsAdmitted) {
       });
     }, Math.max(60_000, relayAgentSweepIntervalMs)).unref();
   }
+
+  setInterval(() => reconcilePermissionRequests("periodic"), 60_000).unref();
 
   // Periodic mesh node compaction sweep to prune Bonjour collision sediments
   setInterval(() => {

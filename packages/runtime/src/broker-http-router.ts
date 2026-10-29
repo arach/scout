@@ -11,7 +11,7 @@ import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-m
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
 import type { MeshDiagnostics } from "./mesh-diagnostics.js";
 import { completionReply } from "@openscout/protocol";
-import { PermissionDeliveryUnconfirmedError, type BrokerPermissionService } from "./broker-permission-service.js";
+import { PermissionDeliveryUnconfirmedError, PermissionRequestEndedError, type BrokerPermissionService } from "./broker-permission-service.js";
 import { BrokerBusyError } from "./broker-storage-pressure.js";
 import { handleBrokerHistoryRoute, type BrokerHistoryQueries } from "./broker-history-http-service.js";
 import { handleBrokerQuarantineRoute, type BrokerQuarantineQueries } from "./broker-quarantine-http-service.js";
@@ -590,7 +590,11 @@ export function createBrokerHttpRouter(
       if (!deps.permissionService) throw new Error("Permission decisions are unavailable");
       await deps.permissionService.decide(body.requestId, body.version, body.decision as "once" | "project" | "deny");
       json(response, 200, { ok: true });
-    } catch (error) { json(response, error instanceof PermissionDeliveryUnconfirmedError ? 502 : 409, { error: error instanceof Error ? error.message : String(error), outcome: error instanceof PermissionDeliveryUnconfirmedError ? "unconfirmed" : "refused" }); }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof PermissionRequestEndedError) json(response, 410, { error: message, outcome: "ended", sessionOpen: error.sessionOpen });
+      else json(response, error instanceof PermissionDeliveryUnconfirmedError ? 502 : 409, { error: message, outcome: error instanceof PermissionDeliveryUnconfirmedError ? "unconfirmed" : "refused" });
+    }
     return;
   }
 
