@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { parseContinuationDialog, stripTerminalControls } from "./continuation/dialog.js";
-import { requestManagedPermission, type PermissionDecision } from "./managed-permission.js";
+import { requestManagedPermission, type ManagedPermissionPrompt, type PermissionDecision } from "./managed-permission.js";
 
 export function parseTmuxPermission(text: string, projectRoot?: string): { version: string; identity: string; text: string; keys: Partial<Record<PermissionDecision, string[]>> } | null {
   let clean = stripTerminalControls(text).trim();
@@ -44,15 +44,18 @@ export function parseTmuxPermission(text: string, projectRoot?: string): { versi
     identity: createHash("sha256").update(clean.replace(/^\s*❯?\s*(?=\d+\.|No, exit|Yes, I trust this folder)/gm, "")).digest("hex"), keys };
 }
 
-export async function waitForTmuxPermission(input: {
+type TmuxPermissionPane = {
   sessionId: string; projectRoot: string; text: string;
   capture: () => Promise<string>; alive: () => Promise<boolean>;
   send: (keys: string[]) => Promise<void>;
-}): Promise<boolean> {
+};
+
+/** Binds the prompt in `text` to its pane. Null when `text` shows no answerable prompt. */
+export function tmuxPermissionPrompt(input: TmuxPermissionPane): ManagedPermissionPrompt | null {
   const prompt = parseTmuxPermission(input.text, input.projectRoot);
-  if (!prompt) return false;
+  if (!prompt) return null;
   const current = async () => await input.alive() && parseTmuxPermission(await input.capture(), input.projectRoot)?.version === prompt.version;
-  return requestManagedPermission({ sessionId: input.sessionId, projectRoot: input.projectRoot,
+  return { sessionId: input.sessionId, projectRoot: input.projectRoot,
     text: prompt.text, version: prompt.version, decisions: Object.keys(prompt.keys) as PermissionDecision[],
     isCurrent: current,
     answer: async decision => {
@@ -75,5 +78,10 @@ export async function waitForTmuxPermission(input: {
       }
       throw new Error("Permission keys sent but the harness did not acknowledge them.");
     },
-  });
+  };
+}
+
+export async function waitForTmuxPermission(input: TmuxPermissionPane): Promise<boolean> {
+  const prompt = tmuxPermissionPrompt(input);
+  return prompt ? requestManagedPermission(prompt) : false;
 }

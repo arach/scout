@@ -2,8 +2,8 @@ import { receiveTransportLiveness } from "./local-endpoint-liveness.js";
 import { hasExplicitCompletion } from "@openscout/protocol";
 import { isExternalSessionEndpoint } from "./external-session-transport.js";
 import { isA2AHttpEndpoint } from "./a2a-http-endpoint.js";
-import { hasManagedPermissionContext } from "./managed-permission.js";
-import { parseTmuxPermission, waitForTmuxPermission } from "./tmux-permission.js";
+import { hasManagedPermissionContext, type ManagedPermissionPrompt } from "./managed-permission.js";
+import { parseTmuxPermission, tmuxPermissionPrompt, waitForTmuxPermission } from "./tmux-permission.js";
 import { SUPPORTED_LOCAL_AGENT_HARNESSES } from "./local-agent-harnesses.js";
 import { boundedLogPipeCommand } from "@openscout/agent-sessions/local/bounded-log";
 import { randomUUID } from "node:crypto";
@@ -4000,6 +4000,28 @@ async function handleManagedTmuxPermission(sessionId: string, projectRoot: strin
     alive: () => isLocalAgentSessionAliveAsync(sessionId),
     send: keys => execSystemFile("tmux", ["send-keys", "-t", target, ...keys], { timeoutMs: 2_000 }).then(() => undefined),
   });
+}
+
+/**
+ * Rebinds a permission record whose waiter was lost to the pane that still
+ * shows its prompt. The cursor may have moved; the prompt itself may not.
+ */
+export async function reattachTmuxPermission(request: { sessionId: string; projectRoot: string; text: string }): Promise<{ prompt?: ManagedPermissionPrompt; sessionOpen: boolean }> {
+  const { sessionId, projectRoot } = request;
+  if (!await isLocalAgentSessionAliveAsync(sessionId)) return { sessionOpen: false };
+  const expected = parseTmuxPermission(request.text, projectRoot);
+  if (!expected) return { sessionOpen: true };
+  const target = (await execSystemFile("tmux", ["display-message", "-p", "-t", sessionId, "#{pane_id}"], { timeoutMs: 2_000 })).stdout.trim();
+  if (!/^%\d+$/.test(target)) return { sessionOpen: true };
+  const observed = await captureTmuxPaneTail(target, 80);
+  if (parseTmuxPermission(observed, projectRoot)?.identity !== expected.identity) return { sessionOpen: true };
+  const prompt = tmuxPermissionPrompt({ sessionId, projectRoot,
+    text: observed,
+    capture: () => captureTmuxPaneTail(target, 80),
+    alive: () => isLocalAgentSessionAliveAsync(sessionId),
+    send: keys => execSystemFile("tmux", ["send-keys", "-t", target, ...keys], { timeoutMs: 2_000 }).then(() => undefined),
+  });
+  return { prompt: prompt ?? undefined, sessionOpen: true };
 }
 
 async function waitForTmuxHarnessReady(sessionName: string, harness: AgentHarness, projectRoot: string): Promise<void> {
