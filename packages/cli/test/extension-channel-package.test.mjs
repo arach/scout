@@ -79,7 +79,7 @@ const pair=allocateExtensionChannel('context');if(pair.target!==5)throw Error('w
     const manifest=join(assets,'extension-channel-artifact.json'), record=JSON.parse(readFileSync(manifest));
     record.adapter='0'.repeat(64);writeFileSync(manifest,JSON.stringify(record));
     assert.notEqual(run(['-e',check],dir).status,0,'fresh manifest cannot approve wrong source');
-    record.adapter='c09006358ff0c37c831da027fe417d09c4f8c0b194230a5901d85a4837e4e62f';record.files['../escape']='0'.repeat(64);writeFileSync(manifest,JSON.stringify(record));
+    record.adapter='5ecc869eabb149398fd3ba231c15d14d421fc09151ec843f12e17d8ef7eb9fd8';record.files['../escape']='0'.repeat(64);writeFileSync(manifest,JSON.stringify(record));
     assert.notEqual(run(['-e',check],dir).status,0,'unexpected manifest path must refuse');
   } finally {rmSync(dir,{recursive:true,force:true});}
 });

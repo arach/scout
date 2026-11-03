@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createExtensionChannelCandidate, releaseExtensionChannelCodeForWitness } from "../../../runtime/src/extension-channel-io.ts";
 import { checkReclaimedDescriptors } from "./extension-descriptor-witness.ts";
+import { APPARATUS_MESSAGES } from "../../../../scripts/extension-numeric-spike/apparatus-contract.ts";
 import { numericWitness, type Fault, type AsyncWitnessOptions } from "../../../../scripts/extension-numeric-spike/witness.ts";
 import type { DescriptorForm, WitnessEvent } from "./extension-descriptor-witness.ts";
 const candidate = Bun.revision === "0d9b296af33f2b851fcbf4df3e9ec89751734ba4" && (process.platform === "darwin" && process.arch === "arm64" || process.platform === "linux" && process.arch === "x64");
@@ -26,6 +27,7 @@ for (const form of ["context", "credential"] as DescriptorForm[]) {
         // late finalization callback or a descriptor-identity loss in CI logs.
         console.error(JSON.stringify({event: "async-positive-refused", form, mode,
           version: Bun.version, revision: Bun.revision, platform: process.platform, arch: process.arch,
+          apparatus: events.filter(e=>e.event==="reservation-startup"||String(e.event).startsWith("reservation-")||String(e.event).startsWith("setup-")),
           collection: events.filter(e => e.event === "collection-incomplete"),
           ports: events.filter(e => e.event === "copy-discipline"),
           reuse: events.filter(e => e.event === "second-spawn-reuse"),
@@ -34,6 +36,10 @@ for (const form of ["context", "credential"] as DescriptorForm[]) {
         }));
         throw error;
       }
+      console.log(JSON.stringify({event:"async-positive-receipt",form,mode,events}));
+      expect(events.filter(e => e.event === "reservation-placement")).toHaveLength(9);
+      expect(events.filter(e => e.event === "setup-frame-unwound" && e.pinCleared === true)).toHaveLength(9);
+      expect(events.filter(e => e.event === "close-to-victim")).toHaveLength(18);
       expect(events.filter(e => e.event === "native-collected")).toHaveLength(9);
       expect(events.filter(e => e.event === "second-spawn-reuse")).toHaveLength(1);
       expect(events.filter(e => e.event === "reap-before-close-survived")).toHaveLength(1);
@@ -72,6 +78,7 @@ for (const form of ["context", "credential"] as DescriptorForm[]) {
       const timer = setTimeout(() => child.kill("SIGKILL"), 20000);
       try {
         const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+        console.log(JSON.stringify({event:"async-sensitivity-receipt",form,fault,code,stdout,stderr}));
         expect(code).toBe(1); expect(stderr).toBe("");
         const failure = stdout.trim().split("\n").map(line => JSON.parse(line)).at(-1);
         expect(failure).toMatchObject({event: "failure", form, fault}); expect(failure.error).toContain(messages[fault]);
@@ -98,3 +105,55 @@ for (const retain of [false, true]) measured(`compiled helper collection ${retai
     else {await proof; expect(seen.collected).toBe(true);}
   } finally {seen.held = null; rmSync(directory, {recursive: true, force: true});}
 }, 10000);
+
+// Extend the original 28 identities; every intervention executes a real syscall
+// or keeps a real identified descriptor/object alive in its isolated process.
+for(const form of ["context","credential"] as const) {
+  measured(`async ${form} apparatus: above-frontier-churn`,async()=>{
+    const events:WitnessEvent[]=[];
+    await numericWitness(form,e=>events.push(e),undefined,{io:"async",mode:"normal",apparatus:"above-frontier-churn"});
+    console.log(JSON.stringify({event:"apparatus-positive-receipt",form,control:"above-frontier-churn",events}));
+    expect(events.filter(e=>e.event==="above-frontier-churn")).toHaveLength(9);
+    for(const e of events.filter(e=>e.event==="above-frontier-churn")) expect(e.fd as number).toBeGreaterThan(128);
+    expect(events.filter(e=>e.event==="native-collected")).toHaveLength(9);
+    expect(events.filter(e=>e.event==="reclaim-check").length).toBeGreaterThanOrEqual(160);
+    expect(events.filter(e=>e.event==="second-spawn-reuse")).toHaveLength(1);
+    expect(events.filter(e=>e.event==="setup-frame-unwound"&&e.pinCleared===true)).toHaveLength(9);
+  },30000);
+  for(const [control,message] of Object.entries(APPARATUS_MESSAGES)) measured(`async ${form} apparatus: ${control}`,async()=>{
+    const child=Bun.spawn([process.execPath,join(import.meta.dir,"../../../../scripts/extension-numeric-spike/witness.ts"),form,"none","async","normal",control],
+      {stdin:"ignore",stdout:"pipe",stderr:"pipe",env:{PATH:process.env.PATH}});
+    const timer=setTimeout(()=>child.kill("SIGKILL"),20000);
+    try {
+      const [out,err,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);
+      console.log(JSON.stringify({event:"apparatus-control-receipt",form,control,code,stdout:out,stderr:err}));
+      expect(code).toBe(1);expect(err).toBe("");
+      const events=out.trim().split("\n").map(line=>JSON.parse(line));
+      expect(events.at(-1)).toMatchObject({event:"failure",form,error:`Error: ${message}`});
+      const intervention=({"suppressed-close":"source-close-suppressed","occupied-parent":"reservation-allocation-observed",
+        "released-guard":"guard-released","reservation-stale-close":"reservation-stale-close","retained-setup-pin":"setup-pin-escaped","low-prefix-interference":"prefix-interference-planted","compile-residue":"compile-residue-planted"} as const)[control as keyof typeof APPARATUS_MESSAGES];
+      const observed=events.find(e=>e.event===intervention && (["suppressed-close","low-prefix-interference","compile-residue"].includes(control)||e.iteration===1));
+      expect(observed).toBeDefined();
+      if(control==="occupied-parent") {
+        expect(observed.occupied).toBe(true);
+        expect(observed.ports[0]).not.toBe(observed.slots[3]);
+      }
+      if(control==="retained-setup-pin") {
+        expect(observed.count).toBeGreaterThan(0);expect(observed.seedCleared).toBe(true);
+        expect(events.some(e=>e.event==="setup-control-seed-cleared"&&e.iteration===1)).toBe(true);
+        expect(events.find(e=>e.event==="collection-incomplete").observations).toHaveLength(9);
+        expect(events.find(e=>e.event==="collection-incomplete").observations[0]).toMatchObject({iteration:0,alive:true,callback:false});
+      }
+    } finally {clearTimeout(timer);if(child.exitCode===null)child.kill("SIGKILL");await child.exited;}
+  },30000);
+}
+
+test("compile-only preparation: zero pairs/endpoints, idempotent, no facade exposure",async()=>{
+  const child=Bun.spawn([process.execPath,join(import.meta.dir,"../../../../scripts/extension-numeric-spike/prepare-contract.ts")],{stdin:"ignore",stdout:"pipe",stderr:"pipe",env:{PATH:process.env.PATH}});
+  const timer=setTimeout(()=>child.kill("SIGKILL"),10000);
+  try {
+    const [out,err,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);
+    expect(code).toBe(0);expect(err).toBe("");
+    expect(JSON.parse(out)).toMatchObject({event:"prepare-contract",compiles:1,pairs:0,endpoints:0,idempotent:true,productionCallers:0});
+  }finally{clearTimeout(timer);if(child.exitCode===null)child.kill("SIGKILL");await child.exited;}
+},15000);

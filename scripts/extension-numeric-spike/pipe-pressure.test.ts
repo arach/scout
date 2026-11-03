@@ -1,6 +1,6 @@
 import {expect, test} from "bun:test";
 import {BoundedChannelDescriptor, ChannelIoError} from "../../packages/runtime/src/extension-channel-io.ts";
-import {prefillForWriteAbort, PRESSURE_DRAIN_BYTES, PRESSURE_PRIMER_LIMIT} from "./witness.ts";
+import {prefillForWriteAbort, PRESSURE_DRAIN_BYTES, PRESSURE_PRIMER_LIMIT} from "./pressure.ts";
 
 const again = () => Object.assign(new Error("full"), {code: "EAGAIN"});
 for (const capacity of [8192, 65536, 262144]) {
