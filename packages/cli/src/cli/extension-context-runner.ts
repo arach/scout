@@ -42,13 +42,6 @@ export async function runScoutExtensionWithContext(extension: ScoutExtension, ar
   const wire = encodeScoutExtensionContext(frame);
   if (!sameSelection(extension, frame, selectionEnv)) contextRefusal(extension.name, "selection_changed");
   if (!scoutExtensionContextBackend()) contextRefusal(extension.name, "context_backend_unproven");
-  return runScoutExtensionWithQualifiedContext(extension,args,env,frame,selectionEnv,wire);
-}
-/** Internal post-gate executor seam. Not a CLI/env switch or package export.
- * Public dispatch must pass the literal product gate before reaching this body.
- */
-export async function runScoutExtensionWithQualifiedContext(extension: ScoutExtension,args:readonly string[],env:NodeJS.ProcessEnv,
-  frame:ScoutExtensionContext,selectionEnv:NodeJS.ProcessEnv,wire=encodeScoutExtensionContext(frame)):Promise<number> {
   // Credential transport is independently unqualified. Never run a declaration with an absent channel.
   if (extension.invocation?.credentialInputs?.length) inputRefusal(extension.name, "input_backend_unproven");
   try {

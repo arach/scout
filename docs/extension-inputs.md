@@ -6,16 +6,18 @@ use an explicitly declared, single-request input channel. Installation, updates,
 reconciliation do not issue grants. A manifest cannot request arbitrary
 environment names, files, keychain labels, credential helpers or network lookups.
 
-**No context or credential transport is qualified on any host.** This slice is
-permission-store and management preparation, not key delivery. Every API 2
-invocation refuses with `context_backend_unproven` before provider spawn.
+**Credential delivery remains disabled.** Context-only activation uses the
+[qualified host](./extension-channel-host.md), not this permission store. A
+nonempty credential declaration refuses `input_backend_unproven` before either
+channel or provider spawn on supported hosts; unsupported hosts refuse
+`context_backend_unproven`. Grants do not open either gate.
 Credential slot 6 remains ignored. The independent input gate also remains
 closed; the metadata-only parent session's `request` always refuses with
 `input_backend_unproven`, even with an exact grant. It retains no raw value in
 the returned session and implements no request-time authorization or response
 server. Protocol/lifecycle sections below specify the proposed future slice.
 
-The prior exact-1.3.14 qualification is withdrawn on macOS and Linux. The old
+The prior Node-extra-pipe qualification is withdrawn on macOS and Linux. The old
 pre-opened-FD witness could not detect a second close of a reused number;
 hosted run 39717881161 is void as transport qualification. Isolated positive
 exchanges and old parent-model successes do not qualify a channel. API 1 stays
