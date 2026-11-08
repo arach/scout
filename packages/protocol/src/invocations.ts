@@ -114,6 +114,12 @@ export interface InvocationRequest {
   id: ScoutId;
   requesterId: ScoutId;
   requesterNodeId: ScoutId;
+  /**
+   * DRAFT (interconnection architecture). The person at the root of the
+   * request chain. Continuations and retries inherit it; an agent-to-agent ask
+   * copies it from its parent and never sets it to the agent.
+   */
+  responsiblePrincipalId?: ScoutId;
   targetAgentId: ScoutId;
   targetNodeId?: ScoutId;
   action: InvocationAction;

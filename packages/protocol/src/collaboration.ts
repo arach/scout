@@ -1,4 +1,6 @@
 import type { MetadataMap, ScoutId } from "./common.js";
+import type { AudienceStamp } from "./external-identity.js";
+import type { WorkClaim } from "./work-claims.js";
 
 export type CollaborationKind = "work_item" | "question";
 
@@ -141,6 +143,34 @@ export interface WorkItemRecord extends CollaborationRecordBase {
   startedAt?: number;
   reviewRequestedAt?: number;
   completedAt?: number;
+  /**
+   * DRAFT (interconnection architecture). Portable key such as `SCO-142`,
+   * unique per workspace. Exports and links use it; database ids do not leave.
+   */
+  key?: string;
+  /** DRAFT. Increments on every runtime write; writers compare-and-set against it. */
+  revision?: number;
+  /** DRAFT. The current claim, changed only by lifecycle moves. See work-claims.ts. */
+  claim?: WorkClaim;
+  /** DRAFT. Count of claims ever granted. Survives release, so stale attempts stay fenced. */
+  claimGeneration?: number;
+  /**
+   * DRAFT. The person at the root of the request chain. Publish and release
+   * effects run under this person's grants. Agents never fill it with themselves.
+   */
+  responsiblePrincipalId?: ScoutId;
+  /** DRAFT. Not ready before this time. Retry backoff and snoozes set it. */
+  deferUntil?: number;
+  /**
+   * DRAFT. Source audiences of the content this item carries. A reader must pass
+   * the Scout scope and every audience here. Absent means Scout scope only.
+   */
+  audience?: AudienceStamp;
+  /**
+   * @deprecated Draft direction: the active ticket link (`TicketWorkLink.observed`)
+   * holds this observation. The runtime keeps projecting it here for readers of
+   * the existing contract until they move.
+   */
   externalContext?: ExternalWorkContext;
 }
 
@@ -282,7 +312,11 @@ export type CollaborationEventKind =
   | "review_requested"
   | "done"
   | "dismissed"
-  | "cancelled";
+  | "cancelled"
+  // DRAFT: claim ledger events (see work-claims.ts)
+  | "released"
+  | "lease_expired"
+  | "reclaimed";
 
 export interface CollaborationEvent {
   id: ScoutId;
@@ -452,7 +486,10 @@ export function validateCollaborationEvent(
       || event.kind === "review_requested"
       || event.kind === "done"
       || event.kind === "cancelled"
-      || event.kind === "claimed")
+      || event.kind === "claimed"
+      || event.kind === "released"
+      || event.kind === "lease_expired"
+      || event.kind === "reclaimed")
     && event.recordKind !== "work_item"
   ) {
     errors.push(`${event.kind} events only apply to work items`);
