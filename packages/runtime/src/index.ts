@@ -12,6 +12,8 @@ export * from "./mesh-discovery.js";
 export * from "./mesh-forwarding.js";
 export * from "./mesh-peer-client.js";
 export * from "./mesh-approvals.js";
+export * from "./tail-observations.js";
+export * from "./tail-observation-binding.js";
 export * from "./mesh-rendezvous.js";
 export * from "./node-identity.js";
 export * from "./node-tls-identity.js";

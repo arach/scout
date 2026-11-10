@@ -1,5 +1,10 @@
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
+import { TailObservationService } from "./tail-observations.js";
+import { TailObservationRouter } from "./tail-observations-http.js";
+import { bindTailObservation } from "./tail-observation-binding.js";
+import { captureTmuxPane } from "./system-probes/tmux.js";
+import { parseTmuxPermission } from "./tmux-permission.js";
 import { BrokerShowStore } from "./broker-show-store.js";
 import { shapeAttentionContext } from "@openscout/agent-sessions";
 import { permissionDialogView } from "./agent-notification-builders.js";
@@ -234,6 +239,8 @@ import {
   getTailDiscovery,
   readRecentLiveEvents,
   readRecentTranscriptEvents,
+  readTailEventsForSession,
+  subscribeTail,
 } from "./tail/index.js";
 import {
   getRepoWatchSnapshot,
@@ -3375,6 +3382,45 @@ const brokerRepoTailService = new BrokerRepoTailService({
   warn: (message) => console.warn(message),
 });
 
+const tailObservationSource = new TailObservationService({
+  bind: target => bindTailObservation(target, runtime.snapshot().endpoints[target.endpointId], nodeId, runtime.node(nodeId)?.name ?? hostname()),
+  history: async target => {
+    const result = await readTailEventsForSession(target.sessionId, { limit: 120, includeAllSources: true });
+    if (!result) throw new Error("The source transcript is not available yet.");
+    return result.events;
+  },
+  subscribe: subscribeTail,
+  state: async target => {
+    const snapshot = runtime.snapshot();
+    const endpoint = snapshot.endpoints[target.endpointId]!;
+    if (["offline", "stopped", "superseded"].includes(endpoint.state)) return { kind: "finished" };
+    for (const record of Object.values(snapshot.collaborationRecords)) {
+      const permission = record.metadata?.permissionRequest as { nodeId?: string; sessionId?: string } | undefined;
+      if (record.kind === "question" && record.state === "open" && permission?.nodeId === nodeId
+        && [target.sessionId, endpoint.sessionId].includes(permission.sessionId))
+        return { kind: "permission", summary: record.summary ?? "Waiting for permission", requestId: record.id };
+    }
+    if (endpoint.transport === "tmux" && endpoint.pane && endpoint.harness === "claude") {
+      const pane = await captureTmuxPane(endpoint.pane, { start: "-100", joinWrapped: true, maxBytes: 24_000, maxAgeMs: 0 });
+      if (pane === null) throw new Error("The source terminal cannot be read.");
+      const current = bindTailObservation(target, runtime.snapshot().endpoints[target.endpointId], nodeId, target.hostLabel);
+      if (current.sessionId !== target.sessionId) throw new Error("The source terminal changed sessions.");
+      const prompt = parseTmuxPermission(pane, endpoint.projectRoot ?? endpoint.cwd);
+      if (prompt) return { kind: "permission", summary: prompt.text };
+    }
+    return { kind: "following" };
+  },
+});
+const tailObservations = new TailObservationRouter({
+  nodeId, source: tailObservationSource, peerFetch: daemonMeshPeerFetch,
+  peer: id => {
+    const peer = trustedPeerStore?.listTrustedPeers().find(peer => peer.nodeId === id && peer.tier === "control"
+      && !peer.revokedAt && (!peer.expiresAt || peer.expiresAt > Date.now()));
+    const node = peer ? runtime.node(id) : null;
+    return node?.brokerUrl ? { brokerUrl: node.brokerUrl } : null;
+  },
+});
+
 const rendezvousService = new BrokerRendezvousService();
 
 // Machine inventory (docs/eng/sco-104-machines.md). Shares the control-plane
@@ -3490,6 +3536,7 @@ const routeRequest = createBrokerHttpRouter({
   }),
   permissionService,
   nativePermissions,
+  tailObservations,
   harnessHooks: new HarnessHooks({ scoutInvocation: resolveRuntimeScoutCliInvocation }),
   meshBridge: new MeshBridgeManagement({
     supportDirectory,
@@ -4238,6 +4285,7 @@ async function shutdownBroker(exitCode = 0): Promise<void> {
   tailscaleListenerGuard.stop();
   storageMaintenance.stop();
   meshApprovalWatch.stop();
+  tailObservations.stop();
   meshApprovalShare.stop();
   await nativePermissions.close().catch(() => undefined);
   await slackWorkerSupervisor?.stop();

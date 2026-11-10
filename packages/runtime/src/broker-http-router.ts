@@ -25,6 +25,7 @@ import { handleBrokerAccessRoute, type BrokerAccessHttpDeps } from "./broker-acc
 import { handleBrokerMcpEvents } from "./broker-mcp-event-routes.js";
 import type { BrokerMcpEvents } from "./broker-mcp-events.js";
 import { handleBrokerMeshApprovalsRoute, type MeshApprovalsHttpDeps } from "./mesh-approvals.js";
+import { handleTailObservationRoute, type TailObservationRouter } from "./tail-observations-http.js";
 import type { IntegrationSlackEvents } from "./integration-slack-events.js";
 import type { IntegrationSlackDeliveryService } from "./integration-slack-delivery.js";
 import { BrokerIntegrationSetupService, IntegrationSetupError } from "./broker-integration-setup.js";
@@ -243,6 +244,7 @@ export type BrokerHttpRouterDeps = {
   mcpEvents?: BrokerMcpEvents;
   /** Cross-machine approvals: share this machine's with chosen peers, watch theirs. */
   meshApprovals?: MeshApprovalsHttpDeps;
+  tailObservations?: TailObservationRouter;
   permissionService?: BrokerPermissionService;
   /** Permission dialogs of native Claude Code sessions, opened and waited on by their hook. */
   nativePermissions?: Pick<NativePermissionRequests, "open" | "wait">;
@@ -675,6 +677,10 @@ export function createBrokerHttpRouter(
     return;
   }
 
+  if (url.pathname.startsWith("/v1/tail/observations/") || url.pathname.startsWith("/v1/mesh/tail/observations/")) {
+    if (deps.tailObservations && await handleTailObservationRoute(request, response, url, method, deps.tailObservations)) return;
+    json(response, 503, { error: "Scoped Tail observations are unavailable" }); return;
+  }
   if (url.pathname.startsWith("/v1/mesh/approvals/") || url.pathname.startsWith("/v1/approvals/remote")) {
     if (await handleBrokerMeshApprovalsRoute(request, response, url, method, deps.meshApprovals ?? {})) return;
   }
