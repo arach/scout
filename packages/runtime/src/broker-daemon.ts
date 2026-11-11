@@ -437,6 +437,7 @@ const brokerSocketPath = process.env.OPENSCOUT_BROKER_SOCKET_PATH
 // Health is a cache read on its own thread: runtime work never delays it.
 const healthResponder = new BrokerHealthResponder({
   socketPath: brokerHealthSocketPath(brokerSocketPath),
+  readStartup: () => startupTrafficGate.snapshot(),
   log: (message) => console.warn(`[openscout-runtime] ${message}`),
 });
 let nodeId = process.env.OPENSCOUT_NODE_ID?.trim() ?? "";
@@ -3476,6 +3477,10 @@ const routeRequest = createBrokerHttpRouter({
     list: options => projection.listQuarantine(options),
     read: id => projection.readQuarantine(id),
     acknowledge: id => projection.acknowledgeQuarantine(id),
+    defer: id => projection.deferQuarantine(id),
+    // Fence concurrent canonical updates while selecting the latest journal
+    // value; a retry only repairs the derived projection, never redispatches work.
+    retry: id => durableStore.runWrite(() => projection.retryQuarantine(id)),
   },
   mcpEvents,
   meshFeedback: new MeshFeedback({
