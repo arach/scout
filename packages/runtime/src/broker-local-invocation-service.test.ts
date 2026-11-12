@@ -170,7 +170,11 @@ function createHarness(input: {
   invokeEndpoint?: (
     endpoint: AgentEndpoint,
     invocation: InvocationRequest,
-    hooks?: { onSessionObserved?: (metadata: Record<string, unknown>) => Promise<void> | void },
+    hooks?: {
+      onSessionObserved?: (metadata: Record<string, unknown>) => Promise<void> | void;
+      onProgress?: (summary: string) => Promise<void> | void;
+      shouldContinue?: () => boolean;
+    },
   ) => Promise<{ output: string; externalSessionId?: string; metadata?: Record<string, unknown> }>;
   ensureResult?: { externalSessionId?: string | null; metadata?: Record<string, unknown> };
   ensureEndpoint?: (endpoint: AgentEndpoint) => Promise<{ externalSessionId?: string | null; metadata?: Record<string, unknown> }>;
@@ -1647,6 +1651,33 @@ describe("tmux session observation across the invocation boundary", () => {
       pendingExternalSession: false,
       observedSessionId: nativeId,
     }));
+  });
+
+  test("a transport that is holding an ask reports it on the task, and is told when the task was cancelled", async () => {
+    const seen: Array<{ summary: string | undefined; go: boolean | undefined }> = [];
+    const harness = createHarness({
+      endpoint: testEndpoint({ transport: "tmux", harness: "claude" }),
+      async invokeEndpoint(_endpoint, _invocation, hooks) {
+        await hooks?.onProgress?.("Held until the turn ends.");
+        seen.push({ summary: harness.flightForInvocation("invocation-1")?.summary, go: hooks?.shouldContinue?.() });
+
+        harness.seedFlight(testFlight({ state: "cancelled", summary: "Cancelled by the sender" }));
+        await hooks?.onProgress?.("Delivered. Waiting for its reply.");
+        seen.push({ summary: harness.flightForInvocation("invocation-1")?.summary, go: hooks?.shouldContinue?.() });
+        return { output: "" };
+      },
+    });
+    harness.seedFlight(testFlight());
+
+    await harness.service.execute(testInvocation());
+
+    expect(seen).toEqual([
+      { summary: "Held until the turn ends.", go: true },
+      // Progress never reopens a cancelled task.
+      { summary: "Cancelled by the sender", go: false },
+    ]);
+    expect(harness.flightForInvocation("invocation-1")?.state).toBe("cancelled");
+    expect(harness.postedMessages).toEqual([]);
   });
 });
 

@@ -61,8 +61,12 @@ export type InPlaceDelivery =
   | { ok: false; code: "draft_unsupported"; detail: string }
   /** The session is live but can't take words right now (e.g. a permission prompt is up). */
   | { ok: false; code: "session_blocked"; via: InPlaceVia; location: string }
-  /** The session is live in a place Scout found but couldn't type into. */
-  | { ok: false; code: "in_place_failed"; via: InPlaceVia; location: string; detail: string }
+  /**
+   * The session is live in a place Scout found but couldn't type into.
+   * `nothingSent` is set only when Scout refused before touching the place;
+   * without it the words may have reached the composer.
+   */
+  | { ok: false; code: "in_place_failed"; via: InPlaceVia; location: string; detail: string; nothingSent?: true }
   /** Live in an app only the Scout app can reach, and the Scout app can't right now. */
   | { ok: false; code: "scout_app_unavailable" | "scout_app_accessibility"; via: InPlaceVia; location: string }
   /** No live place holds this session. */
@@ -137,30 +141,23 @@ type Candidates = {
   tmux: { target: string; location: string } | null;
   /** The Claude process, for typing into a plain terminal tab. */
   terminalPid: number | null;
+  /** Claude's own record of the live process, which carries its activity. */
+  claude: ClaudeSessionRecord | null;
+  /** A harness process other than Scout's own background copy has the session open. */
+  held: boolean;
 };
 
-export async function deliverInPlace(
-  input: { sessionId: string; harness?: string | null; body: string; requireExactHarness?: boolean; mode?: "submit" | "draft" },
-  deps: DeliverInPlaceDeps = {},
-): Promise<InPlaceDelivery> {
-  const { sessionId, body } = input;
-  const harness = input.harness?.trim().toLowerCase() || null;
+type GatheredCandidates =
+  | { ok: true; candidates: Candidates }
+  | { ok: false; code: "session_runtime_unobserved" | "session_ambiguous" };
 
-  // Draft is deliberately handled before any terminal or Accessibility actuator.
-  // A missing harness must not accidentally turn a draft into a submitted prompt.
-  if (input.mode === "draft") {
-    if (harness !== "codex") return { ok: false, code: "draft_unsupported", detail: "Draft mode requires --harness codex and an app-held thread; nothing was sent." };
-    const held = await (deps.codexHeldByApp ?? codexThreadHeldByChatGPTApp)(sessionId).catch(() => false);
-    if (!held) return { ok: false, code: "not_live" };
-    try {
-      await (deps.draftCodexApp ?? draftCodexApp)(sessionId, body);
-      return { ok: true, delivered: "draft", via: "scout-app", location: "the ChatGPT app’s Codex composer (not sent)" };
-    } catch (error) {
-      return { ok: false, code: "in_place_failed", via: "scout-app", location: "the ChatGPT app’s Codex composer", detail: errorText(error) };
-    }
-  }
-
-  const candidates: Candidates = { herdr: null, orca: null, tmux: null, terminalPid: null };
+/** Find every place that holds the session. Nothing is typed. */
+async function gatherInPlaceCandidates(
+  input: { sessionId: string; harness: string | null; requireExactHarness?: boolean },
+  deps: DeliverInPlaceDeps,
+): Promise<GatheredCandidates> {
+  const { sessionId, harness } = input;
+  const candidates: Candidates = { herdr: null, orca: null, tmux: null, terminalPid: null, claude: null, held: false };
 
   // Herdr names the session itself when its integration is installed.
   if (input.requireExactHarness && !harness) return { ok: false, code: "session_runtime_unobserved" };
@@ -181,6 +178,7 @@ export async function deliverInPlace(
     if (record && !isScoutBackgroundCopy(record)) {
       pids.push(record.pid);
       candidates.terminalPid = record.pid;
+      candidates.claude = record;
       if (record.tmux) {
         candidates.tmux = {
           target: record.tmux.pane ?? record.tmux.session,
@@ -192,6 +190,7 @@ export async function deliverInPlace(
   if (!harness || harness === "codex") {
     pids.push(...await (deps.codexThreadPids ?? codexThreadHolderPids)(sessionId).catch(() => []));
   }
+  candidates.held = pids.length > 0;
   for (const pid of pids) {
     const location = await (deps.locateProcess ?? locateProcessHost)(pid).catch(() => null);
     if (location?.host === "herdr" && !candidates.herdr) {
@@ -215,6 +214,123 @@ export async function deliverInPlace(
     && own.terminalHandle === candidates.orca?.terminalHandle)) {
     candidates.orca = null;
   }
+  return { ok: true, candidates };
+}
+
+export type InPlaceActivity = "idle" | "busy" | "blocked" | "unknown";
+
+/** Where a session is open and whether it can take a new turn. Nothing is typed. */
+export type InPlaceProbe =
+  | { live: true; via: InPlaceVia; location: string; activity: InPlaceActivity }
+  /**
+   * No place Scout can type into. `held` says a harness process still has the
+   * session open, so it is running somewhere out of reach, not closed.
+   */
+  | { live: false; code: "not_live"; held: boolean }
+  /** The session's identity could not be established; nothing may be typed. */
+  | { live: false; code: "session_runtime_unobserved" | "session_ambiguous" };
+
+/**
+ * Look for the place a session is open, in the same order `deliverInPlace`
+ * would use, and report what that place or the harness says it is doing.
+ * `unknown` means neither gave a signal.
+ */
+export async function probeInPlace(
+  input: { sessionId: string; harness?: string | null; requireExactHarness?: boolean },
+  deps: DeliverInPlaceDeps = {},
+): Promise<InPlaceProbe> {
+  const { sessionId } = input;
+  const harness = input.harness?.trim().toLowerCase() || null;
+  const gathered = await gatherInPlaceCandidates({ sessionId, harness, requireExactHarness: input.requireExactHarness }, deps);
+  if (!gathered.ok) return { live: false, code: gathered.code };
+  const { candidates } = gathered;
+
+  const harnessActivity = async (): Promise<InPlaceActivity> => {
+    if (harness === "codex") return await (deps.codexActivity ?? codexActivity)(sessionId).catch(() => "unknown" as const);
+    const status = candidates.claude?.status;
+    if (status === "idle") return "idle";
+    if (status === "busy" || status === "shell") return "busy";
+    if (status === "waiting") return "blocked";
+    return "unknown";
+  };
+
+  const order = deps.order ?? resolveInPlaceOrder();
+  for (const host of order) {
+    if (host === "herdr" && candidates.herdr) {
+      const status = candidates.herdr.status;
+      const activity: InPlaceActivity = status === "blocked" ? "blocked"
+        : status === "working" ? "busy"
+        : status === "idle" || status === "done" ? "idle"
+        : await harnessActivity();
+      return { live: true, via: "herdr", location: herdrLocation(candidates.herdr), activity };
+    }
+    if (host === "orca" && candidates.orca) {
+      const { location, agent } = await orcaPlace(candidates.orca, deps);
+      const activity: InPlaceActivity = agent?.state === "blocked" || agent?.state === "waiting" ? "blocked" : await harnessActivity();
+      return { live: true, via: "orca", location, activity };
+    }
+    if (host === "tmux" && candidates.tmux) {
+      return { live: true, via: "tmux", location: candidates.tmux.location, activity: await harnessActivity() };
+    }
+  }
+
+  if (harness === "codex") {
+    const held = await (deps.codexHeldByApp ?? codexThreadHeldByChatGPTApp)(sessionId).catch(() => false);
+    if (!held) return { live: false, code: "not_live", held: candidates.held };
+    return { live: true, via: "scout-app", location: CODEX_APP_LOCATION, activity: await harnessActivity() };
+  }
+
+  const unreachable: InPlaceProbe = { live: false, code: "not_live", held: candidates.held };
+  if (!order.includes("terminal") || candidates.terminalPid === null) return unreachable;
+  const tty = await (deps.ttyForPid ?? ttyForPid)(candidates.terminalPid).catch(() => null);
+  if (!tty) return unreachable;
+  const ownTty = await (deps.selfTty ?? callerTty)().catch(() => null);
+  if (tty === ownTty) return unreachable;
+  return { live: true, via: "lattices", location: `terminal ${tty}`, activity: await harnessActivity() };
+}
+
+const CODEX_APP_LOCATION = "the ChatGPT app’s Codex";
+
+function herdrLocation(pane: HerdrPaneMatch): string {
+  return `Herdr ${pane.session} · ${pane.paneId}`;
+}
+
+async function orcaPlace(
+  terminal: { terminalHandle: string; paneKey: string | null },
+  deps: DeliverInPlaceDeps,
+): Promise<{ location: string; agent: OrcaAgent | null }> {
+  const agents = terminal.paneKey
+    ? await (deps.readOrcaAgents ?? readOrcaAgents)().catch(() => [])
+    : [];
+  const agent = agents.find((entry) => entry.paneKey === terminal.paneKey) ?? null;
+  const where = agent?.worktreePath?.split("/").filter(Boolean).slice(-2).join("/") ?? null;
+  return { location: `Orca ${where ? `${where} · ` : ""}${terminal.terminalHandle}`, agent };
+}
+
+export async function deliverInPlace(
+  input: { sessionId: string; harness?: string | null; body: string; requireExactHarness?: boolean; mode?: "submit" | "draft" },
+  deps: DeliverInPlaceDeps = {},
+): Promise<InPlaceDelivery> {
+  const { sessionId, body } = input;
+  const harness = input.harness?.trim().toLowerCase() || null;
+
+  // Draft is deliberately handled before any terminal or Accessibility actuator.
+  // A missing harness must not accidentally turn a draft into a submitted prompt.
+  if (input.mode === "draft") {
+    if (harness !== "codex") return { ok: false, code: "draft_unsupported", detail: "Draft mode requires --harness codex and an app-held thread; nothing was sent." };
+    const held = await (deps.codexHeldByApp ?? codexThreadHeldByChatGPTApp)(sessionId).catch(() => false);
+    if (!held) return { ok: false, code: "not_live" };
+    try {
+      await (deps.draftCodexApp ?? draftCodexApp)(sessionId, body);
+      return { ok: true, delivered: "draft", via: "scout-app", location: "the ChatGPT app’s Codex composer (not sent)" };
+    } catch (error) {
+      return { ok: false, code: "in_place_failed", via: "scout-app", location: "the ChatGPT app’s Codex composer", detail: errorText(error) };
+    }
+  }
+
+  const gathered = await gatherInPlaceCandidates({ sessionId, harness, requireExactHarness: input.requireExactHarness }, deps);
+  if (!gathered.ok) return { ok: false, code: gathered.code };
+  const { candidates } = gathered;
 
   for (const host of deps.order ?? resolveInPlaceOrder()) {
     if (host === "herdr" && candidates.herdr) return promptHerdrCandidate(candidates.herdr, body, deps);
@@ -253,7 +369,7 @@ export async function deliverInPlace(
       // check between them. A preflight here cannot guard a turn started by
       // focus. Refuse before opening the URL; do not send ignored safety flags
       // to an old actuator or bypass this refusal through another backend.
-      return { ok: false, code: "in_place_failed", via, location, detail: "Scout.app cannot recheck thread activity after focus and before Return; nothing opened or submitted. Use mode=draft (--draft) and send manually." };
+      return { ok: false, code: "in_place_failed", via, location, nothingSent: true, detail: "Scout.app cannot recheck thread activity after focus and before Return; nothing opened or submitted. Use mode=draft (--draft) and send manually." };
     }
     try {
       await (deps.typeIntoCodexApp ?? ((id, words) => typeIntoCodexAppWithLattices(id, words, deps.latticesCall, deps.codexActivity)))(sessionId, body);
@@ -504,7 +620,7 @@ async function codexActivity(sessionId: string): Promise<"idle" | "busy" | "unkn
 
 const TRANSCRIPT_CONFIRM_MS = 8_000;
 
-async function findCodexTranscript(sessionId: string): Promise<string | null> {
+export async function findCodexTranscript(sessionId: string): Promise<string | null> {
   if (!/^[0-9a-f-]{16,}$/iu.test(sessionId)) return null;
   const sessions = join(codexHome(), "sessions");
   const { stdout } = await execSystemFile("find", [sessions, "-name", `rollout-*-${sessionId}.jsonl`, "-print", "-quit"], {

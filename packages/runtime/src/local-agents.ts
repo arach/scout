@@ -161,6 +161,9 @@ import {
   parseScoutPermissionProfile,
 } from "./permission-policy.js";
 import { RequesterWaitTimeoutError } from "./requester-timeout.js";
+import { deliverInPlace, probeInPlace } from "./in-place/deliver.js";
+import { inPlaceSessionForEndpoint, invokeSessionInPlace, IN_PLACE_HOLD_MS, IN_PLACE_REPLY_WAIT_MS } from "./in-place/invoke.js";
+import { openSessionReplyReader, readSessionHolderState } from "./in-place/reply.js";
 import { locateHarnessSession } from "./session-locator.js";
 import { resolveOperatorHandle, resolveOperatorName } from "./user-config.js";
 import {
@@ -6069,7 +6072,74 @@ export type LocalAgentInvocationHooks = {
    * once so a turn that never completes cleanly still leaves the endpoint bound.
    */
   onSessionObserved?: (metadata: Record<string, unknown>) => Promise<void> | void;
+  /** What the delivery is waiting on, in one sentence, for the task's record. */
+  onProgress?: (summary: string) => Promise<void> | void;
+  /** False once the task was cancelled or finished another way; delivery stops. */
+  shouldContinue?: () => boolean;
 };
+
+function inPlaceBudgetMs(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/**
+ * Deliver an ask for an exact session into the place that session is open.
+ * Returns null when it is not open anywhere (or Scout already runs it), and
+ * the caller continues the session through the endpoint's own transport.
+ */
+async function invokeFlatSessionInPlace(
+  endpoint: AgentEndpoint,
+  invocation: InvocationRequest,
+  hooks: LocalAgentInvocationHooks,
+): Promise<LocalAgentInvocationResult | null> {
+  const session = inPlaceSessionForEndpoint(endpoint);
+  // An endpoint Scout already runs holds the session itself.
+  if (!session || isLocalAgentEndpointAlive(endpoint)) return null;
+  const agentRuntimeId = endpoint.agentId;
+  if (invocation.requesterId === agentRuntimeId) {
+    throw new DeliveryBlockedError({
+      stage: "in_place_self",
+      summary: "the ask names the session that sent it.",
+      message: `${session.harness} session ${session.sessionId} sent this ask to itself. Nothing was typed.`,
+    });
+  }
+
+  const flightId = createLocalAgentFlightId();
+  const askedAt = nowSeconds();
+  // The typed words carry the invocation id, so the transcript turn they
+  // start can be told from any other turn.
+  const marker = invocation.id;
+  const tagged = (words: string) => words.includes(marker) ? words : `${words}\n\nScout task ${marker}`;
+  const result = await invokeSessionInPlace({
+    ...session,
+    cwds: [endpoint.cwd, endpoint.projectRoot],
+    label: String(endpoint.metadata?.displayName ?? agentRuntimeId),
+    prompt: tagged(buildAttachedSessionInvocationPrompt(invocation, agentRuntimeId)),
+    explicitReplyPrompt: tagged(buildLocalAgentNudge(agentRuntimeId, invocation, flightId)),
+    marker,
+    wake: invocation.action === "wake",
+    holdMs: inPlaceBudgetMs("OPENSCOUT_IN_PLACE_HOLD_MS", IN_PLACE_HOLD_MS),
+    replyWaitMs: inPlaceBudgetMs("OPENSCOUT_IN_PLACE_REPLY_WAIT_MS", IN_PLACE_REPLY_WAIT_MS),
+  }, {
+    probe: (input) => probeInPlace(input),
+    deliver: (input) => deliverInPlace(input),
+    openReplyReader: openSessionReplyReader,
+    holderState: readSessionHolderState,
+    explicitReply: async () => localAgentReplyFromSnapshot(
+      await readBrokerReplySnapshot(),
+      { agentRuntimeId, invocation, flightId, askedAt },
+    ),
+    onProgress: hooks.onProgress,
+    shouldContinue: hooks.shouldContinue,
+  });
+  if (!result) return null;
+  return {
+    output: result.output,
+    externalSessionId: session.sessionId,
+    ...(result.delivery ? { metadata: { lastInPlaceDelivery: { ...result.delivery, at: Date.now() } } } : {}),
+  };
+}
 
 /** The `--name` Scout passes when it launches this agent's harness into tmux. */
 export function localAgentLaunchName(agentName: string): string {
@@ -6191,6 +6261,11 @@ export async function invokeLocalAgentEndpoint(
   invocation: InvocationRequest,
   hooks: LocalAgentInvocationHooks = {},
 ): Promise<LocalAgentInvocationResult> {
+  // A session that is open where the operator works takes the ask there.
+  // Resuming it here would run a second copy beside the one they are using.
+  const inPlace = await invokeFlatSessionInPlace(endpoint, invocation, hooks);
+  if (inPlace) return inPlace;
+
   const agentRuntimeId = endpoint.agentId;
   const definitionId = String(endpoint.metadata?.definitionId ?? endpoint.metadata?.agentName ?? endpoint.agentId);
   const prompt = endpointInvocationPrompt(endpoint, definitionId, invocation);

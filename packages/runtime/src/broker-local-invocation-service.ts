@@ -92,6 +92,8 @@ type LocalAgentInvocationResult = {
 
 type LocalAgentInvocationHooks = {
   onSessionObserved?: (metadata: Record<string, unknown>) => Promise<void> | void;
+  onProgress?: (summary: string) => Promise<void> | void;
+  shouldContinue?: () => boolean;
 };
 
 type InvocationExecutorResult =
@@ -535,6 +537,13 @@ export class BrokerLocalInvocationService {
             liveEndpoint = promoteLocalEndpointProviderSession(liveEndpoint, { metadata });
             await this.options.persistEndpoint(liveEndpoint);
           },
+          // A delivery that waits (for a busy session, then for its answer)
+          // says so on the task, so a follower sees why it has not finished.
+          onProgress: async (summary) => {
+            if (this.currentFlightIsTerminal(invocation.id)) return;
+            await this.options.transitionInvocation(invocation.id, { state: "running", summary });
+          },
+          shouldContinue: () => !this.currentFlightIsTerminal(invocation.id),
         },
       );
       const completedEndpoint = this.completedEndpoint(liveEndpoint, result);

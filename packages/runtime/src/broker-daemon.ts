@@ -22,7 +22,7 @@ import { createMeshPing } from "./mesh-ping.js";
 import { flightCompletion, SCOUT_COMPLETION_CAPABILITY } from "@openscout/protocol";
 import { SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY } from "@openscout/protocol";
 import type { WorkItemRecord } from "@openscout/protocol";
-import { deliverInPlace, isScoutBackgroundCopy } from "./in-place/deliver.js";
+import { deliverInPlace, isScoutBackgroundCopy, probeInPlace } from "./in-place/deliver.js";
 import { NativePermissionRequests } from "./native-permission.js";
 import { isolatedCodexPermissionMetadata } from "./permission-policy.js";
 import { BrokerPermissionService } from "./broker-permission-service.js";
@@ -1048,6 +1048,7 @@ const wakeLocalSessionForBroker = (input: ExactSessionWakeInput): Promise<LocalS
     actorFor: (actorId) => runtime.peek().actors[actorId],
     harnessSupportsResume: (harness) => Boolean(findHarnessEntry(harness)?.resume),
     observeEndpointSession: observeLocalAgentEndpointSession,
+    probeInPlace: (probe) => probeInPlace(probe),
     log: (message) => console.log(message),
   }, input);
 
