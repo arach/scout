@@ -2118,6 +2118,7 @@ const localEndpointResolver = new BrokerLocalEndpointResolver({
   isLocalAgentEndpointAliveAsync,
   ensureLocalSessionEndpointOnline,
   observeLocalEndpointSession: observeLocalAgentEndpointSession,
+  probeInPlace: (probe) => probeInPlace(probe),
   ensureLocalAgentBindingOnline,
   createIsolatedAgentEndpoint: createIsolatedAgentEndpointForInvocation,
   upsertActor: upsertActorDurably,
