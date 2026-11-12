@@ -162,6 +162,7 @@ import {
 } from "./permission-policy.js";
 import { RequesterWaitTimeoutError } from "./requester-timeout.js";
 import { deliverInPlace, probeInPlace } from "./in-place/deliver.js";
+import type { InPlaceCheckpoint } from "./in-place/checkpoint.js";
 import { inPlaceSessionForEndpoint, invokeSessionInPlace, IN_PLACE_HOLD_MS, IN_PLACE_REPLY_WAIT_MS } from "./in-place/invoke.js";
 import { openSessionReplyReader, readSessionHolderState, type SessionReplyReader } from "./in-place/reply.js";
 import { locateHarnessSession } from "./session-locator.js";
@@ -6117,6 +6118,10 @@ export type LocalAgentInvocationHooks = {
   onProgress?: (summary: string) => Promise<void> | void;
   /** False once the task was cancelled or finished another way; delivery stops. */
   shouldContinue?: () => boolean;
+  /** Where an earlier runtime left a delivery into an open session, if one started it. */
+  inPlaceCheckpoint?: () => InPlaceCheckpoint | null;
+  /** Record where that delivery stands on the task; null clears it. */
+  saveInPlaceCheckpoint?: (checkpoint: InPlaceCheckpoint | null) => Promise<void> | void;
 };
 
 function inPlaceBudgetMs(name: string, fallback: number): number {
@@ -6174,6 +6179,8 @@ async function invokeFlatSessionInPlace(
     ),
     onProgress: hooks.onProgress,
     shouldContinue: hooks.shouldContinue,
+    checkpoint: hooks.inPlaceCheckpoint,
+    saveCheckpoint: hooks.saveInPlaceCheckpoint,
   });
   if (!result) return null;
   return {

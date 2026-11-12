@@ -138,6 +138,8 @@ export function claudeReplyFromTranscript(text: string, marker: string, options:
 
 export type SessionReplyReader = {
   path: string;
+  /** Where reading starts: the transcript's end when the reader was first opened. */
+  offset: number;
   /** The transcript's size at the last read, to tell a quiet transcript from a growing one. */
   size(): number;
   read(options?: { idle?: boolean }): Promise<SessionReply>;
@@ -147,6 +149,9 @@ export type SessionReplyReader = {
  * Open the session's transcript at its current end. Call it before typing, so
  * the reader sees exactly what the typed words caused. Returns null when the
  * transcript cannot be found; the caller then needs another way to hear back.
+ *
+ * `fromOffset` reopens a reader where an earlier one started, after the words
+ * were typed: a runtime that restarted reads the same turn the first one saw.
  */
 export async function openSessionReplyReader(input: {
   sessionId: string;
@@ -154,6 +159,7 @@ export async function openSessionReplyReader(input: {
   marker: string;
   /** Folders the session may be running in; Claude files its transcript by folder. */
   cwds?: Array<string | null | undefined>;
+  fromOffset?: number;
 }): Promise<SessionReplyReader | null> {
   let path: string | null = null;
   if (input.harness === "codex") {
@@ -166,8 +172,9 @@ export async function openSessionReplyReader(input: {
     }
   }
   if (!path) return null;
-  const offset = (await stat(path).catch(() => null))?.size;
-  if (offset === undefined) return null;
+  const end = (await stat(path).catch(() => null))?.size;
+  if (end === undefined) return null;
+  const offset = input.fromOffset === undefined ? end : Math.min(Math.max(0, input.fromOffset), end);
   const transcript = path;
   let size = offset;
   // A transcript that has not grown gives the same answer; it is read again
@@ -175,6 +182,7 @@ export async function openSessionReplyReader(input: {
   let last: { size: number; idle: boolean; reply: SessionReply } | null = null;
   return {
     path: transcript,
+    offset,
     size: () => size,
     async read(options = {}) {
       const idle = options.idle === true;

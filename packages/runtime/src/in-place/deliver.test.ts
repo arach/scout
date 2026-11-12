@@ -220,6 +220,48 @@ describe("deliverInPlace", () => {
     expect(typed).toEqual([]);
   });
 
+  test("the caller is told just before the first keystroke, and only when every check has passed", async () => {
+    const events: string[] = [];
+    const tmuxPane = (overrides: Partial<DeliverInPlaceDeps> = {}) => noHosts({
+      findClaudeRecord: async () => claudeRecord({ tmux: { session: "work", pane: "%3" } as ClaudeSessionRecord["tmux"] }),
+      promptTmux: async () => { events.push("keystroke"); },
+      ...overrides,
+    });
+    const before = (place: { via: string; location: string }) => { events.push(`before ${place.via} ${place.location}`); };
+
+    expect(await deliverInPlace({ sessionId: SESSION, harness: "claude", body: "x", beforeKeystroke: before }, tmuxPane()))
+      .toEqual({ ok: true, via: "tmux", location: "tmux work · %3" });
+    expect(events).toEqual(["before tmux tmux work · %3", "keystroke"]);
+
+    // A composer holding a draft is refused before the caller is told anything.
+    events.length = 0;
+    await deliverInPlace({ sessionId: SESSION, harness: "claude", body: "x", beforeKeystroke: before }, tmuxPane({ tmuxComposerDraft: async () => "half a thought" }));
+    expect(events).toEqual([]);
+  });
+
+  test("a caller that refuses the keystroke stops it, and the refusal says nothing was sent", async () => {
+    const typed: string[] = [];
+    const result = await deliverInPlace({
+      sessionId: SESSION,
+      harness: "claude",
+      body: "x",
+      beforeKeystroke: () => { throw new Error("journal unavailable"); },
+    }, noHosts({
+      findClaudeRecord: async () => claudeRecord(),
+      locateProcess: async () => ({ host: "herdr", session: "fab", paneId: "w2:p2" }),
+      promptHerdr: async (_match, body) => { typed.push(body); },
+    }));
+    expect(result).toEqual({
+      ok: false,
+      code: "in_place_failed",
+      via: "herdr",
+      location: "Herdr fab · w2:p2",
+      nothingSent: true,
+      detail: "journal unavailable",
+    });
+    expect(typed).toEqual([]);
+  });
+
   test("Scout's own background copies are never targets", async () => {
     const result = await deliverInPlace({ sessionId: SESSION, harness: "claude", body: "x" }, noHosts({
       findClaudeRecord: async () => claudeRecord({ tmux: { session: "flat-claude-1", pane: "%1" } as ClaudeSessionRecord["tmux"] }),

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { isDeliveryBlockedError } from "../delivery-blocked.js";
 import { isRequesterWaitTimeoutError } from "../requester-timeout.js";
 
+import type { InPlaceCheckpoint } from "./checkpoint.js";
 import type { InPlaceDelivery, InPlaceProbe } from "./deliver.js";
 import { inPlaceSessionForEndpoint, invokeSessionInPlace, type InPlaceInvokeDeps, type InPlaceInvokeInput } from "./invoke.js";
 import type { SessionReply } from "./reply.js";
@@ -25,11 +26,20 @@ function harness(script: {
   explicit?: Array<string | null>;
   cancelAfterProbes?: number;
   input?: Partial<InPlaceInvokeInput>;
+  /** What an earlier runtime left on the task, and the time this one starts at. */
+  checkpoint?: InPlaceCheckpoint;
+  clock?: number;
+  /** Checkpoint writes that fail. */
+  failSave?: (checkpoint: InPlaceCheckpoint | null) => boolean;
 }) {
-  let clock = 0;
+  let clock = script.clock ?? 0;
   let probes = 0;
   const typed: string[] = [];
   const progress: string[] = [];
+  const saved: Array<InPlaceCheckpoint | null> = [];
+  /** Checkpoint writes and keystrokes, in the order they happened. */
+  const events: string[] = [];
+  const readFrom: Array<number | undefined> = [];
   const next = <T>(list: T[], index: number): T => list[Math.min(index, list.length - 1)]!;
   let deliveries = 0;
   let replies = 0;
@@ -37,15 +47,36 @@ function harness(script: {
   let explicits = 0;
   const deps: InPlaceInvokeDeps = {
     probe: async () => next(script.probes, probes++),
-    deliver: async ({ body }) => {
+    deliver: async ({ body, beforeKeystroke }) => {
       const result = next(script.deliveries ?? [typedOk], deliveries++);
-      if (result.ok) typed.push(body);
+      // As the real delivery does: once every check passed, before the first keystroke.
+      if (result.ok || (result.code === "in_place_failed" && result.nothingSent !== true)) {
+        try {
+          await beforeKeystroke?.(PLACE);
+        } catch (error) {
+          return { ok: false, code: "in_place_failed", ...PLACE, nothingSent: true, detail: String(error) };
+        }
+      }
+      if (result.ok) {
+        typed.push(body);
+        events.push("keystroke");
+      }
       return result;
     },
-    openReplyReader: async () => script.transcript === false ? null : {
-      path: "/work/transcript.jsonl",
-      size: () => 0,
-      read: async () => next(script.replies ?? [{ state: "pending", accepted: true }], replies++),
+    openReplyReader: async ({ fromOffset }) => {
+      readFrom.push(fromOffset);
+      return script.transcript === false ? null : {
+        path: "/work/transcript.jsonl",
+        offset: fromOffset ?? 4_096,
+        size: () => 0,
+        read: async () => next(script.replies ?? [{ state: "pending", accepted: true }], replies++),
+      };
+    },
+    checkpoint: () => script.checkpoint ?? null,
+    saveCheckpoint: async (checkpoint) => {
+      if (script.failSave?.(checkpoint)) throw new Error("journal unavailable");
+      saved.push(checkpoint);
+      events.push(checkpoint?.phase ?? "cleared");
     },
     holderState: async () => {
       const state = next(script.holder ?? [{ live: true, idle: false }], holders++);
@@ -68,7 +99,17 @@ function harness(script: {
     wake: false,
     ...script.input,
   };
-  return { run: () => invokeSessionInPlace(input, deps), typed, progress, probeCount: () => probes, elapsed: () => clock };
+  const startedAt = clock;
+  return {
+    run: () => invokeSessionInPlace(input, deps),
+    typed,
+    progress,
+    saved,
+    events,
+    readFrom,
+    probeCount: () => probes,
+    elapsed: () => clock - startedAt,
+  };
 }
 
 async function refusal(run: () => Promise<unknown>): Promise<{ stage: string; message: string }> {
@@ -332,5 +373,199 @@ describe("invokeSessionInPlace", () => {
       expect(isRequesterWaitTimeoutError(error)).toBe(true);
     }
     expect(session.typed).toHaveLength(1);
+  });
+});
+
+describe("a delivery keeps its place on the task", () => {
+  test("held is recorded once, and typing is recorded before the first keystroke", async () => {
+    const session = harness({ probes: [live("busy"), live("busy"), live("idle")], replies: [{ state: "answered", text: "Done." }] });
+    await session.run();
+    expect(session.events).toEqual(["held", "typing", "keystroke", "typed"]);
+    expect(session.saved).toEqual([
+      { phase: "held", since: 0 },
+      { phase: "typing", since: 0, at: 4_000, ...PLACE, transcriptOffset: 4_096 },
+      { phase: "typed", since: 0, at: 4_000, ...PLACE, transcriptOffset: 4_096 },
+    ]);
+  });
+
+  test("an idle session is never recorded as held, and a session that answers through Scout has no transcript offset", async () => {
+    const session = harness({ probes: [live("idle")], transcript: false, explicit: ["Posted."] });
+    await session.run();
+    expect(session.events).toEqual(["typing", "keystroke", "typed"]);
+    expect(session.saved[0]).toEqual({ phase: "typing", since: 0, at: 0, ...PLACE, transcriptOffset: null });
+  });
+
+  test("when typing cannot be recorded, nothing is typed", async () => {
+    const session = harness({ probes: [live("idle")], failSave: (checkpoint) => checkpoint?.phase === "typing" });
+    const refused = await refusal(session.run);
+    expect(refused.stage).toBe("in_place_failed");
+    expect(refused.message).toContain("journal unavailable");
+    expect(refused.message).toContain("Nothing was typed.");
+    expect(session.typed).toEqual([]);
+  });
+
+  test("losing the typed or the held record does not fail the delivery", async () => {
+    const session = harness({
+      probes: [live("busy"), live("idle")],
+      replies: [{ state: "answered", text: "Done." }],
+      failSave: (checkpoint) => checkpoint?.phase !== "typing",
+    });
+    expect((await session.run())?.output).toBe("Done.");
+    // What is left says typing, which a restart treats as typed.
+    expect(session.events).toEqual(["typing", "keystroke"]);
+  });
+
+  test("a session that closed while the task was held clears the record before Scout continues it itself", async () => {
+    const session = harness({ probes: [live("busy"), { live: false, code: "not_live", held: false }] });
+    expect(await session.run()).toBeNull();
+    expect(session.events).toEqual(["held", "cleared"]);
+    // Never held: there is nothing to clear.
+    const closed = harness({ probes: [{ live: false, code: "not_live", held: false }] });
+    expect(await closed.run()).toBeNull();
+    expect(closed.events).toEqual([]);
+  });
+
+  test("when the record cannot be cleared, Scout does not continue the session itself", async () => {
+    const session = harness({
+      probes: [live("busy"), { live: false, code: "not_live", held: false }],
+      failSave: (checkpoint) => checkpoint === null,
+    });
+    const refused = await refusal(session.run);
+    expect(refused.stage).toBe("in_place_failed");
+    expect(refused.message).toContain("Nothing was typed.");
+  });
+});
+
+describe("a delivery picked up after the runtime restarted", () => {
+  const MINUTE = 60_000;
+  const typedAt = (phase: "typing" | "typed", offset: number | null = 777): InPlaceCheckpoint =>
+    ({ phase, since: 1_000, at: 5_000, ...PLACE, transcriptOffset: offset });
+
+  test("a held task is delivered from the start, and is not recorded as held again", async () => {
+    const session = harness({
+      checkpoint: { phase: "held", since: 1_000 },
+      clock: 61_000,
+      probes: [live("busy"), live("idle")],
+      replies: [{ state: "answered", text: "Done." }],
+    });
+    expect(await session.run()).toEqual({ output: "Done.", delivery: { ...PLACE, heldMs: 62_000, replySource: "transcript" } });
+    expect(session.typed).toHaveLength(1);
+    expect(session.events).toEqual(["typing", "keystroke", "typed"]);
+    // The hold is reported again: the restart replaced the task's summary.
+    expect(session.progress[0]).toContain("The task is held until the turn ends.");
+  });
+
+  test("the hold is one budget across restarts", async () => {
+    const session = harness({ checkpoint: { phase: "held", since: 1_000 }, clock: 1_000 + 20 * MINUTE, probes: [live("busy")] });
+    expect((await refusal(session.run)).stage).toBe("in_place_hold_expired");
+    expect(session.elapsed()).toBe(10 * MINUTE);
+    expect(session.typed).toEqual([]);
+  });
+
+  test("a held task whose session closed in the meantime is handed to Scout's own path, record cleared", async () => {
+    const session = harness({ checkpoint: { phase: "held", since: 1_000 }, clock: 61_000, probes: [{ live: false, code: "not_live", held: false }] });
+    expect(await session.run()).toBeNull();
+    expect(session.events).toEqual(["cleared"]);
+  });
+
+  test("a typed task is never typed again: the answer is read from where the first reader started", async () => {
+    const session = harness({
+      checkpoint: typedAt("typed"),
+      clock: 61_000,
+      probes: [live("idle")],
+      replies: [{ state: "pending", accepted: true }, { state: "answered", text: "It passes." }],
+    });
+    expect(await session.run()).toEqual({ output: "It passes.", delivery: { ...PLACE, heldMs: 4_000, replySource: "transcript" } });
+    expect(session.typed).toEqual([]);
+    expect(session.probeCount()).toBe(0);
+    expect(session.readFrom).toEqual([777]);
+    expect(session.events).toEqual([]);
+    expect(session.progress).toEqual(["Delivered to app:0199aaaa in Herdr work · w1:p2. Waiting for its reply."]);
+  });
+
+  test("a typed task with no transcript offset waits for the reply the session posts through Scout", async () => {
+    const session = harness({ checkpoint: typedAt("typed", null), clock: 61_000, probes: [live("idle")], explicit: [null, "Posted."] });
+    expect(await session.run()).toMatchObject({ output: "Posted.", delivery: { replySource: "scout_reply" } });
+    expect(session.typed).toEqual([]);
+    expect(session.readFrom).toEqual([]);
+  });
+
+  test("the reply wait counts from when the words were typed", async () => {
+    const session = harness({ checkpoint: typedAt("typed"), clock: 5_000 + 2 * 60 * MINUTE, probes: [live("idle")] });
+    try {
+      await session.run();
+      throw new Error("expected the wait to have run out");
+    } catch (error) {
+      expect(isRequesterWaitTimeoutError(error)).toBe(true);
+    }
+    expect(session.elapsed()).toBe(0);
+    expect(session.typed).toEqual([]);
+  });
+
+  test("a typed task whose session was closed before it answered is refused by name", async () => {
+    const session = harness({
+      checkpoint: typedAt("typed"),
+      clock: 61_000,
+      probes: [live("idle")],
+      replies: [{ state: "pending", accepted: true }],
+      holder: [{ live: false, idle: false }],
+    });
+    expect((await refusal(session.run)).stage).toBe("in_place_session_closed");
+    expect(session.typed).toEqual([]);
+  });
+
+  test("interrupted mid-keystroke: a transcript that recorded the words is watched like any typed task", async () => {
+    const session = harness({
+      checkpoint: typedAt("typing"),
+      clock: 61_000,
+      probes: [live("idle")],
+      replies: [{ state: "pending", accepted: true }, { state: "answered", text: "It landed." }],
+      holder: [{ live: true, idle: true }],
+    });
+    expect((await session.run())?.output).toBe("It landed.");
+    expect(session.typed).toEqual([]);
+  });
+
+  test("interrupted mid-keystroke: an idle session that never recorded the words is refused, and nothing is typed", async () => {
+    const session = harness({
+      checkpoint: typedAt("typing"),
+      clock: 61_000,
+      probes: [live("idle")],
+      replies: [{ state: "pending", accepted: false }],
+      holder: [{ live: true, idle: true }],
+    });
+    const refused = await refusal(session.run);
+    expect(refused.stage).toBe("in_place_failed");
+    expect(refused.message).toContain("They may be in the composer");
+    expect(session.elapsed()).toBe(15_000);
+    expect(session.typed).toEqual([]);
+    expect(session.probeCount()).toBe(0);
+  });
+
+  test("interrupted mid-keystroke: a session still mid-turn is not refused while its transcript is silent", async () => {
+    const session = harness({
+      checkpoint: typedAt("typing"),
+      clock: 61_000,
+      probes: [live("idle")],
+      replies: [
+        ...Array.from({ length: 40 }, (): SessionReply => ({ state: "pending", accepted: false })),
+        { state: "pending", accepted: true },
+        { state: "answered", text: "Queued behind a turn, then answered." },
+      ],
+      holder: [{ live: true, idle: false }],
+    });
+    expect((await session.run())?.output).toBe("Queued behind a turn, then answered.");
+  });
+
+  test("a message that expects no reply is done once typed, and is refused when the keystroke was interrupted", async () => {
+    const done = harness({ checkpoint: typedAt("typed"), clock: 61_000, probes: [live("idle")], input: { wake: true } });
+    expect(await done.run()).toEqual({ output: "", delivery: { ...PLACE, heldMs: 4_000, replySource: "none" } });
+    expect(done.typed).toEqual([]);
+
+    const interrupted = harness({ checkpoint: typedAt("typing"), clock: 61_000, probes: [live("idle")], input: { wake: true } });
+    const refused = await refusal(interrupted.run);
+    expect(refused.stage).toBe("in_place_failed");
+    expect(refused.message).toContain("may have reached the composer");
+    expect(interrupted.typed).toEqual([]);
   });
 });

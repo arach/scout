@@ -7,11 +7,16 @@
 // itself, as it did before.
 //
 // Every refusal here means nothing was typed, unless it says otherwise.
+//
+// The delivery leaves a checkpoint on the task as it goes (see checkpoint.ts),
+// so a runtime that restarts picks it up: a task still held is delivered from
+// the start, and a task already typed is only watched for its answer.
 
 import { DeliveryBlockedError } from "../delivery-blocked.js";
 import { RequesterWaitTimeoutError } from "../requester-timeout.js";
 
-import type { InPlaceActivity, InPlaceDelivery, InPlaceProbe, InPlaceVia } from "./deliver.js";
+import type { InPlaceCheckpoint } from "./checkpoint.js";
+import type { BeforeKeystroke, InPlaceActivity, InPlaceDelivery, InPlaceProbe, InPlaceVia } from "./deliver.js";
 import type { SessionReplyReader } from "./reply.js";
 
 /** How long an ask waits for a busy session before it is given up. */
@@ -25,6 +30,11 @@ const HOLDER_POLL_MS = 5_000;
 const EXPLICIT_REPLY_POLL_MS = 2_000;
 /** A session whose activity cannot be read is refused quickly, not held. */
 const UNKNOWN_ACTIVITY_GRACE_MS = 15_000;
+/**
+ * Holder readings (5 s apart) of an idle session with a quiet transcript that
+ * never recorded the words, after a restart that interrupted the keystroke.
+ */
+const UNCONFIRMED_QUIET_READINGS = 3;
 
 export type InPlaceInvokeInput = {
   sessionId: string;
@@ -47,17 +57,28 @@ export type InPlaceInvokeInput = {
 
 export type InPlaceInvokeDeps = {
   probe: (input: { sessionId: string; harness: string; requireExactHarness: true }) => Promise<InPlaceProbe>;
-  deliver: (input: { sessionId: string; harness: string; body: string; requireExactHarness: true }) => Promise<InPlaceDelivery>;
+  deliver: (input: {
+    sessionId: string;
+    harness: string;
+    body: string;
+    requireExactHarness: true;
+    beforeKeystroke?: BeforeKeystroke;
+  }) => Promise<InPlaceDelivery>;
   openReplyReader: (input: {
     sessionId: string;
     harness: "claude" | "codex";
     marker: string;
     cwds?: Array<string | null | undefined>;
+    fromOffset?: number;
   }) => Promise<SessionReplyReader | null>;
   holderState: (sessionId: string, harness: "claude" | "codex") => Promise<{ live: boolean; idle: boolean }>;
   /** A reply the session posted through Scout itself, if any. */
   explicitReply?: () => Promise<string | null>;
   onProgress?: (summary: string) => Promise<void> | void;
+  /** Where an earlier runtime left this delivery, if one started it. */
+  checkpoint?: () => InPlaceCheckpoint | null;
+  /** Record where the delivery stands; null clears it. Durable once it resolves. */
+  saveCheckpoint?: (checkpoint: InPlaceCheckpoint | null) => Promise<void> | void;
   /** False once the ask was cancelled or finished another way. */
   shouldContinue?: () => boolean;
   sleep?: (ms: number) => Promise<void>;
@@ -121,16 +142,62 @@ export async function invokeSessionInPlace(
   const { sessionId, harness, label } = input;
   const holdMs = input.holdMs ?? IN_PLACE_HOLD_MS;
   const replyWaitMs = input.replyWaitMs ?? IN_PLACE_REPLY_WAIT_MS;
-  const startedAt = now();
+  const resume = deps.checkpoint?.() ?? null;
+  // The hold is one budget across restarts, counted from when the task began waiting.
+  const startedAt = resume?.since ?? now();
   const stopped: InPlaceInvokeResult = { output: "", delivery: null };
+
+  let saved: InPlaceCheckpoint | null = resume;
+  const save = async (checkpoint: InPlaceCheckpoint | null): Promise<void> => {
+    await deps.saveCheckpoint?.(checkpoint);
+    saved = checkpoint;
+  };
+  // The caller continues the session on its own path. The checkpoint goes
+  // first, or a later restart would resume a delivery this path gave up.
+  const handOff = async (): Promise<null> => {
+    if (!saved) return null;
+    try {
+      await save(null);
+    } catch (error) {
+      throw blocked(
+        "in_place_failed",
+        "the task's record could not be updated.",
+        `Scout could not update the task's record before continuing ${label} itself (${errorText(error)}). Nothing was typed.`,
+      );
+    }
+    return null;
+  };
 
   let place: { via: InPlaceVia; location: string };
   let reader: SessionReplyReader | null = null;
+  let typedAt: number;
+  // An earlier runtime stopped between "about to type" and "typed".
+  let unconfirmed = false;
   let announced: InPlaceActivity | null = null;
   let unknownSince: number | null = null;
 
-  // Hold until the session can take a turn, then type.
-  for (;;) {
+  if (resume && resume.phase !== "held") {
+    // Already typed, or about to be when the runtime stopped. Never type again.
+    place = { via: resume.via, location: resume.location };
+    typedAt = resume.at;
+    unconfirmed = resume.phase === "typing";
+    if (input.wake) {
+      if (!unconfirmed) return { output: "", delivery: { ...place, heldMs: Math.max(0, typedAt - startedAt), replySource: "none" } };
+      throw blocked(
+        "in_place_failed",
+        `delivery into ${place.location} was interrupted.`,
+        `The runtime restarted while it was typing into ${place.location}. The words may have reached the composer; check the session before sending again.`,
+      );
+    }
+    reader = resume.transcriptOffset === null ? null : await deps.openReplyReader({
+      sessionId,
+      harness,
+      marker: input.marker,
+      cwds: input.cwds,
+      fromOffset: resume.transcriptOffset,
+    }).catch(() => null);
+  } else for (;;) {
+    // Hold until the session can take a turn, then type.
     if (!proceed()) return stopped;
     let probe: InPlaceProbe;
     try {
@@ -161,9 +228,11 @@ export async function invokeSessionInPlace(
           `Claude session ${sessionId} is running, but not in Herdr, Orca, tmux or a terminal Scout can address. Nothing was typed and no copy was started. Close it so Scout can resume it, or open it in one of those.`,
         );
       }
-      return null;
+      return handOff();
     }
     place = { via: probe.via, location: probe.location };
+    // From here a restart finds the task and delivers it again from the start.
+    if (probe.activity !== "idle" && !saved) await save({ phase: "held", since: startedAt }).catch(() => undefined);
 
     if (probe.activity === "idle") {
       unknownSince = null;
@@ -172,14 +241,43 @@ export async function invokeSessionInPlace(
       // A plain terminal is typed key by key, where a newline submits.
       const body = probe.via === "lattices" ? words.split(/\s+/u).filter(Boolean).join(" ") : words;
       if (!proceed()) return stopped;
+      const transcriptOffset = reader?.offset ?? null;
+      const unrecorded: unknown[] = [];
       let delivery: InPlaceDelivery;
       try {
-        delivery = await deps.deliver({ sessionId, harness, body, requireExactHarness: true });
+        delivery = await deps.deliver({
+          sessionId,
+          harness,
+          body,
+          requireExactHarness: true,
+          // Written before the first keystroke: once the words may be in the
+          // session, no restart types them a second time.
+          beforeKeystroke: async (at) => {
+            try {
+              await save({ phase: "typing", since: startedAt, at: now(), via: at.via, location: at.location, transcriptOffset });
+            } catch (error) {
+              unrecorded.push(error);
+              throw error;
+            }
+          },
+        });
       } catch (error) {
         delivery = { ok: false, code: "in_place_failed", ...place, detail: errorText(error) };
       }
+      if (unrecorded.length > 0) {
+        throw blocked(
+          "in_place_failed",
+          "the delivery could not be recorded.",
+          `Scout could not record the delivery into ${place.location} before typing (${errorText(unrecorded[0])}). Nothing was typed.`,
+        );
+      }
       if (delivery.ok) {
         place = { via: delivery.via, location: delivery.location };
+        const typing: InPlaceCheckpoint | null = saved;
+        typedAt = typing && typing.phase === "typing" ? typing.at : now();
+        // If this write is lost the task stays at "typing", which a restart
+        // also treats as typed.
+        await save({ phase: "typed", since: startedAt, at: typedAt, ...place, transcriptOffset }).catch(() => undefined);
         break;
       }
       if (delivery.code === "session_runtime_unobserved" || delivery.code === "session_ambiguous") {
@@ -195,7 +293,7 @@ export async function invokeSessionInPlace(
       // The app that holds this thread cannot be typed into right now. Codex
       // keeps the thread locked, so the caller's own path parks the ask until
       // the app lets go.
-      if (nothingSent && harness === "codex") return null;
+      if (nothingSent && harness === "codex") return handOff();
       if (delivery.code === "in_place_failed" || delivery.code === "draft_unsupported" || nothingSent) {
         const detail = "detail" in delivery ? delivery.detail : delivery.code;
         throw blocked(
@@ -239,7 +337,7 @@ export async function invokeSessionInPlace(
     await sleep(HOLD_POLL_MS);
   }
 
-  const heldMs = now() - startedAt;
+  const heldMs = Math.max(0, typedAt - startedAt);
   const delivered = (output: string, replySource: "transcript" | "scout_reply" | "none"): InPlaceInvokeResult => ({
     output,
     delivery: { ...place, heldMs, replySource },
@@ -248,12 +346,14 @@ export async function invokeSessionInPlace(
   await progress(`Delivered to ${label} in ${place.location}. Waiting for its reply.`);
 
   // Watch for the answer: the transcript's, or one the session posts itself.
-  const deadline = now() + replyWaitMs;
+  // Counted from when the words were typed, so a restart does not extend it.
+  const deadline = typedAt + replyWaitMs;
   let nextExplicitAt = now();
   let nextHolderAt = now() + HOLDER_POLL_MS;
   let idle = false;
   let sizeAtHolderPoll = reader?.size() ?? 0;
   let closedReadings = 0;
+  let quietUnconfirmed = 0;
   for (;;) {
     if (!proceed()) return delivered("", "none");
     if (deps.explicitReply && now() >= nextExplicitAt) {
@@ -271,6 +371,7 @@ export async function invokeSessionInPlace(
           `The ask was typed into ${place.location}, and that turn was interrupted before ${label} answered.`,
         );
       }
+      if (reply.accepted) unconfirmed = false;
     }
     if (now() >= nextHolderAt) {
       nextHolderAt = now() + HOLDER_POLL_MS;
@@ -289,6 +390,16 @@ export async function invokeSessionInPlace(
           "in_place_session_closed",
           "it was closed before it answered.",
           `The ask was typed into ${place.location}, and ${label} was closed before it answered.`,
+        );
+      }
+      // The keystroke was interrupted by a restart, and the session sits idle
+      // with a transcript that never recorded the words: they started no turn.
+      quietUnconfirmed = unconfirmed && reader && idle ? quietUnconfirmed + 1 : 0;
+      if (quietUnconfirmed >= UNCONFIRMED_QUIET_READINGS) {
+        throw blocked(
+          "in_place_failed",
+          `delivery into ${place.location} was interrupted.`,
+          `The runtime restarted while it was typing into ${place.location}, and ${label} did not take the words as a turn. They may be in the composer; check the session before sending again.`,
         );
       }
     }

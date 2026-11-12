@@ -329,11 +329,44 @@ async function orcaPlace(
   return { location: `Orca ${where ? `${where} · ` : ""}${terminal.terminalHandle}`, agent };
 }
 
+/** Called once every check has passed, immediately before the first keystroke. */
+export type BeforeKeystroke = (place: { via: InPlaceVia; location: string }) => Promise<void> | void;
+
+/**
+ * The keystroke itself. `before` runs first and can refuse it: a caller that
+ * must record "about to type" durably types nothing when that record fails.
+ */
+async function typeAt(
+  place: { via: InPlaceVia; location: string },
+  before: BeforeKeystroke | undefined,
+  type: () => Promise<void>,
+): Promise<InPlaceDelivery> {
+  try {
+    await before?.(place);
+  } catch (error) {
+    return { ok: false, code: "in_place_failed", ...place, nothingSent: true, detail: errorText(error) };
+  }
+  try {
+    await type();
+    return { ok: true, ...place };
+  } catch (error) {
+    return { ok: false, code: "in_place_failed", ...place, detail: errorText(error) };
+  }
+}
+
 export async function deliverInPlace(
-  input: { sessionId: string; harness?: string | null; body: string; requireExactHarness?: boolean; mode?: "submit" | "draft" },
+  input: {
+    sessionId: string;
+    harness?: string | null;
+    body: string;
+    requireExactHarness?: boolean;
+    mode?: "submit" | "draft";
+    beforeKeystroke?: BeforeKeystroke;
+  },
   deps: DeliverInPlaceDeps = {},
 ): Promise<InPlaceDelivery> {
   const { sessionId, body } = input;
+  const before = input.beforeKeystroke;
   const harness = input.harness?.trim().toLowerCase() || null;
 
   // Draft is deliberately handled before any terminal or Accessibility actuator.
@@ -355,8 +388,8 @@ export async function deliverInPlace(
   const { candidates } = gathered;
 
   for (const host of deps.order ?? resolveInPlaceOrder()) {
-    if (host === "herdr" && candidates.herdr) return promptHerdrCandidate(candidates.herdr, body, deps);
-    if (host === "orca" && candidates.orca) return promptOrcaCandidate(candidates.orca, body, deps);
+    if (host === "herdr" && candidates.herdr) return promptHerdrCandidate(candidates.herdr, body, deps, before);
+    if (host === "orca" && candidates.orca) return promptOrcaCandidate(candidates.orca, body, deps, before);
     if (host === "tmux" && candidates.tmux) {
       const { target, location } = candidates.tmux;
       // Checked again here, just before the paste: a person may have started
@@ -364,12 +397,7 @@ export async function deliverInPlace(
       if (await tmuxDraft(target, deps)) {
         return { ok: false, code: "busy", via: "tmux", location, detail: "The composer holds unsent text. Nothing was typed." };
       }
-      try {
-        await (deps.promptTmux ?? promptTmuxPane)(target, body);
-        return { ok: true, via: "tmux", location };
-      } catch (error) {
-        return { ok: false, code: "in_place_failed", via: "tmux", location, detail: errorText(error) };
-      }
+      return typeAt({ via: "tmux", location }, before, () => (deps.promptTmux ?? promptTmuxPane)(target, body));
     }
   }
 
@@ -398,12 +426,8 @@ export async function deliverInPlace(
       // to an old actuator or bypass this refusal through another backend.
       return { ok: false, code: "in_place_failed", via, location, nothingSent: true, detail: "Scout.app cannot recheck thread activity after focus and before Return; nothing opened or submitted. Use mode=draft (--draft) and send manually." };
     }
-    try {
-      await (deps.typeIntoCodexApp ?? ((id, words) => typeIntoCodexAppWithLattices(id, words, deps.latticesCall, deps.codexActivity)))(sessionId, body);
-      return { ok: true, via, location };
-    } catch (error) {
-      return { ok: false, code: "in_place_failed", via, location, detail: errorText(error) };
-    }
+    return typeAt({ via, location }, before, () =>
+      (deps.typeIntoCodexApp ?? ((id, words) => typeIntoCodexAppWithLattices(id, words, deps.latticesCall, deps.codexActivity)))(sessionId, body));
   }
 
   // A plain terminal tab: only Claude Code records the process to type into.
@@ -414,34 +438,25 @@ export async function deliverInPlace(
   // The sender's own tab: typing there would feed it its own words.
   const ownTty = await (deps.selfTty ?? callerTty)().catch(() => null);
   if (tty === ownTty) return { ok: false, code: "not_live" };
-  const location = `terminal ${tty}`;
-  try {
-    await (deps.typeIntoTty ?? typeIntoTtyWithLattices)(tty, body);
-    return { ok: true, via: "lattices", location };
-  } catch (error) {
-    return { ok: false, code: "in_place_failed", via: "lattices", location, detail: errorText(error) };
-  }
+  return typeAt({ via: "lattices", location: `terminal ${tty}` }, before, () => (deps.typeIntoTty ?? typeIntoTtyWithLattices)(tty, body));
 }
 
 async function promptHerdrCandidate(
   pane: HerdrPaneMatch,
   body: string,
   deps: DeliverInPlaceDeps,
+  before?: BeforeKeystroke,
 ): Promise<InPlaceDelivery> {
   const location = `Herdr ${pane.session} · ${pane.paneId}`;
   if (pane.status === "blocked") return { ok: false, code: "session_blocked", via: "herdr", location };
-  try {
-    await (deps.promptHerdr ?? promptHerdrPane)(pane, body);
-    return { ok: true, via: "herdr", location };
-  } catch (error) {
-    return { ok: false, code: "in_place_failed", via: "herdr", location, detail: errorText(error) };
-  }
+  return typeAt({ via: "herdr", location }, before, () => (deps.promptHerdr ?? promptHerdrPane)(pane, body));
 }
 
 async function promptOrcaCandidate(
   terminal: { terminalHandle: string; paneKey: string | null },
   body: string,
   deps: DeliverInPlaceDeps,
+  before?: BeforeKeystroke,
 ): Promise<InPlaceDelivery> {
   const agents = terminal.paneKey
     ? await (deps.readOrcaAgents ?? readOrcaAgents)().catch(() => [])
@@ -454,12 +469,7 @@ async function promptOrcaCandidate(
   if (agent?.state === "blocked" || agent?.state === "waiting") {
     return { ok: false, code: "session_blocked", via: "orca", location };
   }
-  try {
-    await (deps.promptOrca ?? sendOrcaPrompt)(terminal.terminalHandle, body);
-    return { ok: true, via: "orca", location };
-  } catch (error) {
-    return { ok: false, code: "in_place_failed", via: "orca", location, detail: errorText(error) };
-  }
+  return typeAt({ via: "orca", location }, before, () => (deps.promptOrca ?? sendOrcaPrompt)(terminal.terminalHandle, body));
 }
 
 export async function findHerdrPaneForSession(sessionId: string, harness?: string | null): Promise<HerdrPaneMatch | null> {

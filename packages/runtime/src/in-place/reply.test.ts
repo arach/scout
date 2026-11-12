@@ -160,6 +160,27 @@ describe("openSessionReplyReader", () => {
     expect(reader!.size()).toBeGreaterThan(grown);
   });
 
+  test("a reader reopened at an earlier reader's start sees the turn that reader was watching", async () => {
+    const path = await transcriptWith(
+      codexUser(`an earlier ask ${MARKER}`),
+      codexEvent("task_complete", { last_agent_message: "an earlier answer" }),
+    );
+    const first = await openSessionReplyReader({ sessionId: SESSION, harness: "codex", marker: MARKER });
+    await appendFile(path, lines(codexUser(`the ask ${MARKER}`), codexEvent("task_complete", { last_agent_message: "the answer" })));
+
+    // A reader opened now starts after the answer and never sees it.
+    const late = await openSessionReplyReader({ sessionId: SESSION, harness: "codex", marker: MARKER });
+    expect(await late!.read()).toEqual({ state: "pending", accepted: false });
+
+    const reopened = await openSessionReplyReader({ sessionId: SESSION, harness: "codex", marker: MARKER, fromOffset: first!.offset });
+    expect(reopened!.offset).toBe(first!.offset);
+    expect(await reopened!.read()).toEqual({ state: "answered", text: "the answer" });
+
+    // An offset past the end of a transcript that was replaced reads from its end.
+    const past = await openSessionReplyReader({ sessionId: SESSION, harness: "codex", marker: MARKER, fromOffset: 10_000_000 });
+    expect(past!.offset).toBe(late!.offset);
+  });
+
   test("a session with no transcript has no reader, and a transcript that disappears reads as pending", async () => {
     const path = await transcriptWith(codexUser("hello"));
     expect(await openSessionReplyReader({ sessionId: "0199aaaa-0000-7000-8000-000000000000", harness: "codex", marker: MARKER })).toBeNull();
