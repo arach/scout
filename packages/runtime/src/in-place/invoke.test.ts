@@ -9,7 +9,7 @@ import type { SessionReply } from "./reply.js";
 
 const SESSION = "0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000";
 const PLACE = { via: "herdr", location: "Herdr work · w1:p2" } as const;
-const live = (activity: "idle" | "busy" | "blocked" | "unknown"): InPlaceProbe => ({ live: true, ...PLACE, activity });
+const live = (activity: "idle" | "busy" | "blocked" | "composing" | "unknown"): InPlaceProbe => ({ live: true, ...PLACE, activity });
 const typedOk: InPlaceDelivery = { ok: true, ...PLACE };
 
 /**
@@ -113,8 +113,38 @@ describe("invokeSessionInPlace", () => {
     expect(result?.delivery).toMatchObject({ heldMs: 6_000, replySource: "transcript" });
     expect(session.typed).toHaveLength(1);
     expect(session.probeCount()).toBe(4);
-    expect(session.progress[0]).toBe("app:0199aaaa is mid-turn in Herdr work · w1:p2. The ask is held until the turn ends.");
+    expect(session.progress[0]).toBe("app:0199aaaa is mid-turn in Herdr work · w1:p2. The task is held until the turn ends.");
     expect(session.progress.filter((line) => line.includes("mid-turn"))).toHaveLength(1);
+  });
+
+  test("unsent text in the composer holds the task until it is sent or cleared", async () => {
+    const session = harness({ probes: [live("composing"), live("composing"), live("idle")], replies: [{ state: "answered", text: "done" }] });
+    const result = await session.run();
+    expect(result?.delivery).toMatchObject({ heldMs: 4_000 });
+    expect(session.typed).toHaveLength(1);
+    expect(session.progress[0]).toBe(
+      "app:0199aaaa has unsent text in its composer in Herdr work · w1:p2. The task is held until that is sent or cleared.",
+    );
+  });
+
+  test("text typed between the probe and the paste sends the task back to waiting", async () => {
+    const draft: InPlaceDelivery = { ok: false, code: "busy", ...PLACE, detail: "The composer holds unsent text. Nothing was typed." };
+    const session = harness({
+      probes: [live("idle"), live("composing"), live("idle")],
+      deliveries: [draft, typedOk],
+      replies: [{ state: "answered", text: "done" }],
+    });
+    await session.run();
+    expect(session.typed).toHaveLength(1);
+    expect(session.probeCount()).toBe(3);
+  });
+
+  test("a draft left in the composer past the hold is refused by name", async () => {
+    const session = harness({ probes: [live("composing")], input: { holdMs: 10_000 } });
+    const refused = await refusal(session.run);
+    expect(refused.stage).toBe("in_place_hold_expired");
+    expect(refused.message).toBe("app:0199aaaa had unsent text in its composer in Herdr work · w1:p2 for 1 minute. Nothing was typed.");
+    expect(session.typed).toEqual([]);
   });
 
   test("a session sitting at a prompt is held the same way", async () => {

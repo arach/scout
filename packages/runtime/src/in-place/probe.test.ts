@@ -38,6 +38,8 @@ function noHosts(overrides: Partial<DeliverInPlaceDeps> = {}): DeliverInPlaceDep
     promptHerdr: never,
     promptOrca: never,
     promptTmux: never,
+    tmuxComposerDraft: async () => null,
+    scoutLaunchedTmuxSessions: async () => new Set<string>(),
     ttyForPid: async () => null,
     typeIntoTty: never,
     typeIntoCodexApp: never,
@@ -75,6 +77,8 @@ describe("probeInPlace", () => {
     expect(await probeInPlace({ sessionId: SESSION, harness: "claude" }, deps("busy"))).toMatchObject({ live: true, activity: "busy" });
     expect(await probeInPlace({ sessionId: SESSION, harness: "claude" }, deps("waiting"))).toMatchObject({ live: true, activity: "blocked" });
     expect(await probeInPlace({ sessionId: SESSION, harness: "claude" }, deps("idle"))).toMatchObject({ live: true, activity: "idle" });
+    // A finished turn with a background shell still running has a free prompt.
+    expect(await probeInPlace({ sessionId: SESSION, harness: "claude" }, deps("shell"))).toMatchObject({ live: true, activity: "idle" });
     expect(await probeInPlace({ sessionId: SESSION, harness: "claude" }, deps(null))).toMatchObject({ live: true, activity: "unknown" });
   });
 
@@ -83,6 +87,49 @@ describe("probeInPlace", () => {
       findClaudeRecord: async () => claudeRecord({ status: "idle", tmux: { session: "main", window: "@1", pane: "%4" } as ClaudeSessionRecord["tmux"] }),
     }));
     expect(probe).toMatchObject({ live: true, via: "tmux", activity: "idle" });
+  });
+
+  test("unsent text in a tmux composer reads as composing, and is looked for only at a free prompt", async () => {
+    const tmux = { session: "main", window: "@1", pane: "%4" } as ClaudeSessionRecord["tmux"];
+    const reads: string[] = [];
+    const deps = (status: string, draft: string | null) => noHosts({
+      findClaudeRecord: async () => claudeRecord({ status, tmux }),
+      tmuxComposerDraft: async (target) => { reads.push(target); return draft; },
+    });
+    expect(await probeInPlace({ sessionId: SESSION, harness: "claude" }, deps("idle", "half a thought")))
+      .toMatchObject({ live: true, via: "tmux", activity: "composing" });
+    expect(await probeInPlace({ sessionId: SESSION, harness: "claude" }, deps("idle", null))).toMatchObject({ activity: "idle" });
+    expect(reads).toEqual(["%4", "%4"]);
+    expect(await probeInPlace({ sessionId: SESSION, harness: "claude" }, deps("busy", "queued words"))).toMatchObject({ activity: "busy" });
+    expect(reads).toHaveLength(2);
+  });
+
+  test("a composer that cannot be read does not hold the session", async () => {
+    const probe = await probeInPlace({ sessionId: SESSION, harness: "claude" }, noHosts({
+      findClaudeRecord: async () => claudeRecord({ status: "idle", tmux: { session: "main", window: "@1", pane: "%4" } as ClaudeSessionRecord["tmux"] }),
+      tmuxComposerDraft: async () => { throw new Error("no server running"); },
+    }));
+    expect(probe).toMatchObject({ live: true, activity: "idle" });
+  });
+
+  test("a session Scout once continued is a place again where the operator reopens it", async () => {
+    // Claude Code keeps the name Scout launched it under.
+    const probe = await probeInPlace({ sessionId: SESSION, harness: "claude" }, noHosts({
+      findClaudeRecord: async () => claudeRecord({
+        status: "idle",
+        name: `flat-claude-${SESSION}-relay-agent`,
+        tmux: { session: "main", window: "@1", pane: "%4" } as ClaudeSessionRecord["tmux"],
+      }),
+    }));
+    expect(probe).toMatchObject({ live: true, via: "tmux", location: "tmux main · %4", activity: "idle" });
+  });
+
+  test("a tmux session Scout launched is not a place, whatever it is called", async () => {
+    const probe = await probeInPlace({ sessionId: SESSION, harness: "claude" }, noHosts({
+      findClaudeRecord: async () => claudeRecord({ status: "idle", tmux: { session: "relay-app-claude", window: "@1", pane: "%1" } as ClaudeSessionRecord["tmux"] }),
+      scoutLaunchedTmuxSessions: async () => new Set(["relay-app-claude"]),
+    }));
+    expect(probe).toEqual({ live: false, code: "not_live", held: false });
   });
 
   test("Scout's own background copy is not a place", async () => {

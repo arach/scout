@@ -229,25 +229,46 @@ export async function observeClaudeSessionForTmuxSession(input: {
   return correlateClaudeSessionForTmuxSession({ ...input, records, isProcessAlive: () => true });
 }
 
+/** When the process started, as `ps` prints it; null when no such process runs. */
+async function readProcessStart(pid: number): Promise<string | null> {
+  try {
+    const result = await execSystemFile("ps", ["-p", String(pid), "-o", "lstart="],
+      { timeoutMs: 2000, env: { ...process.env, TZ: "UTC", LC_ALL: "C" }, maxStdoutBytes: 1024 });
+    return result.stdout.trim() || null;
+  } catch (error) {
+    if ((error as { exitCode?: number }).exitCode !== 1) throw error;
+    return null;
+  }
+}
+
 export async function findLiveClaudeSession(nativeSessionId: string, options: {
   directory?: string; probe?: ClaudePaneProbe;
+  processStart?: (pid: number) => Promise<string | null>;
+  /** Records to pass over, so a second holder of the same session can be found. */
+  skip?: (record: ClaudeSessionRecord) => boolean;
 } = {}): Promise<ClaudeSessionRecord | null> {
   const matches = (await readClaudeSessionRecords(options)).filter(record => record.sessionId === nativeSessionId);
+  const normalized = (value: string) => value.trim().replace(/\s+/gu, " ");
+  // The record's own start time tells its process from a later one with the same pid.
+  const stillRunning = async (record: ClaudeSessionRecord) => {
+    const started = await (options.processStart ?? readProcessStart)(record.pid);
+    return Boolean(record.procStart && started && normalized(started) === normalized(record.procStart));
+  };
   for (const record of matches) {
+    if (options.skip?.(record)) continue;
     // A live non-tmux Claude also owns its native session: never start a competing resume.
     if (!record.tmux) {
-      try {
-        const result = await execSystemFile("ps", ["-p", String(record.pid), "-o", "lstart="],
-          { timeoutMs: 2000, env: { ...process.env, TZ: "UTC", LC_ALL: "C" }, maxStdoutBytes: 1024 });
-        if (record.procStart && result.stdout.trim().replace(/\s+/gu, " ") === record.procStart.trim().replace(/\s+/gu, " ")) return record;
-      } catch (error) {
-        if ((error as { exitCode?: number }).exitCode !== 1) throw error;
-      }
+      if (await stillRunning(record)) return record;
       continue;
     }
     try {
       const panes = await (options.probe ?? probeClaudePanes)(record.tmux.session);
       if (panes.some(pane => sameProcess(record, pane))) return record;
+      // Claude started from a shell is a child of the pane's process, not the
+      // pane's process itself. It is live while its pane is there and it runs.
+      const pane = panes.find(candidate => candidate.session === record.tmux?.session
+        && candidate.window === record.tmux.window && candidate.pane === record.tmux.pane);
+      if (pane && pane.pid !== record.pid && await stillRunning(record)) return record;
     } catch (error) {
       // Missing tmux sessions are stale records; timeouts and unavailable probes fail closed.
       if (!missingTmuxSession(error)) throw error;

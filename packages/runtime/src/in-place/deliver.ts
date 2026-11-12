@@ -37,7 +37,7 @@ import { join } from "node:path";
 import { readHerdrSessions, readHerdrTopology } from "../system-probes/herdr.js";
 import { execSystemFile } from "../system-probes/exec.js";
 import { findLiveClaudeSession, type ClaudeSessionRecord } from "../claude-session-records.js";
-import { sendTmuxPrompt } from "../local-agents.js";
+import { listScoutLaunchedTmuxSessions, sendTmuxPrompt, tmuxPaneTailUnsentComposerText } from "../local-agents.js";
 
 import { readOrcaAgents, sendOrcaPrompt, type OrcaAgent } from "./orca.js";
 import {
@@ -80,6 +80,8 @@ export type DeliverInPlaceDeps = {
   findHerdrPane?: (sessionId: string, harness?: string | null) => Promise<HerdrPaneMatch | null>;
   promptHerdr?: (match: HerdrPaneMatch, body: string) => Promise<void>;
   findClaudeRecord?: (sessionId: string) => Promise<ClaudeSessionRecord | null>;
+  /** The tmux sessions Scout launched itself, by the mark it leaves on them. */
+  scoutLaunchedTmuxSessions?: () => Promise<Set<string>>;
   /** Pids of processes holding a Codex thread, other than the ChatGPT app. */
   codexThreadPids?: (sessionId: string) => Promise<number[]>;
   /** The pane a process's terminal host spawned it in, if any. */
@@ -91,6 +93,8 @@ export type DeliverInPlaceDeps = {
   readOrcaAgents?: () => Promise<OrcaAgent[]>;
   promptOrca?: (terminalHandle: string, body: string) => Promise<void>;
   promptTmux?: (target: string, body: string) => Promise<void>;
+  /** Text a person typed into the pane's composer and has not sent, if any. */
+  tmuxComposerDraft?: (target: string) => Promise<string | null>;
   ttyForPid?: (pid: number) => Promise<string | null>;
   typeIntoTty?: (tty: string, body: string) => Promise<void>;
   /** Whether the ChatGPT app's Codex holds this thread's writer lock. */
@@ -128,10 +132,14 @@ export function resolveInPlaceOrder(env: NodeJS.ProcessEnv = process.env): InPla
  * Scout's own background continuations run in tmux sessions it names
  * `flat-<harness>-<id>`. They are copies, not the place the operator works,
  * so a reply never targets one.
+ *
+ * Where the process runs is the evidence. The `--name` Scout launches with is
+ * not: Claude Code keeps a session's name when it is resumed, so a session
+ * Scout once continued still carries that name in the pane where the operator
+ * opens it later.
  */
 export function isScoutBackgroundCopy(record: ClaudeSessionRecord): boolean {
-  const tmuxSession = record.tmux?.session ?? "";
-  return tmuxSession.startsWith("flat-") || (record.name ?? "").endsWith("-relay-agent");
+  return (record.tmux?.session ?? "").startsWith("flat-");
 }
 
 /** Every place one session is held, gathered before any is tried. */
@@ -174,8 +182,14 @@ async function gatherInPlaceCandidates(
   // The process holding the session, and the panes its environment names.
   const pids: number[] = [];
   if (!harness || harness === "claude") {
-    const record = await (deps.findClaudeRecord ?? findLiveClaudeSession)(sessionId).catch(() => null);
-    if (record && !isScoutBackgroundCopy(record)) {
+    const launched = await (deps.scoutLaunchedTmuxSessions ?? listScoutLaunchedTmuxSessions)().catch(() => new Set<string>());
+    const scoutCopy = (candidate: ClaudeSessionRecord) => isScoutBackgroundCopy(candidate)
+      || Boolean(candidate.tmux && launched.has(candidate.tmux.session));
+    // Scout's copy and the operator's pane can hold one session at once; the
+    // operator's is the one to find.
+    const record = await (deps.findClaudeRecord ?? ((id: string) => findLiveClaudeSession(id, { skip: scoutCopy })))(sessionId)
+      .catch(() => null);
+    if (record && !scoutCopy(record)) {
       pids.push(record.pid);
       candidates.terminalPid = record.pid;
       candidates.claude = record;
@@ -217,7 +231,11 @@ async function gatherInPlaceCandidates(
   return { ok: true, candidates };
 }
 
-export type InPlaceActivity = "idle" | "busy" | "blocked" | "unknown";
+/**
+ * `composing` is a free prompt with a person's unsent text in it: typing there
+ * would send their draft along with the words.
+ */
+export type InPlaceActivity = "idle" | "busy" | "blocked" | "composing" | "unknown";
 
 /** Where a session is open and whether it can take a new turn. Nothing is typed. */
 export type InPlaceProbe =
@@ -248,8 +266,10 @@ export async function probeInPlace(
   const harnessActivity = async (): Promise<InPlaceActivity> => {
     if (harness === "codex") return await (deps.codexActivity ?? codexActivity)(sessionId).catch(() => "unknown" as const);
     const status = candidates.claude?.status;
-    if (status === "idle") return "idle";
-    if (status === "busy" || status === "shell") return "busy";
+    // "shell" is a finished turn with a background shell still running: the
+    // prompt is free. A shell command inside a turn reads "busy".
+    if (status === "idle" || status === "shell") return "idle";
+    if (status === "busy") return "busy";
     if (status === "waiting") return "blocked";
     return "unknown";
   };
@@ -270,7 +290,9 @@ export async function probeInPlace(
       return { live: true, via: "orca", location, activity };
     }
     if (host === "tmux" && candidates.tmux) {
-      return { live: true, via: "tmux", location: candidates.tmux.location, activity: await harnessActivity() };
+      let activity = await harnessActivity();
+      if (activity === "idle" && await tmuxDraft(candidates.tmux.target, deps)) activity = "composing";
+      return { live: true, via: "tmux", location: candidates.tmux.location, activity };
     }
   }
 
@@ -337,6 +359,11 @@ export async function deliverInPlace(
     if (host === "orca" && candidates.orca) return promptOrcaCandidate(candidates.orca, body, deps);
     if (host === "tmux" && candidates.tmux) {
       const { target, location } = candidates.tmux;
+      // Checked again here, just before the paste: a person may have started
+      // typing since the probe.
+      if (await tmuxDraft(target, deps)) {
+        return { ok: false, code: "busy", via: "tmux", location, detail: "The composer holds unsent text. Nothing was typed." };
+      }
       try {
         await (deps.promptTmux ?? promptTmuxPane)(target, body);
         return { ok: true, via: "tmux", location };
@@ -478,6 +505,21 @@ async function promptHerdrPane(match: HerdrPaneMatch, body: string): Promise<voi
 async function promptTmuxPane(target: string, body: string): Promise<void> {
   const result = await sendTmuxPrompt(target, body);
   if (!result.submitted) throw new Error("the pane did not accept the prompt");
+}
+
+const TMUX_COMPOSER_TAIL_LINES = 40;
+
+/** A capture that fails says nothing; the paste that follows fails on its own. */
+async function tmuxDraft(target: string, deps: DeliverInPlaceDeps): Promise<string | null> {
+  return await (deps.tmuxComposerDraft ?? readTmuxComposerDraft)(target).catch(() => null);
+}
+
+async function readTmuxComposerDraft(target: string): Promise<string | null> {
+  // `-e` keeps the escape sequences, which tell typed text from a suggestion.
+  const { stdout } = await execSystemFile("tmux", [
+    "capture-pane", "-p", "-e", "-t", target, "-S", `-${TMUX_COMPOSER_TAIL_LINES}`,
+  ], { timeoutMs: 2_000, maxStdoutBytes: 256 * 1024 });
+  return tmuxPaneTailUnsentComposerText(stdout);
 }
 
 /**

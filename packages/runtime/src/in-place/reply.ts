@@ -217,7 +217,8 @@ export async function readSessionHolderState(
 ): Promise<{ live: boolean; idle: boolean }> {
   if (harness === "claude") {
     const live = await findLiveClaudeSession(sessionId);
-    return { live: live !== null, idle: live?.status === "idle" };
+    // "shell" is a finished turn with a background shell still running.
+    return { live: live !== null, idle: live?.status === "idle" || live?.status === "shell" };
   }
   const held = (await codexThreadHolderPids(sessionId)).length > 0 || await codexThreadHeldByChatGPTApp(sessionId);
   return { live: held, idle: false };

@@ -70,6 +70,8 @@ function noHosts(overrides: Partial<DeliverInPlaceDeps> = {}): DeliverInPlaceDep
     promptHerdr: never,
     promptOrca: never,
     promptTmux: never,
+    tmuxComposerDraft: async () => null,
+    scoutLaunchedTmuxSessions: async () => new Set<string>(),
     ttyForPid: async () => null,
     typeIntoTty: never,
     codexHeldByApp: async () => false,
@@ -199,6 +201,23 @@ describe("deliverInPlace", () => {
       .toMatchObject({ ok: true, via: "herdr" });
     expect((await deliverInPlace({ sessionId: SESSION, harness: "claude", body: "x" }, deps(["tmux", "herdr", "orca", "terminal"]))))
       .toMatchObject({ ok: true, via: "tmux", location: "tmux work · %3" });
+  });
+
+  test("a tmux composer holding unsent text is not typed into", async () => {
+    const typed: string[] = [];
+    const result = await deliverInPlace({ sessionId: SESSION, harness: "claude", body: "x" }, noHosts({
+      findClaudeRecord: async () => claudeRecord({ tmux: { session: "work", pane: "%3" } as ClaudeSessionRecord["tmux"] }),
+      tmuxComposerDraft: async () => "half a thought",
+      promptTmux: async (_target, body) => { typed.push(body); },
+    }));
+    expect(result).toEqual({
+      ok: false,
+      code: "busy",
+      via: "tmux",
+      location: "tmux work · %3",
+      detail: "The composer holds unsent text. Nothing was typed.",
+    });
+    expect(typed).toEqual([]);
   });
 
   test("Scout's own background copies are never targets", async () => {

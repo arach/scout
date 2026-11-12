@@ -220,16 +220,20 @@ export async function invokeSessionInPlace(
       if (announced !== probe.activity) {
         announced = probe.activity;
         await progress(probe.activity === "blocked"
-          ? `${label} is waiting on a prompt in ${place.location}. The ask is held until it clears.`
-          : `${label} is mid-turn in ${place.location}. The ask is held until the turn ends.`);
+          ? `${label} is waiting on a prompt in ${place.location}. The task is held until it clears.`
+          : probe.activity === "composing"
+            ? `${label} has unsent text in its composer in ${place.location}. The task is held until that is sent or cleared.`
+            : `${label} is mid-turn in ${place.location}. The task is held until the turn ends.`);
       }
     }
 
     if (now() - startedAt >= holdMs) {
       throw blocked(
         "in_place_hold_expired",
-        `it stayed busy for ${minutes(holdMs)}.`,
-        `${label} did not become idle in ${place.location} within ${minutes(holdMs)}. Nothing was typed.`,
+        announced === "composing" ? `its composer held unsent text for ${minutes(holdMs)}.` : `it stayed busy for ${minutes(holdMs)}.`,
+        announced === "composing"
+          ? `${label} had unsent text in its composer in ${place.location} for ${minutes(holdMs)}. Nothing was typed.`
+          : `${label} did not become idle in ${place.location} within ${minutes(holdMs)}. Nothing was typed.`,
       );
     }
     await sleep(HOLD_POLL_MS);
