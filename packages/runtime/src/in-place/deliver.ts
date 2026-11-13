@@ -37,7 +37,7 @@ import { join } from "node:path";
 import { readHerdrSessions, readHerdrTopology } from "../system-probes/herdr.js";
 import { execSystemFile } from "../system-probes/exec.js";
 import { findLiveClaudeSession, type ClaudeSessionRecord } from "../claude-session-records.js";
-import { sendTmuxPrompt } from "../local-agents.js";
+import { listScoutLaunchedTmuxSessions, sendTmuxPrompt, tmuxPaneTailUnsentComposerText } from "../local-agents.js";
 
 import { readOrcaAgents, sendOrcaPrompt, type OrcaAgent } from "./orca.js";
 import {
@@ -61,8 +61,12 @@ export type InPlaceDelivery =
   | { ok: false; code: "draft_unsupported"; detail: string }
   /** The session is live but can't take words right now (e.g. a permission prompt is up). */
   | { ok: false; code: "session_blocked"; via: InPlaceVia; location: string }
-  /** The session is live in a place Scout found but couldn't type into. */
-  | { ok: false; code: "in_place_failed"; via: InPlaceVia; location: string; detail: string }
+  /**
+   * The session is live in a place Scout found but couldn't type into.
+   * `nothingSent` is set only when Scout refused before touching the place;
+   * without it the words may have reached the composer.
+   */
+  | { ok: false; code: "in_place_failed"; via: InPlaceVia; location: string; detail: string; nothingSent?: true }
   /** Live in an app only the Scout app can reach, and the Scout app can't right now. */
   | { ok: false; code: "scout_app_unavailable" | "scout_app_accessibility"; via: InPlaceVia; location: string }
   /** No live place holds this session. */
@@ -76,6 +80,8 @@ export type DeliverInPlaceDeps = {
   findHerdrPane?: (sessionId: string, harness?: string | null) => Promise<HerdrPaneMatch | null>;
   promptHerdr?: (match: HerdrPaneMatch, body: string) => Promise<void>;
   findClaudeRecord?: (sessionId: string) => Promise<ClaudeSessionRecord | null>;
+  /** The tmux sessions Scout launched itself, by the mark it leaves on them. */
+  scoutLaunchedTmuxSessions?: () => Promise<Set<string>>;
   /** Pids of processes holding a Codex thread, other than the ChatGPT app. */
   codexThreadPids?: (sessionId: string) => Promise<number[]>;
   /** The pane a process's terminal host spawned it in, if any. */
@@ -87,6 +93,8 @@ export type DeliverInPlaceDeps = {
   readOrcaAgents?: () => Promise<OrcaAgent[]>;
   promptOrca?: (terminalHandle: string, body: string) => Promise<void>;
   promptTmux?: (target: string, body: string) => Promise<void>;
+  /** Text a person typed into the pane's composer and has not sent, if any. */
+  tmuxComposerDraft?: (target: string) => Promise<string | null>;
   ttyForPid?: (pid: number) => Promise<string | null>;
   typeIntoTty?: (tty: string, body: string) => Promise<void>;
   /** Whether the ChatGPT app's Codex holds this thread's writer lock. */
@@ -124,10 +132,14 @@ export function resolveInPlaceOrder(env: NodeJS.ProcessEnv = process.env): InPla
  * Scout's own background continuations run in tmux sessions it names
  * `flat-<harness>-<id>`. They are copies, not the place the operator works,
  * so a reply never targets one.
+ *
+ * Where the process runs is the evidence. The `--name` Scout launches with is
+ * not: Claude Code keeps a session's name when it is resumed, so a session
+ * Scout once continued still carries that name in the pane where the operator
+ * opens it later.
  */
 export function isScoutBackgroundCopy(record: ClaudeSessionRecord): boolean {
-  const tmuxSession = record.tmux?.session ?? "";
-  return tmuxSession.startsWith("flat-") || (record.name ?? "").endsWith("-relay-agent");
+  return (record.tmux?.session ?? "").startsWith("flat-");
 }
 
 /** Every place one session is held, gathered before any is tried. */
@@ -137,30 +149,23 @@ type Candidates = {
   tmux: { target: string; location: string } | null;
   /** The Claude process, for typing into a plain terminal tab. */
   terminalPid: number | null;
+  /** Claude's own record of the live process, which carries its activity. */
+  claude: ClaudeSessionRecord | null;
+  /** A harness process other than Scout's own background copy has the session open. */
+  held: boolean;
 };
 
-export async function deliverInPlace(
-  input: { sessionId: string; harness?: string | null; body: string; requireExactHarness?: boolean; mode?: "submit" | "draft" },
-  deps: DeliverInPlaceDeps = {},
-): Promise<InPlaceDelivery> {
-  const { sessionId, body } = input;
-  const harness = input.harness?.trim().toLowerCase() || null;
+type GatheredCandidates =
+  | { ok: true; candidates: Candidates }
+  | { ok: false; code: "session_runtime_unobserved" | "session_ambiguous" };
 
-  // Draft is deliberately handled before any terminal or Accessibility actuator.
-  // A missing harness must not accidentally turn a draft into a submitted prompt.
-  if (input.mode === "draft") {
-    if (harness !== "codex") return { ok: false, code: "draft_unsupported", detail: "Draft mode requires --harness codex and an app-held thread; nothing was sent." };
-    const held = await (deps.codexHeldByApp ?? codexThreadHeldByChatGPTApp)(sessionId).catch(() => false);
-    if (!held) return { ok: false, code: "not_live" };
-    try {
-      await (deps.draftCodexApp ?? draftCodexApp)(sessionId, body);
-      return { ok: true, delivered: "draft", via: "scout-app", location: "the ChatGPT app’s Codex composer (not sent)" };
-    } catch (error) {
-      return { ok: false, code: "in_place_failed", via: "scout-app", location: "the ChatGPT app’s Codex composer", detail: errorText(error) };
-    }
-  }
-
-  const candidates: Candidates = { herdr: null, orca: null, tmux: null, terminalPid: null };
+/** Find every place that holds the session. Nothing is typed. */
+async function gatherInPlaceCandidates(
+  input: { sessionId: string; harness: string | null; requireExactHarness?: boolean },
+  deps: DeliverInPlaceDeps,
+): Promise<GatheredCandidates> {
+  const { sessionId, harness } = input;
+  const candidates: Candidates = { herdr: null, orca: null, tmux: null, terminalPid: null, claude: null, held: false };
 
   // Herdr names the session itself when its integration is installed.
   if (input.requireExactHarness && !harness) return { ok: false, code: "session_runtime_unobserved" };
@@ -177,10 +182,17 @@ export async function deliverInPlace(
   // The process holding the session, and the panes its environment names.
   const pids: number[] = [];
   if (!harness || harness === "claude") {
-    const record = await (deps.findClaudeRecord ?? findLiveClaudeSession)(sessionId).catch(() => null);
-    if (record && !isScoutBackgroundCopy(record)) {
+    const launched = await (deps.scoutLaunchedTmuxSessions ?? listScoutLaunchedTmuxSessions)().catch(() => new Set<string>());
+    const scoutCopy = (candidate: ClaudeSessionRecord) => isScoutBackgroundCopy(candidate)
+      || Boolean(candidate.tmux && launched.has(candidate.tmux.session));
+    // Scout's copy and the operator's pane can hold one session at once; the
+    // operator's is the one to find.
+    const record = await (deps.findClaudeRecord ?? ((id: string) => findLiveClaudeSession(id, { skip: scoutCopy })))(sessionId)
+      .catch(() => null);
+    if (record && !scoutCopy(record)) {
       pids.push(record.pid);
       candidates.terminalPid = record.pid;
+      candidates.claude = record;
       if (record.tmux) {
         candidates.tmux = {
           target: record.tmux.pane ?? record.tmux.session,
@@ -192,6 +204,7 @@ export async function deliverInPlace(
   if (!harness || harness === "codex") {
     pids.push(...await (deps.codexThreadPids ?? codexThreadHolderPids)(sessionId).catch(() => []));
   }
+  candidates.held = pids.length > 0;
   for (const pid of pids) {
     const location = await (deps.locateProcess ?? locateProcessHost)(pid).catch(() => null);
     if (location?.host === "herdr" && !candidates.herdr) {
@@ -215,18 +228,176 @@ export async function deliverInPlace(
     && own.terminalHandle === candidates.orca?.terminalHandle)) {
     candidates.orca = null;
   }
+  return { ok: true, candidates };
+}
+
+/**
+ * `composing` is a free prompt with a person's unsent text in it: typing there
+ * would send their draft along with the words.
+ */
+export type InPlaceActivity = "idle" | "busy" | "blocked" | "composing" | "unknown";
+
+/** Where a session is open and whether it can take a new turn. Nothing is typed. */
+export type InPlaceProbe =
+  | { live: true; via: InPlaceVia; location: string; activity: InPlaceActivity }
+  /**
+   * No place Scout can type into. `held` says a harness process still has the
+   * session open, so it is running somewhere out of reach, not closed.
+   */
+  | { live: false; code: "not_live"; held: boolean }
+  /** The session's identity could not be established; nothing may be typed. */
+  | { live: false; code: "session_runtime_unobserved" | "session_ambiguous" };
+
+/**
+ * Look for the place a session is open, in the same order `deliverInPlace`
+ * would use, and report what that place or the harness says it is doing.
+ * `unknown` means neither gave a signal.
+ */
+export async function probeInPlace(
+  input: { sessionId: string; harness?: string | null; requireExactHarness?: boolean },
+  deps: DeliverInPlaceDeps = {},
+): Promise<InPlaceProbe> {
+  const { sessionId } = input;
+  const harness = input.harness?.trim().toLowerCase() || null;
+  const gathered = await gatherInPlaceCandidates({ sessionId, harness, requireExactHarness: input.requireExactHarness }, deps);
+  if (!gathered.ok) return { live: false, code: gathered.code };
+  const { candidates } = gathered;
+
+  const harnessActivity = async (): Promise<InPlaceActivity> => {
+    if (harness === "codex") return await (deps.codexActivity ?? codexActivity)(sessionId).catch(() => "unknown" as const);
+    const status = candidates.claude?.status;
+    // "shell" is a finished turn with a background shell still running: the
+    // prompt is free. A shell command inside a turn reads "busy".
+    if (status === "idle" || status === "shell") return "idle";
+    if (status === "busy") return "busy";
+    if (status === "waiting") return "blocked";
+    return "unknown";
+  };
+
+  const order = deps.order ?? resolveInPlaceOrder();
+  for (const host of order) {
+    if (host === "herdr" && candidates.herdr) {
+      const status = candidates.herdr.status;
+      const activity: InPlaceActivity = status === "blocked" ? "blocked"
+        : status === "working" ? "busy"
+        : status === "idle" || status === "done" ? "idle"
+        : await harnessActivity();
+      return { live: true, via: "herdr", location: herdrLocation(candidates.herdr), activity };
+    }
+    if (host === "orca" && candidates.orca) {
+      const { location, agent } = await orcaPlace(candidates.orca, deps);
+      const activity: InPlaceActivity = agent?.state === "blocked" || agent?.state === "waiting" ? "blocked" : await harnessActivity();
+      return { live: true, via: "orca", location, activity };
+    }
+    if (host === "tmux" && candidates.tmux) {
+      let activity = await harnessActivity();
+      if (activity === "idle" && await tmuxDraft(candidates.tmux.target, deps)) activity = "composing";
+      return { live: true, via: "tmux", location: candidates.tmux.location, activity };
+    }
+  }
+
+  if (harness === "codex") {
+    const held = await (deps.codexHeldByApp ?? codexThreadHeldByChatGPTApp)(sessionId).catch(() => false);
+    if (!held) return { live: false, code: "not_live", held: candidates.held };
+    return { live: true, via: "scout-app", location: CODEX_APP_LOCATION, activity: await harnessActivity() };
+  }
+
+  const unreachable: InPlaceProbe = { live: false, code: "not_live", held: candidates.held };
+  if (!order.includes("terminal") || candidates.terminalPid === null) return unreachable;
+  const tty = await (deps.ttyForPid ?? ttyForPid)(candidates.terminalPid).catch(() => null);
+  if (!tty) return unreachable;
+  const ownTty = await (deps.selfTty ?? callerTty)().catch(() => null);
+  if (tty === ownTty) return unreachable;
+  return { live: true, via: "lattices", location: `terminal ${tty}`, activity: await harnessActivity() };
+}
+
+const CODEX_APP_LOCATION = "the ChatGPT app’s Codex";
+
+function herdrLocation(pane: HerdrPaneMatch): string {
+  return `Herdr ${pane.session} · ${pane.paneId}`;
+}
+
+async function orcaPlace(
+  terminal: { terminalHandle: string; paneKey: string | null },
+  deps: DeliverInPlaceDeps,
+): Promise<{ location: string; agent: OrcaAgent | null }> {
+  const agents = terminal.paneKey
+    ? await (deps.readOrcaAgents ?? readOrcaAgents)().catch(() => [])
+    : [];
+  const agent = agents.find((entry) => entry.paneKey === terminal.paneKey) ?? null;
+  const where = agent?.worktreePath?.split("/").filter(Boolean).slice(-2).join("/") ?? null;
+  return { location: `Orca ${where ? `${where} · ` : ""}${terminal.terminalHandle}`, agent };
+}
+
+/** Called once every check has passed, immediately before the first keystroke. */
+export type BeforeKeystroke = (place: { via: InPlaceVia; location: string }) => Promise<void> | void;
+
+/**
+ * The keystroke itself. `before` runs first and can refuse it: a caller that
+ * must record "about to type" durably types nothing when that record fails.
+ */
+async function typeAt(
+  place: { via: InPlaceVia; location: string },
+  before: BeforeKeystroke | undefined,
+  type: () => Promise<void>,
+): Promise<InPlaceDelivery> {
+  try {
+    await before?.(place);
+  } catch (error) {
+    return { ok: false, code: "in_place_failed", ...place, nothingSent: true, detail: errorText(error) };
+  }
+  try {
+    await type();
+    return { ok: true, ...place };
+  } catch (error) {
+    return { ok: false, code: "in_place_failed", ...place, detail: errorText(error) };
+  }
+}
+
+export async function deliverInPlace(
+  input: {
+    sessionId: string;
+    harness?: string | null;
+    body: string;
+    requireExactHarness?: boolean;
+    mode?: "submit" | "draft";
+    beforeKeystroke?: BeforeKeystroke;
+  },
+  deps: DeliverInPlaceDeps = {},
+): Promise<InPlaceDelivery> {
+  const { sessionId, body } = input;
+  const before = input.beforeKeystroke;
+  const harness = input.harness?.trim().toLowerCase() || null;
+
+  // Draft is deliberately handled before any terminal or Accessibility actuator.
+  // A missing harness must not accidentally turn a draft into a submitted prompt.
+  if (input.mode === "draft") {
+    if (harness !== "codex") return { ok: false, code: "draft_unsupported", detail: "Draft mode requires --harness codex and an app-held thread; nothing was sent." };
+    const held = await (deps.codexHeldByApp ?? codexThreadHeldByChatGPTApp)(sessionId).catch(() => false);
+    if (!held) return { ok: false, code: "not_live" };
+    try {
+      await (deps.draftCodexApp ?? draftCodexApp)(sessionId, body);
+      return { ok: true, delivered: "draft", via: "scout-app", location: "the ChatGPT app’s Codex composer (not sent)" };
+    } catch (error) {
+      return { ok: false, code: "in_place_failed", via: "scout-app", location: "the ChatGPT app’s Codex composer", detail: errorText(error) };
+    }
+  }
+
+  const gathered = await gatherInPlaceCandidates({ sessionId, harness, requireExactHarness: input.requireExactHarness }, deps);
+  if (!gathered.ok) return { ok: false, code: gathered.code };
+  const { candidates } = gathered;
 
   for (const host of deps.order ?? resolveInPlaceOrder()) {
-    if (host === "herdr" && candidates.herdr) return promptHerdrCandidate(candidates.herdr, body, deps);
-    if (host === "orca" && candidates.orca) return promptOrcaCandidate(candidates.orca, body, deps);
+    if (host === "herdr" && candidates.herdr) return promptHerdrCandidate(candidates.herdr, body, deps, before);
+    if (host === "orca" && candidates.orca) return promptOrcaCandidate(candidates.orca, body, deps, before);
     if (host === "tmux" && candidates.tmux) {
       const { target, location } = candidates.tmux;
-      try {
-        await (deps.promptTmux ?? promptTmuxPane)(target, body);
-        return { ok: true, via: "tmux", location };
-      } catch (error) {
-        return { ok: false, code: "in_place_failed", via: "tmux", location, detail: errorText(error) };
+      // Checked again here, just before the paste: a person may have started
+      // typing since the probe.
+      if (await tmuxDraft(target, deps)) {
+        return { ok: false, code: "busy", via: "tmux", location, detail: "The composer holds unsent text. Nothing was typed." };
       }
+      return typeAt({ via: "tmux", location }, before, () => (deps.promptTmux ?? promptTmuxPane)(target, body));
     }
   }
 
@@ -253,14 +424,10 @@ export async function deliverInPlace(
       // check between them. A preflight here cannot guard a turn started by
       // focus. Refuse before opening the URL; do not send ignored safety flags
       // to an old actuator or bypass this refusal through another backend.
-      return { ok: false, code: "in_place_failed", via, location, detail: "Scout.app cannot recheck thread activity after focus and before Return; nothing opened or submitted. Use mode=draft (--draft) and send manually." };
+      return { ok: false, code: "in_place_failed", via, location, nothingSent: true, detail: "Scout.app cannot recheck thread activity after focus and before Return; nothing opened or submitted. Use mode=draft (--draft) and send manually." };
     }
-    try {
-      await (deps.typeIntoCodexApp ?? ((id, words) => typeIntoCodexAppWithLattices(id, words, deps.latticesCall, deps.codexActivity)))(sessionId, body);
-      return { ok: true, via, location };
-    } catch (error) {
-      return { ok: false, code: "in_place_failed", via, location, detail: errorText(error) };
-    }
+    return typeAt({ via, location }, before, () =>
+      (deps.typeIntoCodexApp ?? ((id, words) => typeIntoCodexAppWithLattices(id, words, deps.latticesCall, deps.codexActivity)))(sessionId, body));
   }
 
   // A plain terminal tab: only Claude Code records the process to type into.
@@ -271,34 +438,25 @@ export async function deliverInPlace(
   // The sender's own tab: typing there would feed it its own words.
   const ownTty = await (deps.selfTty ?? callerTty)().catch(() => null);
   if (tty === ownTty) return { ok: false, code: "not_live" };
-  const location = `terminal ${tty}`;
-  try {
-    await (deps.typeIntoTty ?? typeIntoTtyWithLattices)(tty, body);
-    return { ok: true, via: "lattices", location };
-  } catch (error) {
-    return { ok: false, code: "in_place_failed", via: "lattices", location, detail: errorText(error) };
-  }
+  return typeAt({ via: "lattices", location: `terminal ${tty}` }, before, () => (deps.typeIntoTty ?? typeIntoTtyWithLattices)(tty, body));
 }
 
 async function promptHerdrCandidate(
   pane: HerdrPaneMatch,
   body: string,
   deps: DeliverInPlaceDeps,
+  before?: BeforeKeystroke,
 ): Promise<InPlaceDelivery> {
   const location = `Herdr ${pane.session} · ${pane.paneId}`;
   if (pane.status === "blocked") return { ok: false, code: "session_blocked", via: "herdr", location };
-  try {
-    await (deps.promptHerdr ?? promptHerdrPane)(pane, body);
-    return { ok: true, via: "herdr", location };
-  } catch (error) {
-    return { ok: false, code: "in_place_failed", via: "herdr", location, detail: errorText(error) };
-  }
+  return typeAt({ via: "herdr", location }, before, () => (deps.promptHerdr ?? promptHerdrPane)(pane, body));
 }
 
 async function promptOrcaCandidate(
   terminal: { terminalHandle: string; paneKey: string | null },
   body: string,
   deps: DeliverInPlaceDeps,
+  before?: BeforeKeystroke,
 ): Promise<InPlaceDelivery> {
   const agents = terminal.paneKey
     ? await (deps.readOrcaAgents ?? readOrcaAgents)().catch(() => [])
@@ -311,12 +469,7 @@ async function promptOrcaCandidate(
   if (agent?.state === "blocked" || agent?.state === "waiting") {
     return { ok: false, code: "session_blocked", via: "orca", location };
   }
-  try {
-    await (deps.promptOrca ?? sendOrcaPrompt)(terminal.terminalHandle, body);
-    return { ok: true, via: "orca", location };
-  } catch (error) {
-    return { ok: false, code: "in_place_failed", via: "orca", location, detail: errorText(error) };
-  }
+  return typeAt({ via: "orca", location }, before, () => (deps.promptOrca ?? sendOrcaPrompt)(terminal.terminalHandle, body));
 }
 
 export async function findHerdrPaneForSession(sessionId: string, harness?: string | null): Promise<HerdrPaneMatch | null> {
@@ -362,6 +515,21 @@ async function promptHerdrPane(match: HerdrPaneMatch, body: string): Promise<voi
 async function promptTmuxPane(target: string, body: string): Promise<void> {
   const result = await sendTmuxPrompt(target, body);
   if (!result.submitted) throw new Error("the pane did not accept the prompt");
+}
+
+const TMUX_COMPOSER_TAIL_LINES = 40;
+
+/** A capture that fails says nothing; the paste that follows fails on its own. */
+async function tmuxDraft(target: string, deps: DeliverInPlaceDeps): Promise<string | null> {
+  return await (deps.tmuxComposerDraft ?? readTmuxComposerDraft)(target).catch(() => null);
+}
+
+async function readTmuxComposerDraft(target: string): Promise<string | null> {
+  // `-e` keeps the escape sequences, which tell typed text from a suggestion.
+  const { stdout } = await execSystemFile("tmux", [
+    "capture-pane", "-p", "-e", "-t", target, "-S", `-${TMUX_COMPOSER_TAIL_LINES}`,
+  ], { timeoutMs: 2_000, maxStdoutBytes: 256 * 1024 });
+  return tmuxPaneTailUnsentComposerText(stdout);
 }
 
 /**
@@ -504,7 +672,7 @@ async function codexActivity(sessionId: string): Promise<"idle" | "busy" | "unkn
 
 const TRANSCRIPT_CONFIRM_MS = 8_000;
 
-async function findCodexTranscript(sessionId: string): Promise<string | null> {
+export async function findCodexTranscript(sessionId: string): Promise<string | null> {
   if (!/^[0-9a-f-]{16,}$/iu.test(sessionId)) return null;
   const sessions = join(codexHome(), "sessions");
   const { stdout } = await execSystemFile("find", [sessions, "-name", `rollout-*-${sessionId}.jsonl`, "-print", "-quit"], {

@@ -212,6 +212,38 @@ test("observes the actual pane process and rejects stale records, reused PIDs, a
   await expect(findLiveClaudeSession("native-agent", { directory, probe: async () => { throw new Error("probe timed out"); } })).rejects.toThrow("probe timed out");
 });
 
+test("Claude started from a shell in a tmux pane is live while its pane is there and its process runs", async () => {
+  const directory = scratchDirectory();
+  // The pane's own process is the shell (pid 90); Claude is its child (pid 100).
+  writeFileSync(join(directory, "100.json"), record({ pid: 100, sessionId: "native-shell" }));
+  const shellPane = { session: tmuxSession, window: "@16", pane: "%16", pid: 90, procStart: "Mon Sep 14 00:10:00 2026" };
+  const find = (processStart: string | null, panes = [shellPane]) => findLiveClaudeSession("native-shell", {
+    directory,
+    probe: async () => panes,
+    processStart: async () => processStart,
+  });
+  expect(await find("Mon Sep 14 00:14:35 2026")).toEqual(expect.objectContaining({ sessionId: "native-shell", pid: 100 }));
+  // The process is gone, or its pid now belongs to something started later.
+  expect(await find(null)).toBeNull();
+  expect(await find("Tue Sep 15 09:00:00 2026")).toBeNull();
+  // The pane it recorded is gone, though another pane of the session remains.
+  expect(await find("Mon Sep 14 00:14:35 2026", [{ ...shellPane, pane: "%17" }])).toBeNull();
+});
+
+test("a record can be passed over to find another holder of the same session", async () => {
+  const directory = scratchDirectory();
+  writeFileSync(join(directory, "100.json"), record({ pid: 100, sessionId: "native-twice", tmux: "flat-claude-native-twice:@1.%1" }));
+  writeFileSync(join(directory, "200.json"), record({ pid: 200, sessionId: "native-twice", tmux: null, name: null }));
+  const options = {
+    directory,
+    probe: async () => [{ session: "flat-claude-native-twice", window: "@1", pane: "%1", pid: 100, procStart: "Mon Sep 14 00:14:35 2026" }],
+    processStart: async () => "Mon Sep 14 00:14:35 2026",
+  };
+  const other = await findLiveClaudeSession("native-twice", { ...options, skip: (candidate) => candidate.tmux?.session.startsWith("flat-") === true });
+  expect(other?.pid).toBe(200);
+  expect(await findLiveClaudeSession("native-twice", { ...options, skip: () => true })).toBeNull();
+});
+
 test("observation reads only the pane PID file and rejects oversized process records", async () => {
   const directory = scratchDirectory();
   writeFileSync(join(directory, "100.json"), " ".repeat(65537));

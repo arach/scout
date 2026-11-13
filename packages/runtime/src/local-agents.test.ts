@@ -1384,6 +1384,29 @@ describe("terminal broker reply capture", () => {
     expect(output).toBe("done");
     expect(reads).toBe(2);
   });
+  test("the session's own transcript answers when the worker posts no reply", async () => {
+    const answers: Array<string | null> = [null, null, "It passes."];
+    let reads = 0;
+    const output = await waitForLocalAgentReply({
+      ...input,
+      timeoutSeconds: 5,
+      readSnapshot: async () => ({ messages: {} }),
+      transcriptReply: async () => answers[Math.min(reads++, answers.length - 1)]!,
+    });
+    expect(output).toBe("It passes.");
+    expect(reads).toBe(3);
+  });
+  test("a reply the worker posts itself still wins, and a transcript that cannot be read is not an answer", async () => {
+    const reply = { class: "agent", actorId: input.agentRuntimeId, conversationId: "chn-smoke", replyToMessageId: "msg-smoke", body: "posted", createdAt: 11_000 };
+    let snapshots = 0;
+    const output = await waitForLocalAgentReply({
+      ...input,
+      timeoutSeconds: 5,
+      readSnapshot: async () => (snapshots++ === 0 ? { messages: {} } : { messages: { reply } }),
+      transcriptReply: async () => { throw new Error("transcript moved"); },
+    });
+    expect(output).toBe("posted");
+  });
 });
 
 describe("local agent reply cleanup", () => {

@@ -161,6 +161,10 @@ import {
   parseScoutPermissionProfile,
 } from "./permission-policy.js";
 import { RequesterWaitTimeoutError } from "./requester-timeout.js";
+import { deliverInPlace, probeInPlace } from "./in-place/deliver.js";
+import type { InPlaceCheckpoint } from "./in-place/checkpoint.js";
+import { inPlaceSessionForEndpoint, invokeSessionInPlace, IN_PLACE_HOLD_MS, IN_PLACE_REPLY_WAIT_MS } from "./in-place/invoke.js";
+import { openSessionReplyReader, readSessionHolderState, type SessionReplyReader } from "./in-place/reply.js";
 import { locateHarnessSession } from "./session-locator.js";
 import { resolveOperatorHandle, resolveOperatorName } from "./user-config.js";
 import {
@@ -4213,6 +4217,47 @@ function extractActiveTmuxComposerText(paneTail: string): string | null {
     : collectBoxedComposerText(lines, anchor.index);
 }
 
+/**
+ * Text drawn dim is the harness's own: Claude Code shows its prompt suggestion
+ * and its placeholder that way. Typed text is never dim, so removing dim runs
+ * leaves what a person wrote.
+ */
+function stripDimTerminalRuns(value: string): string {
+  let out = "";
+  let dim = false;
+  let last = 0;
+  const sgr = /\x1B\[([0-9;]*)m/g;
+  for (let match = sgr.exec(value); match; match = sgr.exec(value)) {
+    if (!dim) out += value.slice(last, match.index);
+    last = match.index + match[0].length;
+    const params = match[1] ? match[1].split(";") : ["0"];
+    for (let index = 0; index < params.length; index += 1) {
+      const param = params[index];
+      if (param === "38" || param === "48" || param === "58") {
+        // An extended colour carries its own numbers, which are not attributes.
+        index += params[index + 1] === "2" ? 4 : params[index + 1] === "5" ? 2 : 0;
+      } else if (param === "2") {
+        dim = true;
+      } else if (param === "0" || param === "" || param === "22") {
+        dim = false;
+      }
+    }
+  }
+  if (!dim) out += value.slice(last);
+  return out;
+}
+
+/**
+ * What a person has typed into the composer and not sent, from a pane tail
+ * captured with its escape sequences (`tmux capture-pane -e`). Null when the
+ * composer is empty or no composer shows. A pane tail captured without escape
+ * sequences cannot tell typed text from a suggestion and must not be used.
+ */
+export function tmuxPaneTailUnsentComposerText(paneTailWithEscapes: string): string | null {
+  const text = extractActiveTmuxComposerText(stripTerminalControlSequences(stripDimTerminalRuns(paneTailWithEscapes)));
+  return text ? text : null;
+}
+
 function findLastIndex<T>(items: readonly T[], predicate: (item: T) => boolean): number {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     if (predicate(items[index]!)) {
@@ -6069,7 +6114,114 @@ export type LocalAgentInvocationHooks = {
    * once so a turn that never completes cleanly still leaves the endpoint bound.
    */
   onSessionObserved?: (metadata: Record<string, unknown>) => Promise<void> | void;
+  /** What the delivery is waiting on, in one sentence, for the task's record. */
+  onProgress?: (summary: string) => Promise<void> | void;
+  /** False once the task was cancelled or finished another way; delivery stops. */
+  shouldContinue?: () => boolean;
+  /** Where an earlier runtime left a delivery into an open session, if one started it. */
+  inPlaceCheckpoint?: () => InPlaceCheckpoint | null;
+  /** Record where that delivery stands on the task; null clears it. */
+  saveInPlaceCheckpoint?: (checkpoint: InPlaceCheckpoint | null) => Promise<void> | void;
 };
+
+function inPlaceBudgetMs(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/**
+ * Deliver an ask for an exact session into the place that session is open.
+ * Returns null when it is not open anywhere (or Scout already runs it), and
+ * the caller continues the session through the endpoint's own transport.
+ */
+async function invokeFlatSessionInPlace(
+  endpoint: AgentEndpoint,
+  invocation: InvocationRequest,
+  hooks: LocalAgentInvocationHooks,
+): Promise<LocalAgentInvocationResult | null> {
+  const session = inPlaceSessionForEndpoint(endpoint);
+  if (!session) return null;
+  // An endpoint Scout already runs holds the session itself. A Claude session
+  // is still looked for: the operator can open it again beside Scout's copy,
+  // and their pane is then the place it is open.
+  if (session.harness !== "claude" && isLocalAgentEndpointAlive(endpoint)) return null;
+  const agentRuntimeId = endpoint.agentId;
+  if (invocation.requesterId === agentRuntimeId) {
+    throw new DeliveryBlockedError({
+      stage: "in_place_self",
+      summary: "the ask names the session that sent it.",
+      message: `${session.harness} session ${session.sessionId} sent this ask to itself. Nothing was typed.`,
+    });
+  }
+
+  const flightId = createLocalAgentFlightId();
+  const askedAt = nowSeconds();
+  const marker = invocation.id;
+  const tagged = (words: string) => withScoutTaskMarker(words, marker);
+  const result = await invokeSessionInPlace({
+    ...session,
+    cwds: [endpoint.cwd, endpoint.projectRoot],
+    label: String(endpoint.metadata?.displayName ?? agentRuntimeId),
+    prompt: tagged(buildAttachedSessionInvocationPrompt(invocation, agentRuntimeId)),
+    explicitReplyPrompt: tagged(buildLocalAgentNudge(agentRuntimeId, invocation, flightId)),
+    marker,
+    wake: invocation.action === "wake",
+    holdMs: inPlaceBudgetMs("OPENSCOUT_IN_PLACE_HOLD_MS", IN_PLACE_HOLD_MS),
+    replyWaitMs: inPlaceBudgetMs("OPENSCOUT_IN_PLACE_REPLY_WAIT_MS", IN_PLACE_REPLY_WAIT_MS),
+  }, {
+    probe: (input) => probeInPlace(input),
+    deliver: (input) => deliverInPlace(input),
+    openReplyReader: openSessionReplyReader,
+    holderState: readSessionHolderState,
+    explicitReply: async () => localAgentReplyFromSnapshot(
+      await readBrokerReplySnapshot(),
+      { agentRuntimeId, invocation, flightId, askedAt },
+    ),
+    onProgress: hooks.onProgress,
+    shouldContinue: hooks.shouldContinue,
+    checkpoint: hooks.inPlaceCheckpoint,
+    saveCheckpoint: hooks.saveInPlaceCheckpoint,
+  });
+  if (!result) return null;
+  return {
+    output: result.output,
+    externalSessionId: session.sessionId,
+    ...(result.delivery ? { metadata: { lastInPlaceDelivery: { ...result.delivery, at: Date.now() } } } : {}),
+  };
+}
+
+/**
+ * The typed words carry the invocation id, so the transcript turn they start
+ * can be told from any other turn.
+ */
+function withScoutTaskMarker(words: string, marker: string): string {
+  return words.includes(marker) ? words : `${words}\n\nScout task ${marker}`;
+}
+
+/**
+ * A session Scout continues for an exact id answers in its own transcript, the
+ * same as one that takes the ask where it is open. Without this the answer
+ * exists only if the worker runs a reply command it was handed in a paste.
+ * Null means the transcript cannot be relied on and the worker must reply.
+ */
+async function openContinuedSessionReplyReader(
+  endpoint: AgentEndpoint,
+  invocation: InvocationRequest,
+  transport: string | undefined,
+): Promise<SessionReplyReader | null> {
+  if (transport !== "tmux" || invocation.action === "wake") return null;
+  const session = inPlaceSessionForEndpoint(endpoint);
+  if (!session || session.harness !== "claude") return null;
+  // Only at a free prompt. Words typed into a running turn are queued, and
+  // the transcript may not record them as a turn of their own.
+  const holder = await readSessionHolderState(session.sessionId, "claude").catch(() => null);
+  if (!holder?.idle) return null;
+  return await openSessionReplyReader({
+    ...session,
+    marker: invocation.id,
+    cwds: [endpoint.cwd, endpoint.projectRoot],
+  }).catch(() => null);
+}
 
 /** The `--name` Scout passes when it launches this agent's harness into tmux. */
 export function localAgentLaunchName(agentName: string): string {
@@ -6191,6 +6343,11 @@ export async function invokeLocalAgentEndpoint(
   invocation: InvocationRequest,
   hooks: LocalAgentInvocationHooks = {},
 ): Promise<LocalAgentInvocationResult> {
+  // A session that is open where the operator works takes the ask there.
+  // Resuming it here would run a second copy beside the one they are using.
+  const inPlace = await invokeFlatSessionInPlace(endpoint, invocation, hooks);
+  if (inPlace) return inPlace;
+
   const agentRuntimeId = endpoint.agentId;
   const definitionId = String(endpoint.metadata?.definitionId ?? endpoint.metadata?.agentName ?? endpoint.agentId);
   const prompt = endpointInvocationPrompt(endpoint, definitionId, invocation);
@@ -6564,7 +6721,10 @@ export async function invokeLocalAgentEndpoint(
   const flightId = createLocalAgentFlightId();
   const askedAt = nowSeconds();
   const timeoutSeconds = invocation.timeoutMs ? Math.max(30, Math.floor(invocation.timeoutMs / 1000)) : 300;
-  await sendLocalAgentPrompt(agentRuntimeId, onlineRecord, buildLocalAgentNudge(agentRuntimeId, invocation, flightId));
+  const transcriptReader = await openContinuedSessionReplyReader(endpoint, invocation, onlineRecord.transport);
+  await sendLocalAgentPrompt(agentRuntimeId, onlineRecord, transcriptReader
+    ? withScoutTaskMarker(buildAttachedSessionInvocationPrompt(invocation, agentRuntimeId), invocation.id)
+    : buildLocalAgentNudge(agentRuntimeId, invocation, flightId));
   // The harness is up once the prompt landed, so its own session record exists
   // to be read. Evidence rides back on the result and never fails the turn.
   const observedSessionMetadata = async (attempts = 1): Promise<Pick<LocalAgentInvocationResult, "metadata">> => {
@@ -6604,6 +6764,12 @@ export async function invokeLocalAgentEndpoint(
     flightId,
     askedAt,
     timeoutSeconds,
+    transcriptReply: transcriptReader
+      ? async () => {
+        const reply = await transcriptReader.read();
+        return reply.state === "answered" ? reply.text : null;
+      }
+      : undefined,
     // A harness that quit can never reply. Without this the requester timeout
     // parks the flight as "still working" forever.
     permissionWait: onlineRecord.transport === "tmux" && onlineRecord.harness === "claude"
@@ -6638,6 +6804,8 @@ export async function waitForLocalAgentReply(input: {
   blockedError?: () => Promise<DeliveryBlockedError | null>;
   readSnapshot?: () => Promise<unknown>;
   permissionWait?: () => Promise<boolean>;
+  /** The answer as the session's own transcript records it, once its turn has ended. */
+  transcriptReply?: () => Promise<string | null>;
 }): Promise<string> {
   let deadline = Date.now() + input.timeoutSeconds * 1000;
   let nextLivenessCheckAt = Date.now() + TMUX_REPLY_LIVENESS_INTERVAL_MS;
@@ -6648,6 +6816,10 @@ export async function waitForLocalAgentReply(input: {
     const snapshot = await (input.readSnapshot ?? readBrokerReplySnapshot)().catch(() => null);
     const output = snapshot ? localAgentReplyFromSnapshot(snapshot, input) : null;
     if (output !== null) return output;
+    if (input.transcriptReply) {
+      const answer = await input.transcriptReply().catch(() => null);
+      if (answer !== null) return answer;
+    }
 
     if (input.permissionWait) {
       const pausedAt = Date.now();
