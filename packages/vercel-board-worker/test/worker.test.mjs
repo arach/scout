@@ -149,9 +149,9 @@ test("with agentProfiles, a call may also write as any valid profile name: each 
   const asked = [];
   const handle = { as: (profile, options) => { asked.push([profile, options.can]); return { profile }; } };
   const clientFor = clientsFor(handle, parseBootstrap(JSON.stringify({ ...line, agentProfiles: true })));
-  assert.equal(clientFor("session-mwsw05pj-b1hfse").profile, "session-mwsw05pj-b1hfse");
+  assert.equal(clientFor("session-k3v9q2ab-x7c4de").profile, "session-k3v9q2ab-x7c4de");
   assert.equal(clientFor("no spaces"), undefined);
   assert.equal(clientFor("x".repeat(40)), undefined);
   // Still narrowed by the bootstrap's can.
-  assert.deepEqual(asked, [["session-mwsw05pj-b1hfse", "work=read,post"]]);
+  assert.deepEqual(asked, [["session-k3v9q2ab-x7c4de", "work=read,post"]]);
 });

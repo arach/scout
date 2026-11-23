@@ -576,7 +576,7 @@ test("a claim is an ask from its requester, kept out of the channel's room: no w
 
 test("an agent's Board profile is its ID when that is a profile name, else a stable slug that no role or other agent shares", () => {
   expect(vercelBoardAgentProfile("agent-1")).toBe("agent-1");
-  expect(vercelBoardAgentProfile("session-mwsw05pj-b1hfse")).toBe("session-mwsw05pj-b1hfse");
+  expect(vercelBoardAgentProfile("session-k3v9q2ab-x7c4de")).toBe("session-k3v9q2ab-x7c4de");
   const dotted = vercelBoardAgentProfile("scout.main.mini");
   expect(dotted).toMatch(/^scout-main-mini-[0-9a-f]{7}$/);
   expect(dotted).toBe(vercelBoardAgentProfile("scout.main.mini"));
