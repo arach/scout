@@ -6,3 +6,4 @@ export * from "./connect.js";
 export { REPORTER_SOURCE, REPORTER_VERSION } from "./reporter-source.js";
 export * from "./managed-agents.js";
 export * from "./status.js";
+export * from "./actions.js";

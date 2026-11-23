@@ -3851,6 +3851,7 @@ function readFeedWork(read: Parameters<typeof queryFeedWork>[1]) {
 }
 
 const routeRequest = createBrokerHttpRouter({
+  hubLoops: { collector: hubCollector, puller: managedAgentsPuller },
   workLifecycles,
   workRetry,
   derivedRecords,

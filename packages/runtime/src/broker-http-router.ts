@@ -187,6 +187,16 @@ import {
 } from "./mesh-trust-enrollment.js";
 import { normalizeConversationTitle } from "./conversation-title.js";
 import { readHubStatus } from "./hub/status.js";
+import {
+  collectHubNow,
+  connectClaudeCodeRepo,
+  connectManagedAgents,
+  disconnectClaudeCodeRepo,
+  disconnectManagedAgents,
+  HubActionError,
+} from "./hub/actions.js";
+import type { HubCollectorService } from "./hub/collector.js";
+import type { ManagedAgentsPuller } from "./hub/managed-agents.js";
 
 const ACTIVE_FLIGHT_LIST_STATES = new Set(["queued", "waking", "running", "waiting"]);
 
@@ -238,7 +248,23 @@ const CHANNEL_INVITE_COMMAND_KINDS = new Set<string>([
   "channel.invite.redeem",
 ]);
 
+function hubString(body: Record<string, unknown>, key: string): string | undefined {
+  const value = body[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new HubActionError(`${key} must be a string.`, "invalid_body");
+  return value;
+}
+
+function hubNumber(body: Record<string, unknown>, key: string): number | undefined {
+  const value = body[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "number") throw new HubActionError(`${key} must be a number.`, "invalid_body");
+  return value;
+}
+
 export type BrokerHttpRouterDeps = {
+  /** Scout Hub loops, so a manual collect joins a pass already running. */
+  hubLoops?: { collector?: Pick<HubCollectorService, "collectOnce"> | null; puller?: Pick<ManagedAgentsPuller, "pullOnce"> | null };
   /** Work lifecycles: stations, moves and reviews. */
   workLifecycles?: BrokerWorkLifecycleService;
   workRetry?: import("./broker-work-retry.js").BrokerWorkRetryService;
@@ -1116,6 +1142,48 @@ export function createBrokerHttpRouter(
       return;
     }
     json(response, 200, readHubStatus());
+    return;
+  }
+
+  // Hub actions change what this runtime mirrors, hold an API key or write into
+  // a repo: machine-local, never forwarded, and only for a signed operator
+  // request. Results never contain a token or key.
+  const runHubAction = async (action: (body: Record<string, unknown>) => unknown): Promise<void> => {
+    if (denyRemoteMutation()) return;
+    if (forwardedNodeId) { json(response, 403, { error: "forbidden", detail: "hub actions cannot be forwarded" }); return; }
+    if (!brokerAttributionRequiresOperator(request.transportContext)) { json(response, 403, { error: "operator_attribution_required" }); return; }
+    try {
+      const body = await readRequestBody<unknown>(request).catch(() => null);
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new HubActionError("The body must be a JSON object.", "invalid_body");
+      json(response, 200, await action(body as Record<string, unknown>));
+    } catch (error) {
+      if (error instanceof HubActionError) json(response, error.status, { error: error.code, detail: error.message });
+      else json(response, 500, { error: "hub_action_failed", detail: error instanceof Error ? error.message : String(error) });
+    }
+  };
+  if (method === "POST" && url.pathname === "/v1/hub/collect") {
+    await runHubAction(() => collectHubNow(deps.hubLoops ?? {}));
+    return;
+  }
+  if (method === "POST" && url.pathname === "/v1/hub/managed-agents/connect") {
+    await runHubAction((body) => connectManagedAgents({
+      apiKey: hubString(body, "apiKey") ?? "",
+      label: hubString(body, "label"),
+      lookbackDays: hubNumber(body, "lookbackDays"),
+      baseURL: hubString(body, "baseURL"),
+    }));
+    return;
+  }
+  if (method === "POST" && url.pathname === "/v1/hub/managed-agents/disconnect") {
+    await runHubAction(() => disconnectManagedAgents());
+    return;
+  }
+  if (method === "POST" && url.pathname === "/v1/hub/claude-code/connect") {
+    await runHubAction((body) => connectClaudeCodeRepo({ repoRoot: hubString(body, "repoRoot") ?? "", label: hubString(body, "label") }));
+    return;
+  }
+  if (method === "POST" && url.pathname === "/v1/hub/claude-code/disconnect") {
+    await runHubAction((body) => disconnectClaudeCodeRepo({ repoRoot: hubString(body, "repoRoot") ?? "" }));
     return;
   }
 

@@ -2,20 +2,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
-  connectClaudeCode,
-  disconnectClaudeCode,
-  HubCollectorService,
+  collectHubNow,
+  connectClaudeCodeRepo,
+  connectManagedAgents,
+  disconnectClaudeCodeRepo,
+  disconnectManagedAgents,
+  type ConnectManagedAgentsResult,
+  type HubCollectNowResult,
   HubInboxClient,
   listHubMirroredSessions,
-  isValidManagedAgentsLabel,
   loadManagedAgentsConfig,
   ManagedAgentsPuller,
   readManagedAgentsStatus,
-  removeManagedAgentsConfig,
   resolveManagedAgentsMirrorRoot,
-  saveManagedAgentsConfig,
   loadHubConfig,
-  loadHubIdentity,
   loadOrCreateHubIdentity,
   newHubToken,
   normalizeInboxUrl,
@@ -116,11 +116,6 @@ export function parseHubCommandOptions(args: string[]): HubOptions {
   return result;
 }
 
-function requireConfig(): HubConfig {
-  const config = loadHubConfig();
-  if (!config) throw new ScoutCliError("Scout Hub is not set up on this runtime. Run `scout hub init --inbox <url>` first.");
-  return config;
-}
 
 function runInit(options: HubOptions): { value: Record<string, unknown>; text: string } {
   if (!options.inbox) throw new ScoutCliError("scout hub init needs --inbox <url>");
@@ -160,17 +155,14 @@ function runInit(options: HubOptions): { value: Record<string, unknown>; text: s
 }
 
 function runConnect(options: HubOptions, cwd: string): { value: Record<string, unknown>; text: string } {
-  const config = requireConfig();
-  const identity = loadHubIdentity();
-  if (!identity) throw new ScoutCliError("This runtime has no Scout Hub key. Run `scout hub init --inbox <url>`.");
   const repoRoot = resolve(cwd, options.path ?? ".");
   let result;
   try {
-    result = connectClaudeCode({ repoRoot, config, recipientPublicKey: identity.publicKey, label: options.label });
+    result = connectClaudeCodeRepo({ repoRoot, label: options.label });
   } catch (error) {
     throw new ScoutCliError(error instanceof Error ? error.message : String(error));
   }
-  const host = new URL(config.inbox).host;
+  const host = new URL(result.inbox).host;
   const text = [
     result.changed.length ? `Connected ${result.repoRoot} as "${result.label}". Changed: ${result.changed.join(", ")}.` : `Already connected as "${result.label}"; nothing changed.`,
     `Reporter v${result.reporterVersion}, sha256 ${result.reporterSha256}`,
@@ -188,29 +180,24 @@ async function runConnectManagedAgents(options: HubOptions): Promise<{ value: Re
   const envName = options.apiKeyEnv ?? "ANTHROPIC_API_KEY";
   const apiKey = process.env[envName]?.trim();
   if (!apiKey) throw new ScoutCliError(`Set ${envName} to an API key of the workspace whose sessions Scout should read.`);
-  const previous = loadManagedAgentsConfig();
-  const label = options.label ?? previous?.label ?? "anthropic";
-  if (!isValidManagedAgentsLabel(label)) throw new ScoutCliError(`--label "${label}" must be letters, digits, dot, dash or underscore`);
-  const lookbackDays = options.sinceDays ? Number.parseInt(options.sinceDays, 10) : previous?.lookbackDays ?? 7;
-  if (!Number.isInteger(lookbackDays) || lookbackDays < 1 || lookbackDays > 90) throw new ScoutCliError("--since-days must be a whole number from 1 to 90");
-  const config = {
-    v: 1 as const, label, apiKey, lookbackDays,
-    ...(options.baseUrl ? { baseURL: options.baseUrl } : previous?.baseURL ? { baseURL: previous.baseURL } : {}),
-    createdAt: previous?.createdAt || new Date().toISOString(),
-  };
-  saveManagedAgentsConfig(config);
-  // Pull once now: it proves the key can read sessions, and fills the mirror.
-  const summary = await new ManagedAgentsPuller().pullOnce();
-  if (summary.error) {
-    if (!previous) removeManagedAgentsConfig();
-    throw new ScoutCliError(`Could not read Managed Agents sessions: ${summary.error}${previous ? "" : ". Nothing was saved."}`);
+  let lookbackDays: number | undefined;
+  if (options.sinceDays) {
+    lookbackDays = Number(options.sinceDays);
+    if (!/^\d+$/.test(options.sinceDays)) throw new ScoutCliError("--since-days must be a whole number from 1 to 90");
   }
+  let result: ConnectManagedAgentsResult;
+  try {
+    result = await connectManagedAgents({ apiKey, label: options.label, lookbackDays, baseURL: options.baseUrl });
+  } catch (error) {
+    throw new ScoutCliError(error instanceof Error ? error.message : String(error));
+  }
+  const { label } = result;
   const text = [
     `Connected Claude Managed Agents as "${label}". The key is kept in ${resolveHubHome()} (only you can read it).`,
-    `Found ${summary.listed} session${summary.listed === 1 ? "" : "s"} from the last ${lookbackDays} day${lookbackDays === 1 ? "" : "s"}; mirrored ${summary.appended} event${summary.appended === 1 ? "" : "s"}.`,
+    `Found ${result.listed} session${result.listed === 1 ? "" : "s"} from the last ${result.lookbackDays} day${result.lookbackDays === 1 ? "" : "s"}; mirrored ${result.appended} event${result.appended === 1 ? "" : "s"}.`,
     "The runtime keeps pulling every 15 seconds. Scout lists these sessions under their agent's name.",
   ].join("\n");
-  return { value: { label, lookbackDays, ...summary }, text };
+  return { value: { ...result }, text };
 }
 
 async function runStatus(): Promise<{ value: Record<string, unknown>; text: string }> {
@@ -287,15 +274,17 @@ function webhookStatusLines(lastWebhookAt: string | null): string[] {
 }
 
 async function runCollect(): Promise<{ value: Record<string, unknown>; text: string }> {
-  const managed = loadManagedAgentsConfig();
-  if (!loadHubConfig()) {
-    if (!managed) requireConfig();
-    const pulled = await new ManagedAgentsPuller().pullOnce();
-    if (pulled.error) throw new ScoutCliError(`Managed Agents pull failed: ${pulled.error}`);
-    return { value: { managedAgents: pulled }, text: managedAgentsPullText(pulled) };
+  let result: HubCollectNowResult;
+  try {
+    result = await collectHubNow();
+  } catch (error) {
+    throw new ScoutCliError(error instanceof Error ? error.message : String(error));
   }
-  const pulled = managed ? await new ManagedAgentsPuller().pullOnce() : null;
-  const summary = await new HubCollectorService().collectOnce();
+  const { claudeCode: summary, managedAgents: pulled } = result;
+  if (!summary) {
+    if (pulled?.error) throw new ScoutCliError(`Managed Agents pull failed: ${pulled.error}`);
+    return { value: { managedAgents: pulled }, text: managedAgentsPullText(pulled!) };
+  }
   if (summary.error) throw new ScoutCliError(`Collect failed: ${summary.error}`);
   const text = summary.notes.includes("another collector is running")
     ? "The runtime is collecting right now; try again in a moment."
@@ -322,7 +311,7 @@ export async function runHubCommand(context: ScoutCommandContext, args: string[]
       break;
     case "disconnect": {
       if (options.target === "managed-agents") {
-        const removed = removeManagedAgentsConfig();
+        const { removed } = disconnectManagedAgents();
         result = {
           value: { removed },
           text: removed ? "Forgot the Managed Agents API key. Sessions already mirrored stay; delete the mirror folder to drop them." : "Managed Agents was not connected.",
@@ -330,7 +319,7 @@ export async function runHubCommand(context: ScoutCommandContext, args: string[]
         break;
       }
       const repoRoot = resolve(context.cwd, options.path ?? ".");
-      const { changed } = disconnectClaudeCode(repoRoot);
+      const { changed } = disconnectClaudeCodeRepo({ repoRoot });
       result = { value: { repoRoot, changed }, text: changed.length ? `Removed from ${repoRoot}: ${changed.join(", ")}. Commit the change.` : "Nothing to remove." };
       break;
     }

@@ -95,7 +95,34 @@ Without webhooks, the puller polls Anthropic every 15 s. With webhooks, it pulls
 | Forget the Managed Agents key | `scout hub disconnect managed-agents`. Mirrored sessions stay. |
 | Change lookback or label | Run `connect managed-agents` again with the new flags. |
 | Turn a loop off on one runtime | `OPENSCOUT_HUB_COLLECTOR=0` or `OPENSCOUT_HUB_MANAGED_AGENTS=0` in the broker's environment |
-| Read status from code or a UI | `GET /v1/hub/status` on the broker. Local only (forwarded requests get 403). Same data as `status --json` without the inbox check, and no secrets. |
+| Do any of these from code or a UI | Use the broker API below. |
+
+## HTTP API
+
+The broker serves the same operations as the CLI. Use the CLI from a shell. Use the API from code or a UI. Both call the same functions in `packages/runtime/src/hub/actions.ts`, so they apply the same checks.
+
+| Route | Body | Returns |
+|---|---|---|
+| `GET /v1/hub/status` | none | Config, last collect and pull, mirrored sessions, webhook address. No inbox check. |
+| `POST /v1/hub/collect` | `{}` | `{ claudeCode, managedAgents }`: one summary each, `null` for a connection that is not set up. A failure is in the summary's `error`. |
+| `POST /v1/hub/managed-agents/connect` | `{ apiKey, label?, lookbackDays? }` | `{ label, lookbackDays, listed, appended, … }` |
+| `POST /v1/hub/managed-agents/disconnect` | `{}` | `{ removed }` |
+| `POST /v1/hub/claude-code/connect` | `{ repoRoot, label? }` (absolute path) | `{ repoRoot, label, changed, reporterSha256, … }` |
+| `POST /v1/hub/claude-code/disconnect` | `{ repoRoot }` | `{ repoRoot, changed }` |
+
+Access:
+- Every route is machine-local. A remote or forwarded request gets 403.
+- Every `POST` route needs a signed operator request: the `x-openscout-local-admin` headers, an HMAC made with the operator attribution key. Without it the broker answers 403 `operator_attribution_required`. The web app's server signs its broker calls when the runtime handed it the key. A plain `curl` does not sign, so it gets 403.
+- `GET /v1/hub/status` needs no signature. It holds no tokens or keys.
+- Results never contain a token or key. The API key goes in the request body, never in the URL.
+
+Errors are `{ error, detail }`:
+
+| Status | `error` | Meaning |
+|---|---|---|
+| 400 | `invalid_body`, `api_key_required`, `invalid_label`, `invalid_lookback`, `invalid_repo_root`, `connect_failed` | The request is wrong. `detail` says how. |
+| 409 | `hub_not_initialized` | The connection needs `scout hub init` first. |
+| 502 | `managed_agents_unreadable` | Anthropic refused the key or could not be reached. `detail` says whether anything was saved. |
 
 To drop mirrored sessions, delete the label's folder under the mirror. Ask the operator first: the vendor might no longer hold the data.
 
@@ -138,7 +165,7 @@ Cannot, today:
 ## Forbidden
 
 - Printing, logging or committing the read token, the runtime private key, the API key or the webhook signing secret.
-- Passing an API key as a command-line argument. Use an environment variable and `--api-key-env`.
+- Passing an API key as a command-line argument or in a URL. Use an environment variable and `--api-key-env`, or the API's request body.
 - Running `hub` commands against the operator's real hub folder from a test or a dev checkout. The CLI does not follow the dev instance; set `OPENSCOUT_HUB_HOME` to a folder under `~/.openscout/instances/` first and check where files land.
 - Deploying the inbox, changing Worker secrets, or committing reporter files to a repo without the operator's approval.
 - Editing mirror files by hand.
@@ -155,6 +182,8 @@ Cannot, today:
 | `packages/runtime/src/hub/mirror.ts` | path checks and ordered appends |
 | `packages/runtime/src/hub/managed-agents.ts` | Managed Agents config, puller, nudges |
 | `packages/runtime/src/hub/status.ts` | `readHubStatus` behind `GET /v1/hub/status` |
+| `packages/runtime/src/hub/actions.ts` | connect, disconnect and collect, shared by the CLI and the API |
+| `packages/runtime/src/broker-http-router.ts` | the `/v1/hub/*` routes and their access checks |
 | `packages/runtime/src/tail/managed-agents-source.ts` | Managed Agents sessions in tail and discovery |
 | `packages/runtime/src/claude-projects.ts` | adds the Claude mirror to Claude's project roots |
 | `integrations/hub-inbox/` | the inbox Worker, local server and tests |
@@ -165,5 +194,7 @@ Cannot, today:
 bun test packages/runtime/src/hub packages/runtime/src/tail
 cd integrations/hub-inbox && bun test src
 ```
+
+`packages/runtime/src/hub/hub-http.test.ts` starts a broker and checks that unsigned requests get 403 on every action, and that no response contains the key.
 
 `integrations/hub-inbox/src/end-to-end.test.ts` runs the reporter as a hook does, sends to the Worker, and checks that the collector rebuilds the transcript byte for byte and that a webhook reaches the runtime once.
