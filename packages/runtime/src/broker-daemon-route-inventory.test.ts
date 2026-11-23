@@ -78,6 +78,7 @@ const expectedRouteInventory = [
   "GET /v1/inbox",
   "GET /v1/inbox/stream",
   "GET /v1/integrations/setup",
+  "GET /v1/integrations/vercel-board/boards",
   "GET /v1/integrations/vercel-board/handoffs",
   "GET /v1/integrations/vercel-board/messages",
   "GET /v1/integrations/vercel-board/status",
