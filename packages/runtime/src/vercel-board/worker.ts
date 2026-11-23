@@ -122,6 +122,8 @@ export interface VercelBoardWorkerInput {
   profile: string;
   /** Every profile a call may name: the connection's role list. `profile` is always one of them. */
   profiles?: string[];
+  /** Also allow any valid profile name: each Scout agent writes as its own profile. `can` still narrows every call. */
+  agentProfiles?: boolean;
   /** The `x-board-can` text. The worker applies it to every call. */
   can: string;
   /** Null only for the in-memory test board. */
@@ -274,7 +276,7 @@ export class VercelBoardWorkerSupervisor {
       this.end(running, reason);
       if (!this.stopped) this.failed(reason);
     });
-    child.stdin!.write(`${JSON.stringify({ protocol: WORKER_PROTOCOL, generation, profile: this.input.profile, profiles: [...new Set([this.input.profile, ...(this.input.profiles ?? [])])], can: this.input.can, target: this.input.target })}\n`);
+    child.stdin!.write(`${JSON.stringify({ protocol: WORKER_PROTOCOL, generation, profile: this.input.profile, profiles: [...new Set([this.input.profile, ...(this.input.profiles ?? [])])], ...(this.input.agentProfiles ? { agentProfiles: true } : {}), can: this.input.can, target: this.input.target })}\n`);
 
     await ready;
     if (this.stopped) { this.end(running, "The Board worker was stopped."); throw new VercelBoardHttpError(503, "worker_stopped", "The Board worker is stopped."); }

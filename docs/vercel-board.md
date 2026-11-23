@@ -59,7 +59,9 @@ Two existing parts of core set the pattern:
 | Promote is frozen. | The code stays; nothing new builds on it. |
 | A `failed` task shows as waiting, labeled failed. | Board lets the owner reopen a failed task, and its dependents still wait on it. Someone owes a move. Scout does not add a failed state. |
 | Board owns `state`. Scout owns acceptance. | One writer per field. A move from Scout is a command to Board; the result returns as an event. |
-| Scout writes as the operator's principal with the `scout` profile. The acting agent is in a label. | Board profile names cannot hold Scout agent names, and short-lived sessions would fill the team's actor list. Labels stay on the board and do not sync out to other platforms. |
+| An agent writes as its own profile of the operator's principal, so Board shows `principal+<agent>`. Scout's planning and setup writes use the `scout` profile. The acting agent is also in a label. | Agent work must never show as the operator. `vercelBoardAgentProfile` makes a valid, stable profile name from the agent ID and never one a role holds. A task kept for a role (`for`) is still claimed as the role, because Board allows no other claimer; the label and the agent's posts name the agent. Labels stay on the board and do not sync out to other platforms. |
+| Every agent acts for an owner (`AgentDefinition.ownerId`). A local agent's owner is the operator. | The runtime stamps the owner when it stores a local agent, and `agentOwnerId` reads it. Hand-offs carry `scout.agentId` and `scout.ownerId`; an actor ref Scout wrote carries `scoutActorId` and `scoutOwnerId`; a held work item carries `metadata.board.scoutHolder` and `scoutHolderOwnerId`. |
+| A claim's brief is a direct ask from its requester. It does not go in the channel's room. | The requester is the operator when the operator picked the agent. Otherwise it is the task's author: the agent that wrote it as its own profile, the operator for their own principal and the `scout` profile, or another principal's mapped Board actor. The room is for the people on the channel; the agent is still added to it. Custody keeps the requester on the claim row, because the claim relabels the task. |
 | Key actors, the allowlist and the host lock on the principal ID. | A second person can be added later without migrating records. See [Multi-user readiness](#multi-user-readiness). |
 | Each host connects to the board on its own. No host holds the board for the others. | Board's claims already decide who does a task: one claim lands, and a claim that is over cannot write ([Board docs](https://vercel.com/docs/board); in the [agent swarm guide](https://vercel.com/docs/board/guides/agent-swarm) every worker talks to the board directly). A host keeps its own cursor, copy, claim tokens and outbox. An earlier design held each board on one custodian host; it rebuilt guarantees the board already gives, and it left the board dark on every other host. |
 | Do not add a shared integration framework. | T3, Slack and Board have different shapes. Two or three providers do not justify one. |
@@ -422,9 +424,9 @@ V1 is single user. Four rules in v1 keep a second person from being a rewrite:
 
 - Key the owner allowlist and every mapped Board actor on the principal ID.
   Do not key on a handle or a display name.
-- Write as the operator's own principal with the `scout` profile. A second
-  person's Scout writes as that person's principal, and Board keeps the two
-  apart.
+- Write as the operator's own principal, with the `scout` profile or the
+  acting agent's own profile. A second person's Scout writes as that
+  person's principal, and Board keeps the two apart.
 - Put the acting agent in a label on every outbound write.
 - Key the host lock on (board, principal), not on the board. Two people's
   Scouts, and two hosts of one person, can follow one board.
@@ -547,8 +549,8 @@ that were made after the architecture review.
      in a label on each planned task, and decide before pool rules or a second
      person whether a planned task needs an operator confirmation.
    - One piece of work must be one work item. Answered: a claim on a task
-     that is not promoted is an ordinary ask in the channel's room and makes
-     no work item. A claim on a promoted task attaches the ask to that work
+     that is not promoted is a direct ask from its requester, outside the
+     channel's room, and makes no work item. A claim on a promoted task attaches the ask to that work
      item through `collaborationRecordId`, and makes no second item.
 5. **One holder per board: resolved, removed.** No lock in one host can
    fence another host, and none is needed: the board's claims decide who does

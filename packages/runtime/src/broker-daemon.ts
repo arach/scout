@@ -82,6 +82,7 @@ import { brokerRouter } from "./broker-trpc-router.js";
 import { brokerOperatorSignalSchema } from "./broker-command-boundary-schemas.js";
 
 import {
+  agentOwnerId,
   type ActorIdentity,
   type AgentEndpoint,
   type AgentHarness,
@@ -2522,6 +2523,7 @@ const vercelBoardService = routeAliasDatabase ? new BrokerVercelBoardService({
   operatorId: operatorActorId,
   database: routeAliasDatabase,
   connectionsDirectory: join(controlHome, "vercel-board"),
+  agentOwner: agentId => agentOwnerId(runtime.agent(agentId), { localNodeId: nodeId, operatorId: operatorActorId }),
   recordWork: (record, options) => recordCollaborationDurably(record, options),
   appendWorkEvent: appendCollaborationEventDurably,
   work: id => runtime.collaborationRecord(id),

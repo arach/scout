@@ -555,6 +555,13 @@ WHERE latest.invocation_id = inv.id
       database.exec(VERCEL_BOARD_ROLES_SQL);
     },
   },
+  {
+    id: "vercel-board-custody-requester",
+    description: "Records who asked the agent for each Vercel Board claim: the operator when they picked the agent, else the task's author.",
+    apply(database) {
+      if (!hasColumn(database, "vercel_board_custody", "requested_by")) database.exec("ALTER TABLE vercel_board_custody ADD COLUMN requested_by TEXT");
+    },
+  },
 ];
 
 export function configureControlPlaneDatabase(database: ControlPlaneSqliteDatabase): void {

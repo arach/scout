@@ -18,8 +18,10 @@ export interface VercelBoardCustodyRow {
   agentId: string;
   workId: string;
   startedBy: string;
-  /** The Board profile the claim was made as: a role from the connection's list. Null on rows from before roles. */
+  /** The Board profile the claim was made as: a role, or the agent's own profile. Null on rows from before roles. */
   profile: string | null;
+  /** Who asked the agent for the work: the operator when they picked the agent, else the task's author. Null on older rows. */
+  requestedBy?: string | null;
   flightId: string | null;
   state: VercelBoardCustodyState;
   outcome: VercelBoardCustodyOutcome | null;
@@ -46,7 +48,7 @@ export interface VercelBoardOutboxRow {
 
 type CustodySql = {
   connection_id: string; task_id: string; attempt_id: string; epoch: number | null; token: string | null; until: number | null;
-  lease_seconds: number; agent_id: string; work_id: string; started_by: string; profile: string | null; flight_id: string | null; state: VercelBoardCustodyState;
+  lease_seconds: number; agent_id: string; work_id: string; started_by: string; profile: string | null; requested_by?: string | null; flight_id: string | null; state: VercelBoardCustodyState;
   outcome: VercelBoardCustodyOutcome | null; result: string | null; detail: string | null; created_at: number; updated_at: number;
 };
 type OutboxSql = {
@@ -56,7 +58,7 @@ type OutboxSql = {
 
 const custody = (row: CustodySql): VercelBoardCustodyRow => ({
   connectionId: row.connection_id, taskId: row.task_id, attemptId: row.attempt_id, epoch: row.epoch, token: row.token, until: row.until,
-  leaseSeconds: row.lease_seconds, agentId: row.agent_id, workId: row.work_id, startedBy: row.started_by, profile: row.profile, flightId: row.flight_id,
+  leaseSeconds: row.lease_seconds, agentId: row.agent_id, workId: row.work_id, startedBy: row.started_by, profile: row.profile, requestedBy: row.requested_by ?? null, flightId: row.flight_id,
   state: row.state, outcome: row.outcome, result: row.result, detail: row.detail, createdAt: row.created_at, updatedAt: row.updated_at,
 });
 const outbox = (row: OutboxSql): VercelBoardOutboxRow => ({
@@ -121,10 +123,10 @@ export class VercelBoardStore {
   insertCustody(row: Omit<VercelBoardCustodyRow, "createdAt" | "updatedAt">): void {
     this.quietCustody.delete(row.connectionId);
     const at = this.now();
-    this.database.query(`INSERT INTO vercel_board_custody (connection_id, task_id, attempt_id, epoch, token, until, lease_seconds, agent_id, work_id, started_by, profile, flight_id, state, outcome, result, detail, created_at, updated_at)
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17)`).run(
+    this.database.query(`INSERT INTO vercel_board_custody (connection_id, task_id, attempt_id, epoch, token, until, lease_seconds, agent_id, work_id, started_by, profile, requested_by, flight_id, state, outcome, result, detail, created_at, updated_at)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)`).run(
       row.connectionId, row.taskId, row.attemptId, row.epoch, row.token, row.until, row.leaseSeconds, row.agentId, row.workId,
-      row.startedBy, row.profile, row.flightId, row.state, row.outcome, row.result, row.detail, at);
+      row.startedBy, row.profile, row.requestedBy ?? null, row.flightId, row.state, row.outcome, row.result, row.detail, at);
   }
 
   updateCustody(connectionId: string, attemptId: string, patch: Partial<Pick<VercelBoardCustodyRow, "epoch" | "token" | "until" | "leaseSeconds" | "flightId" | "state" | "outcome" | "result" | "detail">>): void {

@@ -31,8 +31,8 @@ export class FakeVercelBoard {
   private faults: FakeVercelBoardFault[] = [];
   /** The profile the request being served writes as; null is the principal itself. */
   private profile: string | null = "scout";
-  /** The profiles a request may name, as the connection's role list does. */
-  readonly profiles = new Set(["scout", "builder", "reviewer"]);
+  /** Board takes any profile name under a principal: roles and each agent's own profile. */
+  readonly profiles = /^[A-Za-z][A-Za-z0-9-]{0,31}$/;
   now: () => number;
 
   constructor(options: { principal?: string; token?: string; now?: () => number } = {}) {
@@ -44,11 +44,11 @@ export class FakeVercelBoard {
   fault(fault: FakeVercelBoardFault): void { this.faults.push(fault); }
 
   /** Write as someone else, outside Scout. */
-  createTask(input: { channel: string; text: string; owner?: string; needs?: string[]; for?: string; as?: string | null }): string {
+  createTask(input: { channel: string; text: string; owner?: string; needs?: string[]; for?: string; as?: string | null; labels?: Record<string, string> }): string {
     const previous = this.profile;
     this.profile = input.as === undefined ? "scout" : input.as;
     try {
-      return this.makeTask(input.channel, input.text, {}, input.needs ?? [], input.owner ?? this.principal, null, input.for ?? null).id;
+      return this.makeTask(input.channel, input.text, input.labels ?? {}, input.needs ?? [], input.owner ?? this.principal, null, input.for ?? null).id;
     } finally { this.profile = previous; }
   }
   /** Another worker claims a task. */
@@ -210,7 +210,7 @@ export class FakeVercelBoard {
     const error = (status: number, code: string, message = code, extra: Record<string, string> = {}) => json(status, { error: { code, message } }, extra);
     if (headers.authorization !== `Bearer ${this.token}`) return error(401, "unauthorized");
     const profile = headers["x-board-profile"] ?? null;
-    if (profile !== null && !this.profiles.has(profile)) return error(400, "invalid_profile");
+    if (profile !== null && !this.profiles.test(profile)) return error(400, "invalid_profile");
     this.profile = profile;
     if (!headers["x-board-can"]) return error(400, "invalid_scope", "Scout always narrows");
     const route = `${method} ${path.replace(/\/[^/]+\/(claim|renew|complete|fail|release|block|unblock|labels)$/, "/:id/$1").replace(/^\/(messages|posts|tasks\/batch)\/[^/]+$/, "/$1/:id")}`;

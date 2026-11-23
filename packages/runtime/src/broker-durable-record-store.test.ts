@@ -38,6 +38,7 @@ afterEach(() => {
 function createTestRecordStore(options: {
   beforeAppend?: () => Promise<void>;
   memberConversationIds?: (actorId: string) => string[];
+  operatorActorId?: string;
 } = {}) {
   const runtime = createInMemoryControlRuntime({}, { localNodeId: "node-1" });
   const appended: BrokerJournalEntry[][] = [];
@@ -70,6 +71,7 @@ function createTestRecordStore(options: {
     knownInvocations,
     invocationDispatchJobFor: (id) => jobs.get(id) ?? null,
     memberConversationIds: options.memberConversationIds,
+    operatorActorId: options.operatorActorId,
   });
 
   return {
@@ -470,6 +472,16 @@ describe("BrokerDurableRecordStore", () => {
 
     expect(appended.flat().map(entry => entry.kind)).toEqual(["agent.endpoint.upsert"]);
     expect(runtime.peek().endpoints["endpoint-1"]?.metadata?.lastSeenAt).toBe(2);
+  });
+
+  test("a local agent acts for the operator: its owner is stamped when it names none", async () => {
+    const { runtime, records } = createTestRecordStore({ operatorActorId: "operator" });
+    await records.upsertAgent(testAgent());
+    await records.upsertAgent({ ...testAgent(), id: "agent-remote", authorityNodeId: "node-2" });
+    await records.upsertAgent({ ...testAgent(), id: "agent-owned", ownerId: "someone-else" });
+    expect(runtime.peek().agents["agent-1"]?.ownerId).toBe("operator");
+    expect(runtime.peek().agents["agent-remote"]?.ownerId).toBeUndefined();
+    expect(runtime.peek().agents["agent-owned"]?.ownerId).toBe("someone-else");
   });
 
   test("skips exact duplicate agent and endpoint upserts", async () => {
