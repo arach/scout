@@ -134,3 +134,38 @@ test("collect reports the first waiting offset per file until the gap fills", as
   expect(inbox.bucket.objects.size).toBe(0);
   expect(readFileSync(join(mirrorRoot, label, file), "utf8")).toBe("{}\n".repeat(4));
 });
+
+test("a Managed Agents webhook reaches the runtime as a note, and only once", async () => {
+  const { Webhook } = await import("standardwebhooks");
+  const work = mkdtempSync(join(tmpdir(), "scout-hub-e2e-"));
+  const secret = `whsec_${Buffer.alloc(32, 3).toString("base64")}`;
+  const inbox = serveLocalInbox({ readToken: "shr_e2e", writeToken: "shw_e2e", webhookSigningKey: secret });
+  cleanup.push(() => { inbox.server.stop(true); rmSync(work, { recursive: true, force: true }); });
+  const hubHome = join(work, "hub");
+  saveHubConfig({ v: 1, inbox: inbox.url, readToken: "shr_e2e", writeToken: "shw_e2e", createdAt: "" }, hubHome);
+  loadOrCreateHubIdentity(hubHome);
+
+  const body = JSON.stringify({ type: "event", id: "whe_e2e1", created_at: new Date().toISOString(), data: { type: "session.status_idled", id: "sesn_e2e" } });
+  const now = new Date();
+  const posted = await fetch(`${inbox.url}/v1/inbox/webhooks/anthropic`, {
+    method: "POST",
+    headers: { "webhook-id": "whe_e2e1", "webhook-timestamp": String(Math.floor(now.getTime() / 1000)), "webhook-signature": new Webhook(secret).sign("whe_e2e1", now, body) },
+    body,
+  });
+  expect(posted.status).toBe(204);
+
+  // A runtime that does not act on notes leaves them for one that does.
+  const passive = await new HubCollectorService({ home: hubHome, mirrorRoot: join(hubHome, "claude", "projects") }).collectOnce();
+  expect(passive).toMatchObject({ configured: true, nudges: 0 });
+  expect(inbox.bucket.objects.size).toBe(1);
+
+  const seen: string[] = [];
+  const collector = new HubCollectorService({
+    home: hubHome, mirrorRoot: join(hubHome, "claude", "projects"),
+    onNudges: (nudges) => seen.push(...nudges.map((nudge) => `${nudge.type} ${nudge.resourceId}`)),
+  });
+  expect(await collector.collectOnce()).toMatchObject({ nudges: 1 });
+  expect(seen).toEqual(["session.status_idled sesn_e2e"]);
+  expect(inbox.bucket.objects.size).toBe(0);
+  expect(await collector.collectOnce()).toMatchObject({ nudges: 0 });
+});

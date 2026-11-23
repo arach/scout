@@ -8,6 +8,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { ManagedAgentsSource } from "../tail/managed-agents-source.js";
 import type { DiscoveredTranscript, TailContext } from "../tail/types.js";
 import { ManagedAgentsPuller, saveManagedAgentsConfig, type ManagedAgentsConfig } from "./managed-agents.js";
+import { readHubStatus } from "./status.js";
 
 const KEY = "sk-ant-test-key";
 type FakeEvent = { id: string; type: string; processed_at: string | null; [key: string]: unknown };
@@ -220,5 +221,38 @@ describe("Managed Agents tail source", () => {
     } finally {
       delete process.env.OPENSCOUT_TAIL_CLAUDE_PROJECTS_ROOT;
     }
+  });
+});
+
+describe("Managed Agents webhooks and status", () => {
+  test("a webhook note starts a pass at once, and the status says when it came", async () => {
+    const { home, mirror } = setup();
+    fake.sessions = [session("sesn_a", 1, [{ id: "e1", type: "agent.message", processed_at: at(2), content: [{ type: "text", text: "hi" }] }])];
+    const puller = new ManagedAgentsPuller({
+      home, mirrorRoot: mirror, intervalMs: 3_600_000, webhookIntervalMs: 3_600_000,
+      client: (c) => new Anthropic({ apiKey: c.apiKey, baseURL: c.baseURL, maxRetries: 0 }),
+    });
+    puller.start(); // the first scheduled pass is seconds away
+    puller.nudge(["sesn_a"]);
+    const deadline = Date.now() + 3_000;
+    while (!existsSync(join(mirror, "acme", "sesn_a.jsonl")) && Date.now() < deadline) await Bun.sleep(20);
+    await puller.stop();
+    expect(lines(join(mirror, "acme", "sesn_a.jsonl")).map((event) => event.id)).toEqual(["e1"]);
+    const status = JSON.parse(readFileSync(join(home, "managed-agents.status.json"), "utf8"));
+    expect(Date.parse(status.lastWebhookAt)).toBeGreaterThan(Date.now() - 10_000);
+    puller.nudge([]); // nothing to do: no pass, no error
+  });
+
+  test("hub status lists mirrored sessions with their agent, and never the key", async () => {
+    const { home, mirror, puller } = setup();
+    process.env.OPENSCOUT_HUB_MANAGED_AGENTS_MIRROR_ROOT = mirror;
+    fake.sessions = [session("sesn_a", 1, [{ id: "e1", type: "agent.message", processed_at: at(2), content: [{ type: "text", text: "hi" }] }], { status: "idle" })];
+    await puller.pullOnce();
+    const status = readHubStatus(home);
+    expect(status.managedAgents).toMatchObject({ configured: true, label: "acme", lookbackDays: 7, lastPull: { listed: 1, appended: 1 } });
+    expect(status.managedAgents.sessions).toEqual([expect.objectContaining({ label: "acme", sessionId: "sesn_a", title: "Task sesn_a", status: "idle", agent: "repo-reviewer" })]);
+    expect(status.claudeCode).toMatchObject({ configured: false, inbox: null });
+    expect(status.webhooks.anthropic).toEqual({ url: null, lastWebhookAt: null });
+    expect(JSON.stringify(status)).not.toContain(KEY);
   });
 });

@@ -2502,14 +2502,20 @@ async function cancelBoardFlight(flightId: string, reason: string): Promise<void
 // The Vercel Board adapter. It runs every connection this host made; the
 // credential and claim tokens never leave this host.
 // Scout Hub: mirror cloud sessions sealed to this runtime. Idle until `scout hub init`.
-const hubCollector = process.env.OPENSCOUT_HUB_COLLECTOR === "0"
-  ? null
-  : new HubCollectorService({ log: (message) => console.warn(message) });
 // Claude Managed Agents: pull recent sessions with an API key. Idle until
 // `scout hub connect managed-agents`.
 const managedAgentsPuller = process.env.OPENSCOUT_HUB_MANAGED_AGENTS === "0"
   ? null
   : new ManagedAgentsPuller({ log: (message) => console.warn(message) });
+const hubCollector = process.env.OPENSCOUT_HUB_COLLECTOR === "0"
+  ? null
+  : new HubCollectorService({
+    log: (message) => console.warn(message),
+    // Managed Agents webhooks reach the inbox; each one starts a pull now.
+    onNudges: (nudges) => managedAgentsPuller?.nudge(
+      nudges.filter((nudge) => nudge.provider === "anthropic" && nudge.type.startsWith("session.")).map((nudge) => nudge.resourceId),
+    ),
+  });
 const vercelBoardService = routeAliasDatabase ? new BrokerVercelBoardService({
   nodeId,
   operatorId: operatorActorId,

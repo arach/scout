@@ -14,6 +14,17 @@ import { loadHubConfig, loadHubIdentity, resolveHubClaudeMirrorRoot, resolveHubH
 
 export type HubInboxItem = { key: string; size: number; uploaded: string };
 
+/** A webhook the inbox received for this runtime: what changed, never its content. */
+export type HubInboxNudge = {
+  key: string;
+  provider: string;
+  eventId: string;
+  type: string;
+  resourceId: string;
+  createdAt: string | null;
+  received: string;
+};
+
 export class HubInboxError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -37,8 +48,16 @@ export class HubInboxClient {
     return response;
   }
 
-  async health(): Promise<{ ok: boolean; pending?: number }> {
-    return (await this.request("/v1/inbox/health")).json() as Promise<{ ok: boolean; pending?: number }>;
+  async health(): Promise<{ ok: boolean; pending?: number; webhooks?: Record<string, boolean> }> {
+    return (await this.request("/v1/inbox/health")).json() as Promise<{ ok: boolean; pending?: number; webhooks?: Record<string, boolean> }>;
+  }
+
+  async nudges(): Promise<HubInboxNudge[]> {
+    return ((await (await this.request("/v1/inbox/nudges")).json()) as { items: HubInboxNudge[] }).items;
+  }
+
+  async deleteNudge(key: string): Promise<void> {
+    await this.request(`/v1/inbox/nudges/${encodeURIComponent(key)}`, { method: "DELETE" });
   }
 
   async pending(after?: string, limit = 100): Promise<{ items: HubInboxItem[]; cursor: string | null }> {
@@ -75,6 +94,8 @@ export type HubCollectSummary = {
   waitingFiles: HubWaitingFile[];
   rejected: number;
   sessions: string[];
+  /** Webhook notes handed to their puller this pass. */
+  nudges: number;
   error?: string;
   notes: string[];
 };
@@ -88,6 +109,8 @@ export type HubCollectorOptions = {
   maxItemsPerPass?: number;
   fetch?: typeof fetch;
   log?: (message: string) => void;
+  /** Receives webhook notes. They are deleted from the inbox once this returns. */
+  onNudges?: (nudges: HubInboxNudge[]) => void;
 };
 
 export class HubCollectorService {
@@ -135,7 +158,7 @@ export class HubCollectorService {
 
   private async pass(): Promise<HubCollectSummary> {
     const summary: HubCollectSummary = {
-      at: new Date().toISOString(), configured: false, fetched: 0, appended: 0, duplicate: 0, waiting: 0, waitingFiles: [], rejected: 0, sessions: [], notes: [],
+      at: new Date().toISOString(), configured: false, fetched: 0, appended: 0, duplicate: 0, waiting: 0, waitingFiles: [], rejected: 0, sessions: [], nudges: 0, notes: [],
     };
     let config;
     let identity: HubKeyPair | null;
@@ -160,7 +183,9 @@ export class HubCollectorService {
       mkdirSync(lock);
     }
     try {
-      await this.drain(new HubInboxClient(config.inbox, config.readToken, this.options.fetch), identity, summary);
+      const client = new HubInboxClient(config.inbox, config.readToken, this.options.fetch);
+      await this.drain(client, identity, summary);
+      await this.takeNudges(client, summary);
       this.lastError = null;
     } catch (error) {
       summary.error = error instanceof Error ? error.message : String(error);
@@ -224,6 +249,21 @@ export class HubCollectorService {
       await client.delete(chunk.key);
     }
     summary.sessions = [...sessions];
+  }
+
+  private async takeNudges(client: HubInboxClient, summary: HubCollectSummary): Promise<void> {
+    if (!this.options.onNudges) return; // nothing here acts on them; leave them for a runtime that does
+    let nudges: HubInboxNudge[];
+    try {
+      nudges = await client.nudges();
+    } catch (error) {
+      if (error instanceof HubInboxError && error.status === 404) return; // an inbox from before webhooks
+      throw error;
+    }
+    if (nudges.length === 0) return;
+    this.options.onNudges(nudges);
+    for (const nudge of nudges) await client.deleteNudge(nudge.key);
+    summary.nudges = nudges.length;
   }
 
   private finish(summary: HubCollectSummary): HubCollectSummary {

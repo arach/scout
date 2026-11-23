@@ -9,5 +9,8 @@
     "test": "bun test src",
     "dev": "bun src/serve-local.ts",
     "deploy": "bunx wrangler@4 deploy"
+  },
+  "dependencies": {
+    "standardwebhooks": "1.0.0"
   }
 }
