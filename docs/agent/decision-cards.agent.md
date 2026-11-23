@@ -183,6 +183,7 @@ type OperatorCardView = {
   createdAt: number;
   state: "open"|"needs_material"|"answered"|"defaulted"|"closed";
   plain: { question: string; options: string[]; because?: string; defaultAction?: string; answerDeadline?: number };
+  subject?: { kind: "show"; itemId: string; showId: string };   // what the ask is about; see Subject
   card?: DecisionCard | PermissionCard;
   origin?: "agent"|"synthesized"|"permission";
   synthesis?: { outcome: "card"|"question"|"failed"; sourceHash: string; model?: string;
@@ -247,6 +248,23 @@ request, and 502 when delivery was not confirmed.
 | MCP | `decision_read { id?, all? }` (read-only) |
 
 The routes are machine-local. A remote transport gets 403.
+
+## Subject
+
+An operator ask can name the render it is about, so a surface can put the
+question on that page instead of reading the body:
+
+- CLI: `scout ask --operator --subject show:<itemId>:<showId> [--decision <file>] "…"`
+- MCP: `ask { operator: true, subject: { kind: "show", itemId, showId }, … }`
+- Wire: `task.subject` on `/v1/deliver`. The task object is strict, so a runtime
+  older than this field refuses the ask instead of dropping the subject.
+
+`itemId` and `showId` are the values `scout show` returned (64 hex characters,
+and the show's 36-character id). `--subject` requires `--operator`. The runtime
+checks the shape only, not that the show exists, because the show can live on
+another host. It keeps the subject in the task's invocation metadata and the
+ask message's metadata, and `OperatorCardView.subject` returns it with or
+without a card. Answers do not change: `POST /v1/decisions/answer` as above.
 
 ## Invariants
 

@@ -1,5 +1,22 @@
 import { expect, test } from "bun:test";
-import { taskNotificationPolicy, validateTaskAsk, validateTaskReply, type ScoutTaskAsk } from "./tasks.js";
+import { parseTaskSubject, taskNotificationPolicy, taskSubjectOf, validateTaskAsk, validateTaskReply, type ScoutTaskAsk } from "./tasks.js";
+
+const ITEM = "a".repeat(64);
+const SHOW = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+test("a show subject names one render of one page, on operator asks only", () => {
+  const subject = { kind: "show" as const, itemId: ITEM, showId: SHOW };
+  expect(parseTaskSubject(`show:${ITEM}:${SHOW}`)).toEqual(subject);
+  for (const bad of ["", `show:${ITEM}`, `page:${ITEM}:${SHOW}`, `show:${ITEM}:${SHOW}:x`, `show:${SHOW}:${ITEM}`, `show:${ITEM.toUpperCase()}:${SHOW}`]) {
+    expect(() => parseTaskSubject(bad)).toThrow("--subject takes show:<itemId>:<showId>");
+  }
+  expect(taskSubjectOf({ ...subject, extra: 1 })).toEqual(subject);
+  expect(taskSubjectOf("show")).toBeUndefined();
+  expect(taskSubjectOf({ kind: "show", itemId: ITEM })).toBeUndefined();
+  expect(() => validateTaskAsk(task({ operator: true, subject }), {})).not.toThrow();
+  expect(() => validateTaskAsk(task({ operator: true, options: ["ship", "cut"], subject }), {})).not.toThrow();
+  expect(() => validateTaskAsk(task({ subject }), { to: "worker" })).toThrow("--subject requires --operator");
+  expect(() => validateTaskAsk(task({ operator: true, subject: { ...subject, showId: "x" } }), {})).toThrow("--subject takes");
+});
 
 const task = (patch: Partial<ScoutTaskAsk> = {}): ScoutTaskAsk => ({ version: 1, ...patch });
 const CALLBACK = "export default ({ result, scout }) => scout.open(result.files[0]);";

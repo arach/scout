@@ -75,6 +75,14 @@ test("missing values do not consume another flag and implicit asks are strict to
   expect(() => parseImplicitAskCommandOptions(["--to", "worker", "--permission", "review"], "/repo")).toThrow("--permission requires --operator");
 });
 
+test("--subject names a shown render on an operator ask, and only there", () => {
+  const item = "e".repeat(64), show = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+  expect(parseAskCommandOptions(["--operator", "--subject", `show:${item}:${show}`, "Ship this, or cut section 4?"], "/repo").task)
+    .toMatchObject({ operator: true, subject: { kind: "show", itemId: item, showId: show } });
+  expect(() => parseAskCommandOptions(["--to", "worker", "--subject", `show:${item}:${show}`, "review"], "/repo")).toThrow("--subject requires --operator");
+  expect(() => parseAskCommandOptions(["--operator", "--subject", "show:abc", "review"], "/repo")).toThrow("--subject takes show:<itemId>:<showId>");
+  expect(() => parseAskCommandOptions(["--operator", "--subject", `show:${item}:${show}`, "--subject", `show:${item}:${show}`, "review"], "/repo")).toThrow("only once");
+});
 test("an agent ask accepts a reason and --notify without --operator", () => {
   expect(parseAskCommandOptions(["--to", "worker", "--because", "the build is red", "rerun checks"], "/repo").task)
     .toMatchObject({ because: "the build is red" });

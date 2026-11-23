@@ -4590,6 +4590,7 @@ export function createScoutMcpServer(options: {
         callback: z.string().min(1).optional().describe("Local path of a JavaScript module file, e.g. open-page.js holding: export default ({ result, scout }) => scout.open(result.files[0]); The file is read here and sent with the task. The runtime on the worker's host runs it when the task ends, in a sandbox with no file, process or network access and no imports. Its default export gets { result, scout }: result has taskId, state (completed, failed or cancelled), reply (the final reply text) and files (existing files the reply names by absolute path); scout.open(path) opens an html, pdf or image file; console.log writes to the runtime log. It is not part of the worker's prompt. New tasks only."),
         image: z.string().optional().describe("Local image path."),
         decision: z.union([z.string().min(1), z.record(z.string(), z.unknown())]).optional().describe("Operator tasks only: a decision card, as a local JSON file path (our shape or a decision-pack pack.json, path#id picks one decision) or the card itself. Exactly one pick, 2-3 options keyed A, B, C with label, result and undo (easy or hard), door one_way or two_way, a defaultKey only on a two-way door. Option pictures are local paths ({ path, callouts }); they upload as attachments. Labels become options. See docs/agent/decision-cards.agent.md."),
+        subject: z.object({ kind: z.literal("show"), itemId: z.string().min(1), showId: z.string().min(1) }).strict().optional().describe("Operator tasks only: the render under review, as the itemId and id that show returned. Surfaces put the question on that page."),
         completion: completionRequestSchema.optional().describe("Require an explicit final reply; exact local id or session targets only, with a stable requestId."),
         relation: completionRelationSchema.optional().describe("Join child work or continue a parent flight; requires a stable requestId."),
         requestId: z.string().min(1).max(256).optional().describe("Requester-scoped idempotency key; reuse on retries."),
@@ -4678,7 +4679,7 @@ export function createScoutMcpServer(options: {
     },
     async ({
       requestId,
-      operator, ref, continue: predecessor, cancel, fyi, notify, defaultAction, options: answerOptions, permission, because, window, callback, image, decision,
+      operator, ref, continue: predecessor, cancel, fyi, notify, defaultAction, options: answerOptions, permission, because, window, callback, image, decision, subject,
       completion,
       relation,
       to,
@@ -4761,7 +4762,7 @@ export function createScoutMcpServer(options: {
         ? await readDecisionFile(resolve(resolvedCurrentDirectory, decision))
         : await prepareDecision(decision, resolvedCurrentDirectory);
       const task = { version: 1 as const, operator, ref, continue: predecessor, cancel, fyi, notify, defaultAction, options: answerOptions, permission, because, window,
-        ...(taskCallback ? { callback: taskCallback } : {}), ...(taskDecision ? { decision: taskDecision.decision } : {}) };
+        ...(taskCallback ? { callback: taskCallback } : {}), ...(taskDecision ? { decision: taskDecision.decision } : {}), ...(subject ? { subject } : {}) };
       validateTaskAsk(task, { to: targetTo, channel, capability: !predecessor && Boolean(targetProjectPath || profile),
         execution: Boolean(runtime || harness || model || reasoningEffort || placement || onHost || projectPath || profile || workspace === "new_worktree" || session === "new"), relation: Boolean(relation),
         decisionImages: taskDecision?.images.length ?? 0 });

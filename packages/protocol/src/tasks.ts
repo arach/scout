@@ -1,5 +1,29 @@
 import { FLIGHT_WAITING_ON_SUMMARY_MAX_LENGTH, parseReplyWaitingOn } from "./invocations.js";
 import { applyDecisionToTask, normalizeDecisionCard, validateDecisionCard, type DecisionCardSubmission } from "./decision-cards.js";
+import { SHOW_ID_PATTERN, SHOW_ITEM_ID_PATTERN } from "./shows.js";
+/**
+ * What an operator ask is about, so a surface can put the question on the
+ * thing itself instead of reading the body. A `show` subject names one fixed
+ * render (`showId`) of one page (`itemId`), as `POST /v1/shows` returned them.
+ * The runtime checks the shape, not that the show exists: the show may live
+ * on another host.
+ */
+export type ScoutTaskSubject = { kind: "show"; itemId: string; showId: string };
+/** The subject when `value` is a well-formed one, else undefined. For readers of stored metadata. */
+export function taskSubjectOf(value: unknown): ScoutTaskSubject | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { kind, itemId, showId } = value as Record<string, unknown>;
+  if (kind !== "show" || typeof itemId !== "string" || typeof showId !== "string") return undefined;
+  if (!SHOW_ITEM_ID_PATTERN.test(itemId) || !SHOW_ID_PATTERN.test(showId)) return undefined;
+  return { kind, itemId, showId };
+}
+/** `--subject show:<itemId>:<showId>`, the CLI's spelling of a show subject. */
+export function parseTaskSubject(value: string): ScoutTaskSubject {
+  const [kind, itemId, showId, ...rest] = value.trim().split(":");
+  const subject = rest.length ? undefined : taskSubjectOf({ kind, itemId, showId });
+  if (!subject) throw new Error("--subject takes show:<itemId>:<showId>, the itemId and id that scout show returned");
+  return subject;
+}
 /** Versioned ask/reply semantics. Old peers must be refused before dispatch. */
 export const SCOUT_TASKS_CAPABILITY = "ask-reply/1";
 export type ScoutTaskAsk = {
@@ -34,6 +58,8 @@ export type ScoutTaskAsk = {
    * `defaultAction`. See docs/agent/decision-cards.agent.md.
    */
   decision?: DecisionCardSubmission;
+  /** Operator asks only: the render under review. See {@link ScoutTaskSubject}. */
+  subject?: ScoutTaskSubject;
 };
 /**
  * `ask --callback <file>`: the source of the asker's callback file, read on
@@ -91,6 +117,10 @@ export function validateTaskAsk(task: ScoutTaskAsk, route: {
   if (task.callback !== undefined && (typeof task.callback?.code !== "string" || !task.callback.code.trim() || task.callback.code.length > SCOUT_TASK_CALLBACK_MAX_CODE_LENGTH)) throw new Error(`--callback takes a JavaScript module file of up to ${SCOUT_TASK_CALLBACK_MAX_CODE_LENGTH} characters`);
   if (task.callback !== undefined && (task.fyi || task.ref || task.cancel || task.operator || route.channel)) throw new Error("--callback belongs to a new task an agent carries out; it cannot be combined with --fyi, --ref, --cancel, --operator or --channel");
   if (task.decision !== undefined) validateTaskDecision(task, route.decisionImages);
+  if (task.subject !== undefined) {
+    if (!task.operator) throw new Error("--subject requires --operator: it names what the operator is asked about");
+    if (!taskSubjectOf(task.subject)) throw new Error("--subject takes show:<itemId>:<showId>, the itemId and id that scout show returned");
+  }
 }
 /**
  * The rules for `--decision`: an operator task that expects an answer, a valid

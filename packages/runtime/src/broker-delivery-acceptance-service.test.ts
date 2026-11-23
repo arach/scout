@@ -1748,6 +1748,17 @@ describe("two-verb acceptance", () => {
     expect(h.dispatchedInvocations).toHaveLength(0);
     expect(h.operatorSignals[0]).toMatchObject({ signal: { notificationPolicy: { requested: true, priority: "normal" } } });
   });
+  test("an operator ask's subject is kept on its task and its message", async () => {
+    const h = createHarness({ isOperatorTarget: () => true, now: 100 });
+    const subject = { kind: "show" as const, itemId: "c".repeat(64), showId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" };
+    await h.service.accept({ requestId: "operator-subject", intent: "consult", body: "Ship this, or cut section 4?",
+      requesterId: "agent-1", target: { kind: "agent_label", label: "operator" }, task: { version: 1, operator: true, options: ["ship", "cut"], subject } });
+    expect(h.acceptedInvocations[0]?.metadata?.subject).toEqual(subject);
+    expect(h.postedMessages[0]?.metadata?.subject).toEqual(subject);
+    expect(h.operatorSignals[0]).toBeDefined();
+    await expect(h.service.accept({ requestId: "agent-subject", intent: "consult", body: "Review it", requesterId: "agent-1",
+      target: { kind: "agent_id", agentId: "agent-2" }, task: { version: 1, subject } })).rejects.toThrow("--subject requires --operator");
+  });
   test.each([false, true])("operator FYI notify=%s stores policy and never creates work", async notify => {
     const h = createHarness({ isOperatorTarget: () => true });
     await h.service.accept({ requestId: "operator-fyi", intent: "consult", body: "Deploy finished", requesterId: "agent-1",

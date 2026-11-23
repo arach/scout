@@ -48,6 +48,8 @@ export function renderAskCommandHelp(): string {
     "                        (Ready, with Continue or Hold). Use it only for work the operator",
     "                        is waiting on, not to make an ask asynchronous",
     "  --image <path>        attach PNG, JPEG, GIF, or WebP evidence",
+    "  --subject show:<itemId>:<showId>  operator ask about one shown render; use the",
+    "                        itemId and id that scout show returned",
     "  --decision <file>     operator decision card: our JSON shape or one decision-pack",
     "                        pack.json decision (<file>#<id> picks one). Pictures upload as",
     "                        attachments; labels become --option. See docs/agent/decision-cards.agent.md",

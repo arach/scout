@@ -36,6 +36,17 @@ test("a task ask carries its callback through the boundary, and the task object 
   expect(brokerDeliverRequestSchema.safeParse({ ...payload, task: { version: 1, onDone: "open it" } }).success).toBe(false);
 });
 
+test("an operator ask carries a show subject through the boundary, and only a well-formed one", () => {
+  const subject = { kind: "show", itemId: "b".repeat(64), showId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" };
+  const payload = { requestId: "ask-2", body: "Ship this, or cut section 4?", intent: "task_ask",
+    task: { version: 1, operator: true, subject }, target: { kind: "agent_label", label: "operator" } };
+  expect(brokerDeliverRequestSchema.parse(payload)).toMatchObject({ task: { subject } });
+  expect(brokerDeliverRequestSchema.parse({ ...payload, task: { version: 1, operator: true } }).task).not.toHaveProperty("subject");
+  for (const bad of [{ ...subject, kind: "page" }, { ...subject, itemId: "short" }, { ...subject, showId: "../x" }, { ...subject, note: "extra" }, "show"]) {
+    expect(brokerDeliverRequestSchema.safeParse({ ...payload, task: { version: 1, operator: true, subject: bad } }).success).toBe(false);
+  }
+});
+
 describe("brokerInvocationRequestSchema execution.turnBudgetMs", () => {
   test("accepts an execution turn budget up to the 6 h bound", () => {
     const parsed = brokerInvocationRequestSchema.safeParse({

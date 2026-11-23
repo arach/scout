@@ -33,12 +33,21 @@ Agents must still choose safe content.
 Every route has mesh tier `local` and independently refuses non-local transport,
 peer, guest, scoped, or missing transport context. They are not forwarded.
 
-- `GET /v1/shows/capability` → `{ "shows.v1": true, fileBytes, storeBytes,
-  records, captionCharacters }`. Check this boolean, not a version string.
-- `POST /v1/shows` takes `{ path, caption?, caller: { actorId,
+- `GET /v1/shows/capability` → `{ "shows.v1": true, "shows.requestId": true,
+  fileBytes, storeBytes, records, captionCharacters, requestIdCharacters }`.
+  Check these booleans, not a version string.
+- `POST /v1/shows` takes `{ path, caption?, requestId?, caller: { actorId,
   currentDirectory, metadata?: { sessionId?, harness? } } }` and returns HTTP
   201 `{ show: ScoutShow }`. Browser-origin writes are refused. The JSON body
   cap is 16 KiB; bytes are copied directly by the runtime, not base64 uploaded.
+- `requestId` (1 to 256 characters) makes a retry safe. It is scoped to the
+  caller's `actorId`. When that agent's retained shows already hold the id with
+  the same canonical source path and caption, the runtime copies nothing and
+  returns HTTP 200 `{ show, replayed: true }` with the first show. The same id
+  with another path or caption is refused with HTTP 409
+  `show_request_id_reused_with_other_content`. After the first show is evicted,
+  the id is free again and a retry makes a new version. A runtime without
+  `shows.requestId` refuses the field with HTTP 400 `invalid_show_request`.
 - `GET /v1/shows?projectRoot=<absolute-root>&since=<milliseconds>` returns
   `{ shows: ScoutShow[] }` in ascending creation order. `since` is exclusive
   and defaults to zero. This lists retained versions, not just newest cards.
@@ -78,9 +87,15 @@ peer, guest, scoped, or missing transport context. They are not forwarded.
   byteSize: number;
   sha256: string;
   caption?: string;
+  requestId?: string;
   createdAt: number;
 }
 ```
+
+An operator ask about a show names it with
+`subject: { kind: "show", itemId, showId }` (`scout ask --operator --subject
+show:<itemId>:<showId>`). See
+[decision-cards.agent.md](./decision-cards.agent.md#subject).
 
 Project roots collapse linked worktrees through Git's common directory. Worktree
 and source paths are canonical absolute paths. Outside Git, project root and

@@ -468,7 +468,7 @@ export class BrokerDeliveryAcceptanceService {
         ...(task.fyi ? { workItem: undefined, collaborationRecordId: undefined, execution: undefined, invocationMetadata: undefined } :
           { workItem: payload.workItem ?? { title: defaultTaskWorkItemTitle(payload.body) } }),
         messageMetadata: { ...payload.messageMetadata, taskVersion: 1, ...(policy ? { notificationPolicy: policy } : {}),
-          ...(task.because ? { because: task.because } : {}) },
+          ...(task.because ? { because: task.because } : {}), ...(task.subject ? { subject: task.subject } : {}) },
         ...(task.operator ? { operatorSignal: task.fyi
           ? { kind: "notify", blocking: false, replyExpectation: "none", notificationPolicy: policy }
           : task.defaultAction ? { kind: "consult", blocking: false, replyExpectation: "optional", defaultAction: task.defaultAction, notificationPolicy: policy }
@@ -812,6 +812,7 @@ export class BrokerDeliveryAcceptanceService {
             ...(payload.task.defaultAction ? { operatorAnswerDeadline: createdAt + (payload.task.window ?? 1800) * 1000 } : {}),
             defaultAction: payload.task.defaultAction, options: payload.task.options, permission: payload.task.permission,
             because: payload.task.because, notificationPolicy: taskNotificationPolicy(payload.task),
+            ...(payload.task.subject ? { subject: payload.task.subject } : {}),
             replyToSessionId, replyMode: payload.invocationMetadata?.replyMode ?? "notify" },
         };
         message.metadata = { ...message.metadata, scoutAcceptance: operatorAcceptance };

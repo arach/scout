@@ -9,6 +9,8 @@ import { CallerMismatchError, callerSchema, resolveCallerSession } from "./broke
 
 const inputSchema = z.object({
   path: z.string().min(1).max(4096), caption: z.string().max(SHOW_LIMITS.captionCharacters).optional(),
+  // Reuse it on a retry after an uncertain response; a repeat returns the first show with 200.
+  requestId: z.string().trim().min(1).max(SHOW_LIMITS.requestIdCharacters).optional(),
   caller: callerSchema,
 }).strict();
 export function showByteRange(value: string | undefined, size: number): [number, number] | undefined {
@@ -36,7 +38,7 @@ export async function handleShowRoute(request: RuntimeHttpRequestLike, response:
     // Browser-origin writes cannot turn this local-file verb into a cross-site file reader.
     if (create && request.headers.origin) throw new ShowError("show_forbidden", 403);
     const store = deps.store;
-    if (capability) { json(response, 200, { "shows.v1": Boolean(store), ...SHOW_LIMITS }); return true; }
+    if (capability) { json(response, 200, { "shows.v1": Boolean(store), "shows.requestId": Boolean(store), ...SHOW_LIMITS }); return true; }
     if (!store) throw new ShowError("shows_unavailable", 503);
     if (create) {
       const parsed = inputSchema.safeParse(await readRequestBody(request, { maxBytes: 16_384, requireJsonContentType: true }));
@@ -45,7 +47,8 @@ export async function handleShowRoute(request: RuntimeHttpRequestLike, response:
       let session: ReturnType<typeof resolveCallerSession>;
       try { session = resolveCallerSession(deps.snapshot(), caller, "show"); }
       catch (error) { if (error instanceof CallerMismatchError) { json(response, 409, { error: error.message, detail: error.detail }); return true; } throw error; }
-      json(response, 201, { show: await store.show({ ...input, currentDirectory: caller.currentDirectory, agentId: caller.actorId, sessionId: session.sessionId, harness: session.harness }) });
+      const { show, replayed } = await store.showRequest({ ...input, currentDirectory: caller.currentDirectory, agentId: caller.actorId, sessionId: session.sessionId, harness: session.harness });
+      json(response, replayed ? 200 : 201, { show, ...(replayed ? { replayed: true } : {}) });
     } else if (list || events) {
       const project = url.searchParams.get("projectRoot");
       if (!project) throw new ShowError("show_project_root_required");

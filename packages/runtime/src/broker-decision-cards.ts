@@ -2,6 +2,7 @@ import {
   findPriorDecision,
   renderOperatorCardAnswerText,
   normalizeDecisionCard,
+  taskSubjectOf,
   validateDecisionCard,
   validateOperatorCardAnswer,
   type DecisionAnswer,
@@ -329,6 +330,7 @@ export class BrokerDecisionCardService {
       : answer?.by === "default" || defaulted ? "defaulted" : record.answer || answer ? "answered" : "closed";
     const options = Array.isArray(taskMeta.options) ? (taskMeta.options as unknown[]).flatMap((option) => text(option) ?? [])
       : permission ? (permission.decisions ?? []).map((decision) => permission.decisionLabels?.[decision] ?? decision) : [];
+    const subject = taskSubjectOf(taskMeta.subject) ?? taskSubjectOf(message?.metadata?.subject);
     return {
       id: record.id,
       ...(messageId ? { messageId } : {}),
@@ -344,6 +346,7 @@ export class BrokerDecisionCardService {
         ...(text(taskMeta.defaultAction) ? { defaultAction: text(taskMeta.defaultAction) } : {}),
         ...(typeof taskMeta.operatorAnswerDeadline === "number" ? { answerDeadline: taskMeta.operatorAnswerDeadline } : {}),
       },
+      ...(subject ? { subject } : {}),
       ...(card ? { card, origin } : {}),
       ...(metadata.decisionSynthesis ? { synthesis: metadata.decisionSynthesis as DecisionSynthesisInfo } : {}),
       ...(answer ? { answer } : defaulted && text(taskMeta.defaultAction) && card?.kind === "decision" ? { answer: this.defaultAnswer(card, text(taskMeta.defaultAction)!, flight) } : {}),

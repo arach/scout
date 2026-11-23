@@ -128,3 +128,32 @@ test("concurrent copies fail boundedly and hardlinks cannot launder source prove
   await link(join(workspace, input.path), join(workspace, "linked.txt"));
   await expect(store.show({ ...input, path: "linked.txt" })).rejects.toThrow("show_hardlink_forbidden");
 });
+test("a repeated request id returns the first show, per agent, and refuses other content", async () => {
+  const { dir, workspace, store, input } = await fixture();
+  await writeFile(join(workspace, input.path), "first");
+  const first = await store.showRequest({ ...input, caption: "Look", requestId: "req-1" });
+  expect(first.replayed).toBe(false); expect(first.show.requestId).toBe("req-1");
+  await writeFile(join(workspace, input.path), "second");
+  const again = await store.showRequest({ ...input, caption: "Look", requestId: "req-1" });
+  expect(again).toEqual({ show: first.show, replayed: true });
+  expect(await new BrokerShowStore(join(dir, "store"), "node-test").showRequest({ ...input, caption: "Look", requestId: "req-1" })).toEqual({ show: first.show, replayed: true });
+  expect(await store.list(workspace)).toHaveLength(1);
+  await expect(store.show({ ...input, caption: "Other", requestId: "req-1" })).rejects.toThrow("show_request_id_reused_with_other_content");
+  await writeFile(join(workspace, "another.txt"), "x");
+  await expect(store.show({ ...input, path: "another.txt", caption: "Look", requestId: "req-1" })).rejects.toThrow("show_request_id_reused_with_other_content");
+  const otherAgent = await store.showRequest({ ...input, agentId: "agent-other", caption: "Look", requestId: "req-1" });
+  expect(otherAgent.replayed).toBe(false); expect(otherAgent.show.supersedes).toBe(first.show.id);
+  const plain = await store.show(input);
+  expect(plain.requestId).toBeUndefined();
+});
+test("POST /v1/shows answers a repeated request id with 200 and the first show", async () => {
+  const { workspace, store, input } = await fixture(); await writeFile(join(workspace, input.path), "abc");
+  const body = { path: input.path, requestId: "req-http", caller: { actorId: input.agentId, currentDirectory: workspace } };
+  const created = await http(store, "/v1/shows", { method: "POST", body });
+  expect(created.status).toBe(201); const show = JSON.parse(created.bytes.toString()).show;
+  const repeated = await http(store, "/v1/shows", { method: "POST", body });
+  expect(repeated.status).toBe(200); expect(JSON.parse(repeated.bytes.toString())).toEqual({ show, replayed: true });
+  expect((await http(store, "/v1/shows", { method: "POST", body: { ...body, caption: "changed" } })).status).toBe(409);
+  expect((await http(store, "/v1/shows", { method: "POST", body: { ...body, requestId: "x".repeat(257) } })).status).toBe(400);
+  expect(JSON.parse((await http(store, "/v1/shows/capability")).bytes.toString())["shows.requestId"]).toBe(true);
+});
