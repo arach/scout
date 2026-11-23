@@ -98,7 +98,27 @@ export interface AgentDefinition extends ActorIdentity {
   homeNodeId: ScoutId;
   authorityNodeId: ScoutId;
   advertiseScope: AdvertiseScope;
+  /**
+   * The actor this agent acts for. Work the agent does is the agent's, done
+   * on behalf of this owner; it is never shown as the owner's own. A local
+   * agent's owner is the operator by definition, and the runtime stamps it
+   * when it stores the agent. Read it through `agentOwnerId`.
+   */
   ownerId?: ScoutId;
+}
+
+/**
+ * Who an agent acts for: its `ownerId`, or the operator for an agent whose
+ * authority is the local node. Undefined only for a remote agent that names no
+ * owner.
+ */
+export function agentOwnerId(
+  agent: Pick<AgentDefinition, "ownerId" | "authorityNodeId"> | null | undefined,
+  context: { localNodeId: ScoutId; operatorId: ScoutId },
+): ScoutId | undefined {
+  if (!agent) return undefined;
+  if (agent.ownerId) return agent.ownerId;
+  return agent.authorityNodeId === context.localNodeId ? context.operatorId : undefined;
 }
 
 export interface HelperDefinition extends ActorIdentity {

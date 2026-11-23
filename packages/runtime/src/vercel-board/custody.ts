@@ -34,8 +34,10 @@ export type VercelBoardCustodyNotice =
 
 type ClaimInput = {
   taskId: string; workId: string; agentId: string; startedBy: string;
-  /** The role profile to claim as. Absent means the connection's own profile. */
+  /** The profile to claim as: a role, or the agent's own. Absent means the connection's own profile. */
   profile?: string;
+  /** Who asks the agent for the work. Kept on the row: the claim relabels the task, so it cannot be read back later. */
+  requestedBy?: string;
   dependencyContext?: { channel: string; owner: string; needs: string[]; lines: string[] };
 };
 
@@ -118,7 +120,7 @@ export class VercelBoardCustody {
     }
     const attemptId = randomUUID();
     store.insertCustody({ connectionId: connection.id, taskId: input.taskId, attemptId, epoch: null, token: null, until: null,
-      leaseSeconds: this.firstLease, agentId: input.agentId, workId: input.workId, startedBy: input.startedBy, profile: input.profile ?? connection.profile, flightId: null,
+      leaseSeconds: this.firstLease, agentId: input.agentId, workId: input.workId, startedBy: input.startedBy, profile: input.profile ?? connection.profile, requestedBy: input.requestedBy ?? null, flightId: null,
       state: "claiming", outcome: null, result: null, detail: null });
     this.inFlight.add(attemptId);
     try {
@@ -250,7 +252,7 @@ export class VercelBoardCustody {
     }
     const attemptId = randomUUID();
     store.insertCustody({ connectionId: connection.id, taskId: row.taskId, attemptId, epoch: null, token: null, until: null,
-      leaseSeconds: this.firstLease, agentId: row.agentId, workId: row.workId, startedBy: row.startedBy, profile: row.profile, flightId: row.flightId,
+      leaseSeconds: this.firstLease, agentId: row.agentId, workId: row.workId, startedBy: row.startedBy, profile: row.profile, requestedBy: row.requestedBy ?? null, flightId: row.flightId,
       state: "claiming", outcome: null, result: null, detail: `resumed from ${row.attemptId}` });
     store.updateCustody(connection.id, row.attemptId, { state: "settled" });
     try {

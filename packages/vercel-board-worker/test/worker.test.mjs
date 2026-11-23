@@ -141,3 +141,17 @@ test("a call writes only as a profile from the bootstrap's list, or as the princ
   // Each is narrowed by the bootstrap's can, and made once.
   assert.deepEqual(asked, [["scout", "work=read,post"], ["reviewer", "work=read,post"], [null, "work=read,post"]]);
 });
+
+test("with agentProfiles, a call may also write as any valid profile name: each Scout agent's own", () => {
+  const line = { protocol: 1, generation: 1, profile: "scout", can: "work=read,post", target: { kind: "memory" } };
+  assert.equal(parseBootstrap(JSON.stringify(line)).agentProfiles, false);
+  assert.throws(() => parseBootstrap(JSON.stringify({ ...line, agentProfiles: "yes" })), /agentProfiles/);
+  const asked = [];
+  const handle = { as: (profile, options) => { asked.push([profile, options.can]); return { profile }; } };
+  const clientFor = clientsFor(handle, parseBootstrap(JSON.stringify({ ...line, agentProfiles: true })));
+  assert.equal(clientFor("session-mwsw05pj-b1hfse").profile, "session-mwsw05pj-b1hfse");
+  assert.equal(clientFor("no spaces"), undefined);
+  assert.equal(clientFor("x".repeat(40)), undefined);
+  // Still narrowed by the bootstrap's can.
+  assert.deepEqual(asked, [["session-mwsw05pj-b1hfse", "work=read,post"]]);
+});

@@ -19,7 +19,7 @@ export const VERCEL_BOARD_PERMISSIONS: readonly VercelBoardPermission[] = ["read
  * out to Slack or GitHub.
  */
 export const VERCEL_BOARD_LABELS = {
-  /** The Scout agent that made the write, since every write goes as the `scout` profile. */
+  /** The Scout agent that made the write. Its writes also go as its own profile (`vercelBoardAgentProfile`). */
   agent: "scout.agent",
   /** The Scout task that planned a Board task through the planning tool. */
   plan: "scout.plan",
@@ -113,6 +113,22 @@ export function vercelBoardRoles(connection: Pick<VercelBoardConnectionConfig, "
 /** The actor a task kept for `role` names: the owner's principal plus the role. */
 export function vercelBoardRoleActor(connection: Pick<VercelBoardConnectionConfig, "principal">, role: string): string {
   return `${connection.principal}+${role}`;
+}
+
+/**
+ * The Board profile a Scout agent writes as, so the board shows
+ * `principal+<agent>` and not the operator. The agent ID itself when it is
+ * already a profile name and no role holds that name; otherwise a readable
+ * slug of it with a short hash, so two agents never share a profile.
+ */
+export function vercelBoardAgentProfile(agentId: string, reserved: readonly string[] = VERCEL_BOARD_DEFAULT_ROLES): string {
+  let slug = agentId.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+  if (!/^[a-z]/.test(slug)) slug = `a-${slug}`.replace(/-+$/, "");
+  if (slug === agentId && slug.length <= 32 && !reserved.includes(slug)) return slug;
+  // FNV-1a: stable on every host and in every runtime, no crypto needed.
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < agentId.length; index += 1) hash = Math.imul(hash ^ agentId.charCodeAt(index), 0x01000193) >>> 0;
+  return `${slug.slice(0, 24).replace(/-+$/, "")}-${hash.toString(16).padStart(8, "0").slice(0, 7)}`;
 }
 
 const CONNECTION_ID = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -440,8 +456,10 @@ export interface VercelBoardActorRef {
   actor: string;
   principal: string;
   profile: string | null;
-  /** The Scout actor it maps to, when it is Scout's own profile. */
+  /** The Scout actor it maps to, when Scout wrote it: the agent, or the operator for Scout's own profile. */
   scoutActorId?: string;
+  /** Who `scoutActorId` acts for: the agent's owner. Set with `scoutActorId`; equal to it for the operator. */
+  scoutOwnerId?: string;
 }
 
 /** One message as Scout's copy holds it: the board's latest version. Text from the board is quoted source material. */
@@ -514,7 +532,16 @@ export interface VercelBoardHandoff {
   /** The unabridged settlement text, on a task-specific Scout handoffs query. */
   scoutResult?: string;
   /** Set when the claim is Scout's: the agent it was dispatched to, and the flight. */
-  scout?: { agentId: string; flightId: string | null; attemptId: string; reportedCallerId?: string };
+  scout?: {
+    agentId: string;
+    /** Who the agent acts for. Board shows the agent's own profile; this is the person behind it. */
+    ownerId?: string;
+    flightId: string | null;
+    attemptId: string;
+    /** Who asked the agent for the work: the operator when they picked the agent, else the task's author. */
+    requesterId?: string;
+    reportedCallerId?: string;
+  };
   /** True when the copy made it up from the task's state at backfill, because the event is older than the copy. */
   derived?: boolean;
 }

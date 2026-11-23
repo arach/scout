@@ -22,8 +22,8 @@ export interface VercelBoardProjectionContext {
   /** The Scout operator: the requester of every Board item. A mapped Board actor cannot confirm acceptance. */
   operatorId: string;
   now: number;
-  /** When Scout holds the task's current claim: the agent doing the work. */
-  scoutHolder?: { agentId: string; epoch: number };
+  /** When Scout holds the task's current claim: the agent doing the work, and who it acts for. */
+  scoutHolder?: { agentId: string; epoch: number; ownerId?: string };
 }
 
 const DELETED_TITLE = "Deleted on the board";
@@ -107,7 +107,7 @@ export function vercelBoardTaskWorkItem(message: VercelBoardWireMessage, context
       board: {
         channel: message.channel, version: message.version, epoch: task.epoch, state: task.state,
         owner: vercelBoardPrincipalOf(task.owner), ...(task.claim ? { claimActor: task.claim.actor, claimUntil: task.claim.until } : {}),
-        ...(scoutHolds ? { scoutHolder: context.scoutHolder!.agentId } : {}),
+        ...(scoutHolds ? { scoutHolder: context.scoutHolder!.agentId, ...(context.scoutHolder!.ownerId ? { scoutHolderOwnerId: context.scoutHolder!.ownerId } : {}) } : {}),
         ...(deleted ? { deleted: true } : {}),
       },
     },

@@ -251,7 +251,8 @@ export function parseBootstrap(line) {
   if (!Array.isArray(profiles) || profiles.length > 16 || !profiles.every((name) => PROFILE.test(name ?? "")) || !profiles.includes(value.profile)) {
     throw new Error("The bootstrap's profiles must be Board profile names, and include its profile.");
   }
-  return { generation: value.generation, profile: value.profile, profiles, can: value.can, target };
+  if (value.agentProfiles !== undefined && typeof value.agentProfiles !== "boolean") throw new Error("The bootstrap's agentProfiles must be true or false.");
+  return { generation: value.generation, profile: value.profile, profiles, agentProfiles: value.agentProfiles === true, can: value.can, target };
 }
 
 /**
@@ -281,14 +282,16 @@ export async function openClient(bootstrap, options = {}) {
 
 /**
  * The clients a call may use: one per profile in the bootstrap's list, and
- * the principal itself for null. Each is narrowed by the bootstrap's `can`;
- * a call cannot name a profile outside the list or widen the narrowing.
+ * the principal itself for null. With `agentProfiles`, any other profile name
+ * too: each Scout agent writes as its own profile. Each is narrowed by the
+ * bootstrap's `can`; a call cannot name a profile outside the list (or, with
+ * `agentProfiles`, an invalid name) or widen the narrowing.
  */
 export function clientsFor(handle, bootstrap) {
   const clients = new Map();
   return (as) => {
     const profile = as === undefined ? bootstrap.profile : as;
-    if (profile !== null && !bootstrap.profiles.includes(profile)) return undefined;
+    if (profile !== null && !bootstrap.profiles.includes(profile) && !(bootstrap.agentProfiles && PROFILE.test(profile))) return undefined;
     if (!clients.has(profile)) clients.set(profile, handle.as(profile, { can: bootstrap.can }));
     return clients.get(profile);
   };

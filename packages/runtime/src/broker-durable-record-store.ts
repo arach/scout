@@ -1,4 +1,4 @@
-import { completionReply, flightCompletion, flightSessionTrace } from "@openscout/protocol";
+import { agentOwnerId, completionReply, flightCompletion, flightSessionTrace } from "@openscout/protocol";
 import { taskTerminal, finishedTaskError, followupAudience, taskCompletionMessage, isRequesterSession, type FollowupSession } from "./broker-tasks.js";
 import { assertExplicitReplyAdmission, prepareCompletionAdmission } from "./broker-explicit-completion.js";
 import { blockedFlight, holdFinalReplyWhilePermissionOpen, openPermissionRequestId, resumedFlight } from "./broker-blocked-reply.js";
@@ -314,7 +314,7 @@ export class BrokerDurableRecordStore {
 
   readonly upsertAgent = async (agent: RuntimeAgentDefinition): Promise<void> => {
     const stamped = withCreatedAt(
-      agent,
+      this.withOwner(agent),
       this.options.runtime.peek().actors[agent.id]?.createdAt,
     );
     if (isCurrentAgentRecord(this.options.runtime.peek(), stamped)) {
@@ -342,6 +342,14 @@ export class BrokerDurableRecordStore {
       );
     });
   };
+
+  /** Every local agent acts for the operator: stamp the owner when the agent names none. */
+  private withOwner(agent: RuntimeAgentDefinition): RuntimeAgentDefinition {
+    const { localNodeId, operatorActorId } = this.options;
+    if (agent.ownerId || !localNodeId || !operatorActorId) return agent;
+    const ownerId = agentOwnerId(agent, { localNodeId, operatorId: operatorActorId });
+    return ownerId ? { ...agent, ownerId } : agent;
+  }
 
   readonly upsertEndpoint = async (endpoint: AgentEndpoint): Promise<void> => {
     const previous = this.options.runtime.peek().endpoints[endpoint.id];
