@@ -186,6 +186,7 @@ import {
   type TrustedPeerGrant,
 } from "./mesh-trust-enrollment.js";
 import { normalizeConversationTitle } from "./conversation-title.js";
+import { readHubStatus } from "./hub/status.js";
 
 const ACTIVE_FLIGHT_LIST_STATES = new Set(["queued", "waking", "running", "waiting"]);
 
@@ -1104,6 +1105,17 @@ export function createBrokerHttpRouter(
         : service.get({ ownerId: input.ownerId, sessionId: string("sessionId") });
       json(response, 200, result);
     } catch (error) { badRequest(response, error); }
+    return;
+  }
+
+  if (method === "GET" && url.pathname === "/v1/hub/status") {
+    // Local only: it names the inbox, labels and mirrored sessions (never tokens or keys).
+    if (denyRemoteMutation()) return;
+    if (forwardedNodeId) {
+      json(response, 403, { error: "forbidden", detail: "hub status cannot be forwarded" });
+      return;
+    }
+    json(response, 200, readHubStatus());
     return;
   }
 

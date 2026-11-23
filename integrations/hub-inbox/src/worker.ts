@@ -1,17 +1,24 @@
 /**
  * Scout Hub inbox: a Cloudflare Worker over one R2 bucket. It holds sealed
- * chunks until the runtime that can open them collects them. It cannot read
- * them and keeps no other data. Anything not collected is deleted after
- * HOLD_DAYS (7 by default) by the scheduled handler.
+ * chunks until the runtime that can open them collects them, and cannot read
+ * them. It also takes vendor webhooks, which carry only an event type and a
+ * resource ID, and keeps each as a small note that tells the runtime what to
+ * fetch. Anything not collected is deleted after HOLD_DAYS (7 by default) by
+ * the scheduled handler.
  *
  *   POST   /v1/inbox/chunks         WRITE_TOKEN  add one sealed chunk (body = bytes)
  *   GET    /v1/inbox/pending        READ_TOKEN   list chunks, oldest first (?after=&limit=)
  *   GET    /v1/inbox/chunks/:key    READ_TOKEN   fetch one chunk
  *   DELETE /v1/inbox/chunks/:key    READ_TOKEN   delete one chunk once collected
- *   GET    /v1/inbox/health         READ_TOKEN   { ok, pending }
+ *   GET    /v1/inbox/health         READ_TOKEN   { ok, pending, webhooks }
+ *   POST   /v1/inbox/webhooks/anthropic  signature  a Managed Agents webhook
+ *   GET    /v1/inbox/nudges         READ_TOKEN   webhook notes, oldest first
+ *   DELETE /v1/inbox/nudges/:key    READ_TOKEN   delete one note once handled
  *
  * One deployment serves one runtime. Keys sort by arrival time.
  */
+
+import { Webhook } from "standardwebhooks";
 
 export type InboxObject = { key: string; size: number; uploaded: Date };
 
@@ -33,11 +40,27 @@ export interface InboxEnv {
   WRITE_TOKEN: string;
   HOLD_DAYS?: string;
   MAX_CHUNK_BYTES?: string;
+  /** The `whsec_` signing secret from Anthropic's Console. Without it the webhook route is off. */
+  ANTHROPIC_WEBHOOK_SIGNING_KEY?: string;
 }
+
+/** What the inbox keeps of one webhook: enough to know what to fetch, nothing more. */
+export type InboxNudge = {
+  key: string;
+  provider: "anthropic";
+  eventId: string;
+  type: string;
+  resourceId: string;
+  createdAt: string | null;
+  received: string;
+};
 
 const PREFIX = "c/";
 const KEY = /^c\/[0-9a-z]{9}-[0-9a-f]{24}$/u;
 const DEFAULT_MAX_CHUNK_BYTES = 32 * 1024 * 1024;
+const NUDGE_PREFIX = "n/";
+const NUDGE_KEY = /^n\/anthropic\/[A-Za-z0-9_-]{1,128}$/u;
+const MAX_WEBHOOK_BYTES = 64 * 1024;
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
@@ -82,9 +105,44 @@ async function readBody(request: Request, max: number): Promise<Uint8Array | Res
   return body;
 }
 
+async function receiveAnthropicWebhook(request: Request, env: InboxEnv): Promise<Response> {
+  const secret = env.ANTHROPIC_WEBHOOK_SIGNING_KEY?.trim();
+  if (!secret) return error(404, "Not found");
+  const body = await request.text();
+  if (body.length > MAX_WEBHOOK_BYTES) return error(413, "Webhook too large");
+  let event: { id?: unknown; created_at?: unknown; data?: { type?: unknown; id?: unknown } };
+  try {
+    // The same library the Anthropic SDK's webhooks.unwrap() uses: signature
+    // over id, timestamp and raw body, and a five-minute freshness window.
+    new Webhook(secret).verify(body, {
+      "webhook-id": request.headers.get("webhook-id") ?? "",
+      "webhook-timestamp": request.headers.get("webhook-timestamp") ?? "",
+      "webhook-signature": request.headers.get("webhook-signature") ?? "",
+    });
+    event = JSON.parse(body);
+  } catch {
+    return error(400, "Invalid signature");
+  }
+  const eventId = typeof event.id === "string" ? event.id : "";
+  const type = typeof event.data?.type === "string" ? event.data.type : "";
+  const resourceId = typeof event.data?.id === "string" ? event.data.id : "";
+  if (!/^[A-Za-z0-9_-]{1,128}$/u.test(eventId) || !type || !resourceId) return error(400, "Not a webhook event");
+  // Keyed by event ID, so Anthropic's retries overwrite one note instead of adding more.
+  const key = `${NUDGE_PREFIX}anthropic/${eventId}`;
+  const nudge: InboxNudge = {
+    key, provider: "anthropic", eventId, type, resourceId,
+    createdAt: typeof event.created_at === "string" ? event.created_at : null,
+    received: new Date().toISOString(),
+  };
+  await env.INBOX.put(key, new TextEncoder().encode(JSON.stringify(nudge)));
+  return new Response(null, { status: 204 });
+}
+
 export async function handleInboxRequest(request: Request, env: InboxEnv): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/u, "");
+
+  if (request.method === "POST" && path === "/v1/inbox/webhooks/anthropic") return receiveAnthropicWebhook(request, env);
 
   if (request.method === "POST" && path === "/v1/inbox/chunks") {
     if (!(await authorized(request, env.WRITE_TOKEN))) return error(401, "Unauthorized");
@@ -100,7 +158,30 @@ export async function handleInboxRequest(request: Request, env: InboxEnv): Promi
 
   if (request.method === "GET" && path === "/v1/inbox/health") {
     const listed = await env.INBOX.list({ prefix: PREFIX, limit: 1000 });
-    return json({ ok: true, pending: listed.objects.length, more: listed.truncated });
+    return json({
+      ok: true, pending: listed.objects.length, more: listed.truncated,
+      webhooks: { anthropic: Boolean(env.ANTHROPIC_WEBHOOK_SIGNING_KEY?.trim()) },
+    });
+  }
+
+  if (request.method === "GET" && path === "/v1/inbox/nudges") {
+    const listed = await env.INBOX.list({ prefix: NUDGE_PREFIX, limit: 100 });
+    const items: InboxNudge[] = [];
+    for (const object of listed.objects) {
+      const stored = await env.INBOX.get(object.key);
+      if (!stored) continue;
+      try { items.push(JSON.parse(new TextDecoder().decode(await stored.arrayBuffer())) as InboxNudge); } catch { /* skip a damaged note */ }
+    }
+    items.sort((a, b) => a.received.localeCompare(b.received));
+    return json({ items });
+  }
+
+  const nudge = /^\/v1\/inbox\/nudges\/(.+)$/u.exec(path);
+  if (nudge && request.method === "DELETE") {
+    const key = decodeURIComponent(nudge[1]!);
+    if (!NUDGE_KEY.test(key)) return error(400, "Bad key");
+    await env.INBOX.delete(key);
+    return new Response(null, { status: 204 });
   }
 
   if (request.method === "GET" && path === "/v1/inbox/pending") {
@@ -134,17 +215,21 @@ export async function expireInbox(env: InboxEnv, now = Date.now()): Promise<numb
   const holdMs = (Number(env.HOLD_DAYS) || 7) * 24 * 60 * 60 * 1000;
   let removed = 0;
   let cursor: string | undefined;
-  for (;;) {
-    const listed = await env.INBOX.list({ prefix: PREFIX, limit: 1000, ...(cursor ? { cursor } : {}) });
-    for (const object of listed.objects) {
-      if (now - object.uploaded.getTime() > holdMs) {
-        await env.INBOX.delete(object.key);
-        removed += 1;
+  for (const prefix of [PREFIX, NUDGE_PREFIX]) {
+    cursor = undefined;
+    for (;;) {
+      const listed = await env.INBOX.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) });
+      for (const object of listed.objects) {
+        if (now - object.uploaded.getTime() > holdMs) {
+          await env.INBOX.delete(object.key);
+          removed += 1;
+        }
       }
+      if (!listed.truncated || !listed.cursor) break;
+      cursor = listed.cursor;
     }
-    if (!listed.truncated || !listed.cursor) return removed;
-    cursor = listed.cursor;
   }
+  return removed;
 }
 
 export default {

@@ -63,6 +63,8 @@ export type ManagedAgentsPullSummary = {
   sessions: string[];
   error?: string;
   notes: string[];
+  /** When the last webhook note arrived through the inbox, if any. */
+  lastWebhookAt?: string;
 };
 
 
@@ -146,6 +148,8 @@ export type ManagedAgentsPullerOptions = {
   home?: string;
   mirrorRoot?: string;
   intervalMs?: number;
+  /** The slower full poll used while webhook notes keep arriving. */
+  webhookIntervalMs?: number;
   /** Upper bound on sessions listed per pass. */
   maxSessions?: number;
   /** Builds the client; tests pass one pointed at a fake server. */
@@ -159,8 +163,32 @@ export class ManagedAgentsPuller {
   private running: Promise<ManagedAgentsPullSummary> | null = null;
   private stopped = true;
   private lastError: string | null = null;
+  private lastWebhookAt: number | null = null;
+  private nudged = false;
 
   constructor(private readonly options: ManagedAgentsPullerOptions = {}) {}
+
+  /**
+   * A webhook said these sessions changed. Pull now instead of at the next
+   * tick. While webhooks keep arriving, the full poll relaxes to a slower
+   * backstop: Anthropic drops a webhook after three failed attempts, so the
+   * poll is what catches anything lost.
+   */
+  nudge(sessionIds: string[]): void {
+    if (sessionIds.length === 0) return;
+    this.lastWebhookAt = this.options.now?.() ?? Date.now();
+    this.nudged = true;
+    if (this.stopped || this.running) return; // a running pass reschedules itself at once
+    if (this.timer) clearTimeout(this.timer);
+    this.schedule(0);
+  }
+
+  private nextDelay(): number {
+    if (this.nudged) return 0;
+    const now = this.options.now?.() ?? Date.now();
+    const webhooksLive = this.lastWebhookAt !== null && now - this.lastWebhookAt < 24 * 3_600_000;
+    return webhooksLive ? this.options.webhookIntervalMs ?? 120_000 : this.options.intervalMs ?? 15_000;
+  }
 
   private get home(): string {
     return this.options.home ?? resolveHubHome();
@@ -186,7 +214,7 @@ export class ManagedAgentsPuller {
   private schedule(delayMs: number): void {
     if (this.stopped) return;
     this.timer = setTimeout(() => {
-      void this.pullOnce().finally(() => this.schedule(this.options.intervalMs ?? 15_000));
+      void this.pullOnce().finally(() => this.schedule(this.nextDelay()));
     }, delayMs);
     this.timer.unref?.();
   }
@@ -198,8 +226,10 @@ export class ManagedAgentsPuller {
   }
 
   private async pass(): Promise<ManagedAgentsPullSummary> {
+    this.nudged = false;
     const now = this.options.now?.() ?? Date.now();
     const summary: ManagedAgentsPullSummary = { at: new Date(now).toISOString(), configured: false, listed: 0, changed: 0, appended: 0, sessions: [], notes: [] };
+    if (this.lastWebhookAt !== null) summary.lastWebhookAt = new Date(this.lastWebhookAt).toISOString();
     let config: ManagedAgentsConfig | null;
     try {
       config = loadManagedAgentsConfig(this.home);

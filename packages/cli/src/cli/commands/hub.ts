@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
@@ -6,6 +6,7 @@ import {
   disconnectClaudeCode,
   HubCollectorService,
   HubInboxClient,
+  listHubMirroredSessions,
   isValidManagedAgentsLabel,
   loadManagedAgentsConfig,
   ManagedAgentsPuller,
@@ -212,25 +213,6 @@ async function runConnectManagedAgents(options: HubOptions): Promise<{ value: Re
   return { value: { label, lookbackDays, ...summary }, text };
 }
 
-type MirrorSession = { label: string; sessionId: string; bytes: number; updatedAt: string };
-
-function mirroredSessions(): MirrorSession[] {
-  const root = resolveHubClaudeMirrorRoot();
-  const out: MirrorSession[] = [];
-  let labels: string[] = [];
-  try { labels = readdirSync(root); } catch { return out; }
-  for (const label of labels) {
-    let names: string[] = [];
-    try { names = readdirSync(join(root, label)); } catch { continue; }
-    for (const name of names) {
-      if (!name.endsWith(".jsonl")) continue;
-      const stats = statSync(join(root, label, name));
-      out.push({ label, sessionId: name.slice(0, -".jsonl".length), bytes: stats.size, updatedAt: stats.mtime.toISOString() });
-    }
-  }
-  return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-}
-
 async function runStatus(): Promise<{ value: Record<string, unknown>; text: string }> {
   const config = loadHubConfig();
   if (!config) {
@@ -250,7 +232,7 @@ async function runStatus(): Promise<{ value: Record<string, unknown>; text: stri
   const lastCollect = existsSync(statusPath) ? JSON.parse(readFileSync(statusPath, "utf8")) as Partial<HubCollectSummary> : null;
   const waiting = lastCollect?.waitingFiles ?? [];
   const now = Date.now();
-  const sessions = mirroredSessions();
+  const sessions = listHubMirroredSessions(resolveHubClaudeMirrorRoot());
   const lines = [
     `Inbox: ${config.inbox} ${inbox.reachable ? `(reachable, ${inbox.pending ?? "?"} waiting)` : `(not reachable: ${inbox.error})`}`,
     lastCollect
@@ -289,6 +271,18 @@ function managedAgentsStatusLines(): string[] {
       ? `  Last pull: ${last.at}, ${last.listed} listed, ${last.changed} changed, ${last.appended} events mirrored${last.error ? `, error: ${last.error}` : ""}`
       : "  Last pull: never",
     `  Mirror: ${value.mirror}`,
+    ...webhookStatusLines(last?.lastWebhookAt ?? null),
+  ];
+}
+
+function webhookStatusLines(lastWebhookAt: string | null): string[] {
+  let inbox: string | null = null;
+  try { inbox = loadHubConfig()?.inbox ?? null; } catch { /* reported with the inbox */ }
+  if (!inbox) return ["  Webhooks: need an inbox (`scout hub init`); until then the runtime polls every 15 seconds."];
+  if (lastWebhookAt) return [`  Webhooks: last one ${lastWebhookAt}; the full poll runs every 2 minutes as a backstop.`];
+  return [
+    `  Webhooks: none yet. In Anthropic's Console (Manage → Webhooks), add ${inbox}/v1/inbox/webhooks/anthropic`,
+    "            for session events, then put its signing secret on the inbox as ANTHROPIC_WEBHOOK_SIGNING_KEY.",
   ];
 }
 
