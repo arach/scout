@@ -7,6 +7,7 @@ import { createHistorySessionSnapshot } from "@openscout/agent-sessions";
 
 import { ClaudeSource } from "../tail/claude-source.js";
 import { readSessionFileScan } from "../system-probes/sessions.js";
+import { activityPage, recordActivity } from "./activity.js";
 import { connectClaudeCode, disconnectClaudeCode, reporterCommand, reporterSha256 } from "./connect.js";
 import { applyChunkToMirror, mirrorPathForHeader } from "./mirror.js";
 import { REPORTER_SOURCE } from "./reporter-source.js";
@@ -38,6 +39,24 @@ async function importReporter(): Promise<{
   writeFileSync(path, REPORTER_SOURCE);
   return import(path);
 }
+
+test("activity rotation keeps ids stable across pages and writes a private JSONL file", () => {
+  const home = tempDir();
+  const path = join(home, "activity.jsonl");
+  const history = Array.from({ length: 1000 }, (_, i) => JSON.stringify({
+    id: (i + 1).toString(36).padStart(10, "0"), at: new Date(0).toISOString(), kind: "test", summary: "Earlier probe",
+  }));
+  writeFileSync(path, history.join("\n") + "\n");
+  const before = activityPage(null, 2, home);
+  recordActivity("test", "Next probe", home);
+  const newest = activityPage(null, 1, home);
+  expect(newest.items[0]!.id > before.items[0]!.id).toBe(true);
+  expect(activityPage(newest.nextBefore, 2, home)).toEqual(before);
+  const retained = readFileSync(path, "utf8").trimEnd().split("\n");
+  expect(retained).toHaveLength(1000);
+  expect(retained[0]).toBe(history[1]);
+  expect(statSync(path).mode & 0o777).toBe(0o600);
+});
 
 describe("Scout Hub sealing", () => {
   test("the runtime opens what the reporter seals, and nothing else", async () => {

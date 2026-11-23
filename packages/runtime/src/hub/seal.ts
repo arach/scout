@@ -42,7 +42,7 @@ export type HubKeyPair = { publicKey: Uint8Array; privateKey: Uint8Array };
 
 export type HubChunkHeader = {
   v: 1;
-  kind: "claude-code.transcript";
+  kind: "claude-code.transcript" | "scout.test";
   /** Claude's session id (the transcript's file name). */
   sessionId: string;
   /** CLAUDE_CODE_REMOTE_SESSION_ID when the sandbox sets it. */
@@ -58,6 +58,12 @@ export type HubChunkHeader = {
   cwd: string | null;
   sentAt: string;
 };
+
+export const HUB_TEST_LABEL = "_scout-test";
+
+export function isHubTestChunk(header: HubChunkHeader): boolean {
+  return header?.kind === "scout.test" && header.label === HUB_TEST_LABEL;
+}
 
 export type OpenedHubChunk = { header: HubChunkHeader; data: Buffer };
 

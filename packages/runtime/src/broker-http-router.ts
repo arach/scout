@@ -188,6 +188,7 @@ import {
 import { normalizeConversationTitle } from "./conversation-title.js";
 import { readHubStatus } from "./hub/status.js";
 import {
+  readHubActivity, pullHubSession, testHubInbox,
   collectHubNow,
   connectClaudeCodeRepo,
   connectManagedAgents,
@@ -264,7 +265,7 @@ function hubNumber(body: Record<string, unknown>, key: string): number | undefin
 
 export type BrokerHttpRouterDeps = {
   /** Scout Hub loops, so a manual collect joins a pass already running. */
-  hubLoops?: { collector?: Pick<HubCollectorService, "collectOnce"> | null; puller?: Pick<ManagedAgentsPuller, "pullOnce"> | null };
+  hubLoops?: { collector?: Pick<HubCollectorService, "collectOnce"> | null; puller?: Pick<ManagedAgentsPuller, "pullOnce" | "nudge"> | null };
   /** Work lifecycles: stations, moves and reviews. */
   workLifecycles?: BrokerWorkLifecycleService;
   workRetry?: import("./broker-work-retry.js").BrokerWorkRetryService;
@@ -1134,14 +1135,19 @@ export function createBrokerHttpRouter(
     return;
   }
 
-  if (method === "GET" && url.pathname === "/v1/hub/status") {
+  if (method === "GET" && (url.pathname === "/v1/hub/status" || url.pathname === "/v1/hub/activity")) {
     // Local only: it names the inbox, labels and mirrored sessions (never tokens or keys).
     if (denyRemoteMutation()) return;
     if (forwardedNodeId) {
       json(response, 403, { error: "forbidden", detail: "hub status cannot be forwarded" });
       return;
     }
-    json(response, 200, readHubStatus());
+    try {
+      json(response, 200, url.pathname === "/v1/hub/status" ? readHubStatus() : readHubActivity(url.searchParams.get("before"), url.searchParams.get("limit")));
+    } catch (error) {
+      if (error instanceof HubActionError) json(response, error.status, { error: error.code, detail: error.message });
+      else json(response, 500, { error: "hub_action_failed", detail: "Could not read Hub state." });
+    }
     return;
   }
 
@@ -1161,6 +1167,17 @@ export function createBrokerHttpRouter(
       else json(response, 500, { error: "hub_action_failed", detail: error instanceof Error ? error.message : String(error) });
     }
   };
+  const hubSessionPull = method === "POST"
+    ? url.pathname.match(/^\/v1\/hub\/managed-agents\/sessions\/([^/]+)\/pull$/)
+    : null;
+  if (hubSessionPull) {
+    await runHubAction(() => pullHubSession(hubSessionPull[1]!, deps.hubLoops?.puller ?? undefined));
+    return;
+  }
+  if (method === "POST" && url.pathname === "/v1/hub/test") {
+    await runHubAction(() => testHubInbox());
+    return;
+  }
   if (method === "POST" && url.pathname === "/v1/hub/collect") {
     await runHubAction(() => collectHubNow(deps.hubLoops ?? {}));
     return;

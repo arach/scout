@@ -2512,9 +2512,14 @@ const hubCollector = process.env.OPENSCOUT_HUB_COLLECTOR === "0"
   : new HubCollectorService({
     log: (message) => console.warn(message),
     // Managed Agents webhooks reach the inbox; each one starts a pull now.
-    onNudges: (nudges) => managedAgentsPuller?.nudge(
-      nudges.filter((nudge) => nudge.provider === "anthropic" && nudge.type.startsWith("session.")).map((nudge) => nudge.resourceId),
-    ),
+    onNudges: managedAgentsPuller ? async (nudges) => {
+      const sessions = new Map<string, string>();
+      for (const n of nudges) if (n.provider === "anthropic" && n.type.startsWith("session.")) sessions.set(n.resourceId, n.received);
+      for (const [id, received] of sessions) {
+        const pull = await managedAgentsPuller.nudge(id, received);
+        if (pull.notes.includes("another pull is running")) throw new Error("A Managed Agents pull is running. The next collect retries the note.");
+      }
+    } : undefined,
   });
 const vercelBoardService = routeAliasDatabase ? new BrokerVercelBoardService({
   nodeId,
