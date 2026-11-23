@@ -36,6 +36,7 @@ export const TRPC_UPGRADE_ROUTE = "GET /trpc";
  * TRPC_UPGRADE_ROUTE allowlist entry, which the inventory test exempts).
  */
 const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
+  "GET /v1/integrations/vercel-board/boards": "local",
   "GET /v1/integrations/vercel-board/handoffs": "local",
   "GET /v1/integrations/vercel-board/messages": "local",
   "GET /v1/integrations/vercel-board/status": "local",

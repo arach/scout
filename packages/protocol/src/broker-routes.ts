@@ -77,6 +77,7 @@ export const scoutBrokerPaths = {
     vercelBoardPlan: "/v1/integrations/vercel-board/plan",
     vercelBoardPromote: "/v1/integrations/vercel-board/promote",
     vercelBoardMessages: "/v1/integrations/vercel-board/messages",
+    vercelBoardBoards: "/v1/integrations/vercel-board/boards",
     vercelBoardHandoffs: "/v1/integrations/vercel-board/handoffs",
     vercelBoardRoles: "/v1/integrations/vercel-board/roles",
     pairingAttach: "/v1/pairing/attach",
