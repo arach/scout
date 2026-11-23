@@ -13,6 +13,7 @@
  *
  * The functions here are pure. They read no files and call no model.
  */
+import type { ScoutTaskSubject } from "./tasks.js";
 
 export const DECISION_CARD_VERSION = 1 as const;
 export const DECISION_KEYS = ["A", "B", "C"] as const;
@@ -694,6 +695,8 @@ export type OperatorCardView = {
   state: OperatorCardState;
   /** The ask as the agent wrote it. Always present, so a surface without a card still has the plain ask. */
   plain: { question: string; options: string[]; because?: string; defaultAction?: string; answerDeadline?: number };
+  /** What the ask is about, when the agent named it (`ask --subject`). Present with or without a card. */
+  subject?: ScoutTaskSubject;
   /** Absent when no card exists: show the plain ask. Never an empty card. */
   card?: OperatorCard;
   origin?: OperatorCardOrigin;

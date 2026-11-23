@@ -16,6 +16,11 @@ export interface ScoutShow {
   byteSize: number;
   sha256: string;
   caption?: string;
+  /**
+   * The caller's idempotency key for `POST /v1/shows`, scoped to `agentId`.
+   * Repeating it returns this show and copies nothing.
+   */
+  requestId?: string;
   createdAt: number;
 }
 export const SHOW_LIMITS = {
@@ -23,4 +28,9 @@ export const SHOW_LIMITS = {
   storeBytes: 1024 * 1024 * 1024,
   records: 10_000,
   captionCharacters: 4000,
+  requestIdCharacters: 256,
 } as const;
+/** A show's `id`: one fixed render. */
+export const SHOW_ID_PATTERN = /^[a-f0-9-]{36}$/;
+/** A show's `itemId`: one page across its renders. */
+export const SHOW_ITEM_ID_PATTERN = /^[a-f0-9]{64}$/;

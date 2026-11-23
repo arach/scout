@@ -649,6 +649,17 @@
             { "type": "object", "propertyNames": { "type": "string" }, "additionalProperties": {} }
           ]
         },
+        "subject": {
+          "description": "Operator tasks only: the render under review, as the itemId and id that show returned. Surfaces put the question on that page.",
+          "type": "object",
+          "properties": {
+            "kind": { "type": "string", "const": "show" },
+            "itemId": { "type": "string", "minLength": 1 },
+            "showId": { "type": "string", "minLength": 1 }
+          },
+          "required": ["kind", "itemId", "showId"],
+          "additionalProperties": false
+        },
         "completion": {
           "description": "Require an explicit final reply; exact local id or session targets only, with a stable requestId.",
           "type": "object",

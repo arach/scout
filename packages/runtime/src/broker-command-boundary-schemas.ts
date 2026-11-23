@@ -5,6 +5,8 @@ import {
   SCOUT_PERMISSION_PROFILES,
   SCOUT_REASONING_EFFORTS,
   SCOUT_TASK_CALLBACK_MAX_CODE_LENGTH,
+  SHOW_ID_PATTERN,
+  SHOW_ITEM_ID_PATTERN,
   validateScoutRuntimeTuple,
   validateInvocationExecutionPreference,
   type DecisionCardSubmission,
@@ -207,7 +209,9 @@ export const brokerDeliverRequestSchema: z.ZodType<ScoutDeliverRequest> = z.obje
   intent: z.enum(["tell", "consult", "session_input", "explicit_consult", "task_ask"]),
   task: z.object({ version: z.literal(1), ref: nonEmptyString.optional(), continue: nonEmptyString.optional(), successor: z.object({ host: nonEmptyString.optional(), projectPath: nonEmptyString.optional() }).strict().optional(), cancel: z.boolean().optional(), fyi: z.boolean().optional(), operator: z.boolean().optional(), notify: z.boolean().optional(), defaultAction: nonEmptyString.optional(), window: z.number().positive().optional(), options: z.array(nonEmptyString).optional(), permission: z.boolean().optional(), because: nonEmptyString.optional(), callback: z.object({ code: z.string().trim().min(1).max(SCOUT_TASK_CALLBACK_MAX_CODE_LENGTH) }).strict().optional(),
     // The card's field rules live in validateTaskAsk, shared with the CLI and MCP.
-    decision: z.custom<DecisionCardSubmission>(value => Boolean(value) && typeof value === "object" && !Array.isArray(value), "decision must be an object").optional() }).strict().optional(),
+    decision: z.custom<DecisionCardSubmission>(value => Boolean(value) && typeof value === "object" && !Array.isArray(value), "decision must be an object").optional(),
+    // An older broker refuses this field (the object is strict) rather than dropping it.
+    subject: z.object({ kind: z.literal("show"), itemId: z.string().regex(SHOW_ITEM_ID_PATTERN), showId: z.string().regex(SHOW_ID_PATTERN) }).strict().optional() }).strict().optional(),
   decisionImages: z.array(z.object({ data: z.string().min(1), mediaType: z.string().min(1), fileName: z.string().optional() }).passthrough()).max(3).optional(),
   completion: z.object({ mode: z.literal("explicit") }).strict().optional(),
   relation: z.object({ parentFlightId: nonEmptyString, kind: z.enum(["joined", "continuation"]) }).strict().optional(),

@@ -374,7 +374,18 @@ describe("decision card service", () => {
     const view = (await h.service.view(h.questionId))!;
     expect(view.card).toBeUndefined();
     expect(view.plain).toMatchObject({ question: MERGE_ASK.body, options: ["Merge now", "Wait for the app"] });
+    expect(view).not.toHaveProperty("subject");
     await expect(h.service.answer({ id: h.questionId, answer: { kind: "take_pick" }, requestId: "r1" })).rejects.toBeInstanceOf(DecisionAnswerError);
+  });
+
+  test("the view names the render under review when the ask has a subject, and ignores a malformed one", async () => {
+    const subject = { kind: "show", itemId: "d".repeat(64), showId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" };
+    const h = harness({ invocationMeta: { subject } });
+    await h.service.register(h.message, h.signal);
+    expect((await h.service.view(h.questionId))!.subject).toEqual(subject);
+    const malformed = harness({ invocationMeta: { subject: { ...subject, showId: "x" } } });
+    await malformed.service.register(malformed.message, malformed.signal);
+    expect(await malformed.service.view(malformed.questionId)).not.toHaveProperty("subject");
   });
 
   test("a failed model call leaves the plain ask and says why", async () => {

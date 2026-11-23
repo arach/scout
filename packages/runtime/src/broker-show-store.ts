@@ -30,6 +30,7 @@ export async function resolveShowWorkspace(currentDirectory: string): Promise<{ 
   const projectRoot = common ? await realpath(dirname(common)) : worktree;
   return { cwd, worktree, projectRoot, branch: await git(cwd, ["symbolic-ref", "--short", "HEAD"]) || undefined };
 }
+type ShowInput = { path: string; currentDirectory: string; agentId: string; sessionId?: string; harness?: string; caption?: string; requestId?: string };
 export class BrokerShowStore {
   private busy = false;
   private listeners = new Set<(record: ScoutShow) => void>();
@@ -61,13 +62,22 @@ export class BrokerShowStore {
     catch { throw new ShowError("show_not_found", 404); }
   }
   blobPath(id: string): string { return join(this.directory, `${id}.blob`); }
-  show(input: { path: string; currentDirectory: string; agentId: string; sessionId?: string; harness?: string; caption?: string }): Promise<ScoutShow> {
+  async show(input: ShowInput): Promise<ScoutShow> {
+    return (await this.showRequest(input)).show;
+  }
+  /**
+   * `replayed` is true when the caller's `requestId` already made a show: that
+   * show is returned and nothing is copied. The same request id with another
+   * path or caption is refused, so a retry cannot quietly change content.
+   */
+  showRequest(input: ShowInput): Promise<{ show: ScoutShow; replayed: boolean }> {
     if (this.busy) return Promise.reject(new ShowError("show_busy_retry", 409));
     this.busy = true;
     return this.commit(input).finally(() => { this.busy = false; });
   }
-  private async commit(input: { path: string; currentDirectory: string; agentId: string; sessionId?: string; harness?: string; caption?: string }): Promise<ScoutShow> {
+  private async commit(input: ShowInput): Promise<{ show: ScoutShow; replayed: boolean }> {
     if (input.caption && input.caption.length > SHOW_LIMITS.captionCharacters) throw new ShowError("show_caption_too_long");
+    if (input.requestId !== undefined && (!input.requestId.trim() || input.requestId.length > SHOW_LIMITS.requestIdCharacters)) throw new ShowError("invalid_show_request_id");
     const lexical = resolve(input.currentDirectory, input.path);
     assertShowPath(lexical);
     const sourcePath = await realpath(lexical);
@@ -77,6 +87,13 @@ export class BrokerShowStore {
     const rel = relative(worktree, sourcePath);
     if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new ShowError("show_outside_worktree", 403);
     const records = await this.records();
+    // A request id is scoped to the agent that sent it. An evicted show is gone,
+    // so a retry after its eviction makes a new version.
+    const earlier = input.requestId === undefined ? undefined : records.find(r => r.requestId === input.requestId && r.agentId === input.agentId);
+    if (earlier) {
+      if (earlier.sourcePath !== sourcePath || earlier.caption !== input.caption) throw new ShowError("show_request_id_reused_with_other_content", 409);
+      return { show: earlier, replayed: true };
+    }
     // Recover uncommitted files from interrupted writes. Only this serialized writer owns the directory.
     const live = new Set(records.flatMap(r => [`${r.id}.json`, `${r.id}.blob`]));
     for (const file of await readdir(this.directory)) if (!live.has(file)) await rm(join(this.directory, file), { force: true });
@@ -122,7 +139,7 @@ export class BrokerShowStore {
       const mediaType = ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown", ".html": "text/html", ".svg": "image/svg+xml", ".csv": "text/csv", ".json": "application/json", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".rtf": "application/rtf", ".odt": "application/vnd.oasis.opendocument.text" } as Record<string, string>)[extension] || "application/octet-stream";
       const record: ScoutShow = { id, itemId, ...(previous ? { supersedes: previous.id } : {}), agentId: input.agentId, sessionId: input.sessionId, harness: input.harness, nodeId: this.nodeId, projectRoot, worktree, branch, sourcePath,
         kind: mediaType.startsWith("image/") ? "image" : mediaType.startsWith("video/") ? "video" : mediaType.startsWith("text/") || mediaType === "application/pdf" || [".json", ".docx", ".xlsx", ".pptx", ".rtf", ".odt"].includes(extension) ? "document" : "other",
-        mediaType, byteSize, sha256: hash.digest("hex"), caption: input.caption, createdAt: Math.max(Date.now(), (records.at(-1)?.createdAt ?? 0) + 1) };
+        mediaType, byteSize, sha256: hash.digest("hex"), caption: input.caption, ...(input.requestId !== undefined ? { requestId: input.requestId } : {}), createdAt: Math.max(Date.now(), (records.at(-1)?.createdAt ?? 0) + 1) };
       // Admission is complete. Evict only superseded versions; every existing latest survives until commit.
       for (const r of victims) { await rm(join(this.directory, `${r.id}.json`), { force: true }); await rm(this.blobPath(r.id), { force: true }); }
       await rename(temporary, this.blobPath(id));
@@ -130,7 +147,7 @@ export class BrokerShowStore {
       await writeFile(metadata, JSON.stringify(record), { mode: 0o600 });
       await rename(metadata, join(this.directory, `${id}.json`));
       for (const listener of this.listeners) { try { listener(record); } catch {} }
-      return record;
+      return { show: record, replayed: false };
     } finally { await handle.close(); await rm(temporary, { force: true }); }
   }
 }
