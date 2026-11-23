@@ -5,7 +5,7 @@
  * transcript identical to the source.
  */
 import { afterEach, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,8 +14,10 @@ import {
   HubCollectorService,
   loadOrCreateHubIdentity,
   saveHubConfig,
-  sealHubChunk,
+  sealHubChunk, readHubStatus,
 } from "../../../packages/runtime/src/hub/index.ts";
+import { activityPage } from "../../../packages/runtime/src/hub/activity.ts";
+import { probeInbox } from "../../../packages/runtime/src/hub/round-trip.ts";
 import { serveLocalInbox } from "./serve-local.ts";
 
 const cleanup: Array<() => void> = [];
@@ -120,6 +122,7 @@ test("collect reports the first waiting offset per file until the gap fills", as
   await send(0);
   await send(6);
   await send(9);
+  for (const obj of inbox.bucket.objects.values()) obj.uploaded = new Date(Date.now() - 3_600_001);
   const collector = new HubCollectorService({ home, mirrorRoot });
   const first = await collector.collectOnce();
   expect(first.waiting).toBe(2);
@@ -127,6 +130,7 @@ test("collect reports the first waiting offset per file until the gap fills", as
   expect(Number.isFinite(Date.parse(first.waitingFiles[0]!.waitingSince))).toBe(true);
   expect(JSON.parse(readFileSync(join(home, "status.json"), "utf8")).waitingFiles).toEqual(first.waitingFiles);
   expect(inbox.bucket.objects.size).toBe(2);
+  expect(readHubStatus(home).issues).toMatchObject([{ id: `gap:${label}/${file}` }]);
   expect((await collector.collectOnce()).waitingFiles).toEqual(first.waitingFiles);
 
   await send(3);
@@ -166,6 +170,40 @@ test("a Managed Agents webhook reaches the runtime as a note, and only once", as
   });
   expect(await collector.collectOnce()).toMatchObject({ nudges: 1 });
   expect(seen).toEqual(["session.status_idled sesn_e2e"]);
+  expect(activityPage(null, 50, hubHome).items).toContainEqual(expect.objectContaining({ kind: "webhook", summary: seen[0] }));
   expect(inbox.bucket.objects.size).toBe(0);
   expect(await collector.collectOnce()).toMatchObject({ nudges: 0 });
+});
+
+test("the probe proves its own chunk, leaves other mail alone and never creates a mirror", async () => {
+  const home = mkdtempSync(join(tmpdir(), "scout-hub-probe-"));
+  const inbox = serveLocalInbox({ readToken: "reader", writeToken: "writer" });
+  cleanup.push(() => { inbox.server.stop(true); rmSync(home, { recursive: true, force: true }); });
+  const config = { v: 1 as const, inbox: inbox.url, readToken: "reader", writeToken: "writer", createdAt: "" };
+  saveHubConfig(config, home);
+  const identity = loadOrCreateHubIdentity(home);
+  const abandoned = sealHubChunk({ v: 1, kind: "scout.test", label: "_scout-test", sessionId: "orphan",
+    remoteSessionId: null, file: "orphan.jsonl", offset: 0, seq: 0, cwd: null, sentAt: "" }, Buffer.from("test\n"), identity.publicKey);
+  await fetch(inbox.url + "/v1/inbox/chunks", { method: "POST", body: abandoned, headers: { authorization: "Bearer writer" } });
+  const probe = await probeInbox(config, identity, true);
+  expect(probe).toMatchObject({ ok: true, webhooksEnabled: false });
+  expect(probe.steps.map(s => s.name)).toEqual(["post", "list", "fetch", "open", "delete", "webhooks"]);
+  expect(inbox.bucket.objects.size).toBe(1);
+
+  await fetch(inbox.url + "/v1/inbox/webhooks/anthropic", { method: "POST" });
+  const mirrorRoot = join(home, "mirror");
+  const collector = () => new HubCollectorService({ home, mirrorRoot }).collectOnce();
+  expect(await collector()).toMatchObject({ fetched: 1, appended: 0, rejected: 0 });
+  await collector(); // a new collector does not double-count or log idle work
+  expect(activityPage(null, 50, home).items.filter(r => r.kind === "rejection")).toMatchObject([
+    { summary: expect.stringContaining("webhooks/anthropic.not_enabled: 1 refused") },
+  ]);
+  expect(readHubStatus(home).issues).toMatchObject([{ id: "webhooks/anthropic.not_enabled" }]);
+  saveHubConfig({ ...config, readToken: "wrong" }, home);
+  await collector();
+  expect(readHubStatus(home).issues.map(i => i.id)).toContain("inbox_read_token");
+  inbox.server.stop(true);
+  await collector();
+  expect(readHubStatus(home).issues.map(i => i.id)).toContain("inbox_unreachable");
+  expect(existsSync(mirrorRoot)).toBe(false);
 });

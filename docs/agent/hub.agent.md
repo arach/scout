@@ -90,6 +90,9 @@ Without webhooks, the puller polls Anthropic every 15 s. With webhooks, it pulls
 | Goal | Command |
 |---|---|
 | See everything | `scout hub status` (`--json` for agents) |
+| Read recent activity | `scout hub activity --limit 50`. Add `--json` for record ids. |
+| Re-pull one Managed Agents session | `scout hub pull <session-id>`. This reads its event cursor without scanning other sessions. |
+| Test the inbox end to end | `scout hub test --json`. Inspect the result and elapsed milliseconds for each step. |
 | Collect and pull now, instead of waiting for the loops | `scout hub collect` |
 | Stop a repo from reporting | `scout hub disconnect claude-code <repo>`, then the operator commits the removal. Already mirrored sessions stay. |
 | Forget the Managed Agents key | `scout hub disconnect managed-agents`. Mirrored sessions stay. |
@@ -103,7 +106,10 @@ The broker serves the same operations as the CLI. Use the CLI from a shell. Use 
 
 | Route | Body | Returns |
 |---|---|---|
-| `GET /v1/hub/status` | none | Config, last collect and pull, mirrored sessions, webhook address. No inbox check. |
+| `GET /v1/hub/status` | none | Config, last collect and pull, mirrored sessions, webhook address and current `issues`. Reads local state only. |
+| `GET /v1/hub/activity?before=<id>&limit=<n>` | none | `{ items, nextBefore }`. Newest first. Default 50, maximum 200. Pass `nextBefore` as the exclusive cursor until it is null. |
+| `POST /v1/hub/managed-agents/sessions/:id/pull` | `{}` | `{ sessionId, listed, changed, appended, … }` for one session. |
+| `POST /v1/hub/test` | `{}` | `{ ok, steps, webhooksEnabled? }`. Each step has a name, result and elapsed `ms`. A completed diagnostic can return HTTP 200 with `ok: false`. |
 | `POST /v1/hub/collect` | `{}` | `{ claudeCode, managedAgents }`: one summary each, `null` for a connection that is not set up. A failure is in the summary's `error`. |
 | `POST /v1/hub/managed-agents/connect` | `{ apiKey, label?, lookbackDays? }` | `{ label, lookbackDays, listed, appended, … }` |
 | `POST /v1/hub/managed-agents/disconnect` | `{}` | `{ removed }` |
@@ -113,7 +119,7 @@ The broker serves the same operations as the CLI. Use the CLI from a shell. Use 
 Access:
 - Every route is machine-local. A remote or forwarded request gets 403.
 - Every `POST` route needs a signed operator request: the `x-openscout-local-admin` headers, an HMAC made with the operator attribution key. Without it the broker answers 403 `operator_attribution_required`. The web app's server signs its broker calls when the runtime handed it the key. A plain `curl` does not sign, so it gets 403.
-- `GET /v1/hub/status` needs no signature. It holds no tokens or keys.
+- The status and activity reads need no signature. Neither returns a token or key.
 - Results never contain a token or key. The API key goes in the request body, never in the URL.
 
 Errors are `{ error, detail }`:
@@ -121,12 +127,25 @@ Errors are `{ error, detail }`:
 | Status | `error` | Meaning |
 |---|---|---|
 | 400 | `invalid_body`, `api_key_required`, `invalid_label`, `invalid_lookback`, `invalid_repo_root`, `connect_failed` | The request is wrong. `detail` says how. |
+| 400 | `invalid_cursor`, `invalid_limit`, `invalid_session_id` | Use a returned cursor, a positive whole-number limit or a valid session id. |
+| 403 | `operator_attribution_required`, `forbidden` | Sign actions on the local runtime. Do not forward Hub requests. |
+| 409 | `hub_busy` | Another process owns the collect or pull. Retry after it finishes. |
+| 409 | `managed_agents_not_connected` | Connect the workspace before a single-session pull. |
 | 409 | `hub_not_initialized` | The connection needs `scout hub init` first. |
 | 502 | `managed_agents_unreadable` | Anthropic refused the key or could not be reached. `detail` says whether anything was saved. |
 
 To drop mirrored sessions, delete the label's folder under the mirror. Ask the operator first: the vendor might no longer hold the data.
 
 ## Troubleshoot
+
+Start with `scout hub status`. It checks the inbox and prints current issues first.
+Each issue has an `id`, `severity`, `title`, `detail`, `since` and `fix`.
+The runtime computes issues from observations. There is nothing to acknowledge.
+
+Use `scout hub activity` to see what changed before the issue.
+The private `activity.jsonl` file holds the newest 1,000 records.
+Each record has an increasing `id`, an `at` timestamp, a `kind` and a `summary`.
+Idle polls and collects do not add records.
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -136,6 +155,9 @@ To drop mirrored sessions, delete the label's folder under the mirror. Ask the o
 | A cloud session never appears | Repo files not pushed, session started before the push, or `CLAUDE_CODE_REMOTE` not set in that sandbox | Check the pushed repo has `.claude/scout/`; start a new cloud session. |
 | Managed Agents last pull: key rejected (401) | Key revoked or wrong workspace | `connect managed-agents` again with a valid key. |
 | Webhooks on but no last webhook | Console subscription missing, wrong address, or secret mismatch (the inbox answers 400 to bad signatures) | Check the Console delivery log and the address from `scout hub status`. Polling still covers the gap. |
+| Webhook refusals | The inbox counted a refusal in the last 24 hours. For example, `bad_signature` can mean a signing secret mismatch. | Follow the fix for that reason in status. Check activity for new refusals. |
+| Webhooks look broken | A full poll found a session change after webhooks were enabled. No note for that session arrived within two minutes of the poll. | Check the address, subscription and signing secret. A matching note clears the warning. The observation expires after 24 hours. |
+| Inbox test fails | One step failed. Steps that depend on it show `skipped`. | Check the write token for a failed post. Check the read token for a failed list, fetch or delete. Check the runtime key for a failed open. |
 | Rejected chunks in the last collect | A chunk's path did not match Claude's layout | Expected for junk writes. See the write-token limit below. |
 
 ## What Hub can and cannot do
@@ -144,13 +166,17 @@ Can:
 - Mirror Claude Code cloud transcripts byte for byte, including subagent files.
 - Mirror Managed Agents events in server order, with title, status and agent.
 - Show both in Scout's session lists, tail and search. Managed Agents sessions report status `busy` while running and `idle` when idle.
-- Pull a Managed Agents session within one collect (≤15 s) of its webhook.
+- Pull the session named by a Managed Agents webhook without listing the workspace.
+- Re-pull a session by id even outside the configured lookback.
+- Verify that the inbox accepts, lists, returns and deletes a test chunk that opens on this runtime. Test chunks never go into mirrors.
 
 Cannot, today:
 - Send anything to a cloud session. Hub is read-only. To steer a cloud session, use the vendor's own surface.
 - Push to the Mac. Webhook notes wait for the next collect.
 - Verify who wrote a chunk. Chunks are sealed, not signed. Anyone who can read a connected repo has the write token and the public key, so they can add chunks. The collector accepts only paths in Claude's layout and only appends.
 - Separate tokens per repo. One inbox and one write token serve every connected repo.
+- Replay a rejected body. The inbox keeps counts by route and reason, not refused request bodies or headers.
+- Prove that Anthropic can deliver a webhook with the inbox test. The optional webhook step checks whether the inbox has a signing secret.
 - Mirror vendors other than Anthropic.
 - Show Hub on console.openscout.app. The status route is local-only. (Design in progress.)
 
@@ -182,7 +208,11 @@ Cannot, today:
 | `packages/runtime/src/hub/mirror.ts` | path checks and ordered appends |
 | `packages/runtime/src/hub/managed-agents.ts` | Managed Agents config, puller, nudges |
 | `packages/runtime/src/hub/status.ts` | `readHubStatus` behind `GET /v1/hub/status` |
-| `packages/runtime/src/hub/actions.ts` | connect, disconnect and collect, shared by the CLI and the API |
+| `packages/runtime/src/hub/actions.ts` | Hub actions shared by the CLI and HTTP API |
+| `packages/runtime/src/hub/activity.ts` | local activity retention and cursor paging |
+| `packages/runtime/src/hub/inbox-health.ts` | last successful inbox observation and rejection deltas |
+| `packages/runtime/src/hub/round-trip.ts` | timed probe of one sealed test chunk |
+| `integrations/hub-inbox/src/rejections.ts` | hourly rejection counters and the 24-hour health window |
 | `packages/runtime/src/broker-http-router.ts` | the `/v1/hub/*` routes and their access checks |
 | `packages/runtime/src/tail/managed-agents-source.ts` | Managed Agents sessions in tail and discovery |
 | `packages/runtime/src/claude-projects.ts` | adds the Claude mirror to Claude's project roots |
@@ -191,10 +221,18 @@ Cannot, today:
 ## Verification
 
 ```sh
-bun test packages/runtime/src/hub packages/runtime/src/tail
-cd integrations/hub-inbox && bun test src
+bun run check
+bun test packages/runtime/src/hub packages/runtime/src/tail packages/runtime/src/broker-attribution-http.test.ts
+bun test packages/runtime/src/broker-daemon-route-inventory.test.ts packages/runtime/src/mesh-route-matrix.test.ts
+(cd integrations/hub-inbox && bun test src)
 ```
 
 `packages/runtime/src/hub/hub-http.test.ts` starts a broker and checks that unsigned requests get 403 on every action, and that no response contains the key.
 
 `integrations/hub-inbox/src/end-to-end.test.ts` runs the reporter as a hook does, sends to the Worker, and checks that the collector rebuilds the transcript byte for byte and that a webhook reaches the runtime once.
+
+For a manual test, point `OPENSCOUT_HUB_HOME` at a new scratch folder.
+Run the inbox from `integrations/hub-inbox/src/serve-local.ts`.
+Initialize the scratch folder with that URL and matching test tokens.
+Run `scout hub test --json` and `scout hub activity --limit 1` with the same hub folder.
+Check for five passed steps, one test record and no new mirror.

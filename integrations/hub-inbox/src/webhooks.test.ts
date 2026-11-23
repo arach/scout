@@ -64,12 +64,22 @@ describe("Scout Hub inbox webhooks", () => {
       body: body.replace("sesn_01xyz", "sesn_other"),
     }), env);
     expect(changed.status).toBe(400);
-    expect(env.INBOX.objects.size).toBe(0);
+    expect(await (await read(env, "GET", "/v1/inbox/nudges")).json()).toEqual({ items: [] });
+    expect((await deliver(env, "{")).status).toBe(400);
+    expect((await deliver(env, "null")).status).toBe(400);
+    const post = (body: string) => handleInboxRequest(new Request("https://inbox.test/v1/inbox/webhooks/anthropic", { method: "POST", body }), env);
+    expect((await post("{}")).status).toBe(400);
+    expect((await post("x".repeat(70_000))).status).toBe(413);
 
     const off = setup("");
     expect((await deliver(off, event())).status).toBe(404);
-    expect(await (await read(off, "GET", "/v1/inbox/health")).json()).toMatchObject({ webhooks: { anthropic: false } });
-    expect(await (await read(env, "GET", "/v1/inbox/health")).json()).toMatchObject({ webhooks: { anthropic: true } });
+    expect(await (await read(off, "GET", "/v1/inbox/health")).json()).toMatchObject({ webhooks: { anthropic: false }, rejections: { "webhooks/anthropic.not_enabled": { count: 1 } } });
+    expect(await (await read(env, "GET", "/v1/inbox/health")).json()).toMatchObject({
+      webhooks: { anthropic: true }, rejections: {
+        "webhooks/anthropic.bad_signature": { count: 2 }, "webhooks/anthropic.stale_timestamp": { count: 1 },
+        "webhooks/anthropic.bad_body": { count: 2 }, "webhooks/anthropic.missing_signature": { count: 1 }, "webhooks/anthropic.too_large": { count: 1 },
+      },
+    });
   });
 
   test("notes expire with the chunks", async () => {

@@ -15,12 +15,15 @@
  * The connector only reads. It never sends events, archives or deletes.
  */
 
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import Anthropic from "@anthropic-ai/sdk";
 
-import { resolveHubHome, resolveManagedAgentsMirrorRoot, type ManagedAgentsSessionMeta } from "./state.js";
+import { takeHubPassLock } from "./pass-lock.js";
+import { recordActivity } from "./activity.js";
+import { readInboxObservation } from "./inbox-health.js";
+import { loadHubConfig, readHubJson as readJson, writePrivateJson, resolveHubHome, resolveManagedAgentsMirrorRoot, type ManagedAgentsSessionMeta } from "./state.js";
 
 export { resolveManagedAgentsMirrorRoot, type ManagedAgentsSessionMeta };
 
@@ -50,6 +53,8 @@ type SessionProgress = {
   /** Ids of the mirrored events that share lastProcessedAt, so a resume skips them. */
   idsAtLast: string[];
   events: number;
+  lastNoteAt?: string;
+  unannouncedAt?: string;
 };
 
 type ProgressState = { v: 1; sessions: Record<string, SessionProgress> };
@@ -61,6 +66,7 @@ export type ManagedAgentsPullSummary = {
   changed: number;
   appended: number;
   sessions: string[];
+  keyRejectedSince?: string;
   error?: string;
   notes: string[];
   /** When the last webhook note arrived through the inbox, if any. */
@@ -68,16 +74,17 @@ export type ManagedAgentsPullSummary = {
 };
 
 
-function writePrivateJson(path: string, value: unknown): void {
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  chmodSync(tmp, 0o600);
-  renameSync(tmp, path);
+export const WEBHOOK_GRACE_MS = 120_000;
+
+export function isSessionId(id: string): boolean {
+  return SESSION_ID.test(id) && !Object.hasOwn(Object.prototype, id);
 }
 
-function readJson<T>(path: string): T | null {
-  if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, "utf8")) as T;
+export function unannouncedSessions(home: string, enabledSince: string, now: number) {
+  const state = readJson<ProgressState>(join(home, STATE_FILE));
+  return Object.entries(state?.sessions ?? {}).flatMap(([id, p]) =>
+    p.unannouncedAt && p.unannouncedAt >= enabledSince && now - Date.parse(p.unannouncedAt) >= WEBHOOK_GRACE_MS
+      && now - Date.parse(p.unannouncedAt) < 86_400_000 ? [{ id, since: p.unannouncedAt }] : []);
 }
 
 export function isValidManagedAgentsLabel(label: string): boolean {
@@ -115,7 +122,7 @@ export function readManagedAgentsStatus(home = resolveHubHome()): ManagedAgentsP
 }
 
 export function managedAgentsSessionPaths(root: string, label: string, sessionId: string): { events: string; meta: string } | null {
-  if (!isValidManagedAgentsLabel(label) || !SESSION_ID.test(sessionId)) return null;
+  if (!isValidManagedAgentsLabel(label) || !isSessionId(sessionId)) return null;
   const dir = join(root, label);
   return { events: join(dir, `${sessionId}.jsonl`), meta: join(dir, `${sessionId}.session.json`) };
 }
@@ -164,27 +171,18 @@ export class ManagedAgentsPuller {
   private stopped = true;
   private lastError: string | null = null;
   private lastWebhookAt: number | null = null;
-  private nudged = false;
+  private full: Promise<ManagedAgentsPullSummary> | null = null;
 
   constructor(private readonly options: ManagedAgentsPullerOptions = {}) {}
 
-  /**
-   * A webhook said these sessions changed. Pull now instead of at the next
-   * tick. While webhooks keep arriving, the full poll relaxes to a slower
-   * backstop: Anthropic drops a webhook after three failed attempts, so the
-   * poll is what catches anything lost.
-   */
-  nudge(sessionIds: string[]): void {
-    if (sessionIds.length === 0) return;
-    this.lastWebhookAt = this.options.now?.() ?? Date.now();
-    this.nudged = true;
-    if (this.stopped || this.running) return; // a running pass reschedules itself at once
-    if (this.timer) clearTimeout(this.timer);
-    this.schedule(0);
+  /** A webhook and an operator re-pull share the targeted path. Only a real
+   * note supplies received, so a manual repair never counts as a webhook. */
+  nudge(id: string, received?: string): Promise<ManagedAgentsPullSummary> {
+    if (!isSessionId(id)) throw new Error("Invalid Managed Agents session id.");
+    return this.serialize({ id, received });
   }
 
   private nextDelay(): number {
-    if (this.nudged) return 0;
     const now = this.options.now?.() ?? Date.now();
     const webhooksLive = this.lastWebhookAt !== null && now - this.lastWebhookAt < 24 * 3_600_000;
     return webhooksLive ? this.options.webhookIntervalMs ?? 120_000 : this.options.intervalMs ?? 15_000;
@@ -221,15 +219,20 @@ export class ManagedAgentsPuller {
 
   /** One pass. Concurrent calls share the pass in progress. */
   pullOnce(): Promise<ManagedAgentsPullSummary> {
-    this.running ??= this.pass().finally(() => { this.running = null; });
+    this.full ??= this.serialize().finally(() => { this.full = null; });
+    return this.full;
+  }
+
+  private async serialize(target?: { id: string; received?: string }): Promise<ManagedAgentsPullSummary> {
+    while (this.running) await this.running;
+    this.running = this.pass(target).finally(() => { this.running = null; });
     return this.running;
   }
 
-  private async pass(): Promise<ManagedAgentsPullSummary> {
-    this.nudged = false;
+  private async pass(target?: { id: string; received?: string }): Promise<ManagedAgentsPullSummary> {
     const now = this.options.now?.() ?? Date.now();
     const summary: ManagedAgentsPullSummary = { at: new Date(now).toISOString(), configured: false, listed: 0, changed: 0, appended: 0, sessions: [], notes: [] };
-    if (this.lastWebhookAt !== null) summary.lastWebhookAt = new Date(this.lastWebhookAt).toISOString();
+
     let config: ManagedAgentsConfig | null;
     try {
       config = loadManagedAgentsConfig(this.home);
@@ -240,50 +243,79 @@ export class ManagedAgentsPuller {
     if (!config) return summary;
     summary.configured = true;
 
-    const lock = join(this.home, "managed-agents.lock");
-    try {
-      mkdirSync(lock);
-    } catch {
-      try {
-        if (Date.now() - statSync(lock).mtimeMs < 5 * 60_000) { summary.notes.push("another pull is running"); return summary; }
-      } catch { /* gone already */ }
-      rmSync(lock, { recursive: true, force: true });
-      mkdirSync(lock);
-    }
+    const release = takeHubPassLock(this.home, "managed-agents");
+    if (!release) { summary.notes.push("another pull is running"); return summary; }
     try {
       const client = this.options.client?.(config)
         ?? new Anthropic({ apiKey: config.apiKey, ...(config.baseURL ? { baseURL: config.baseURL } : {}), maxRetries: 2, timeout: 60_000 });
-      await this.pull(client, config, now, summary);
+      const last = readManagedAgentsStatus(this.home)?.lastWebhookAt;
+      this.lastWebhookAt = last ? Date.parse(last) : null;
+      if (target?.received) this.lastWebhookAt = Math.max(this.lastWebhookAt ?? 0, Date.parse(target.received));
+      if (this.lastWebhookAt !== null) summary.lastWebhookAt = new Date(this.lastWebhookAt).toISOString();
+      await this.pull(client, config, now, summary, target);
       this.lastError = null;
     } catch (error) {
-      summary.error = describeError(error);
+      summary.error = target && error instanceof Anthropic.NotFoundError
+        ? "Managed Agents session not found (404)" : describeError(error);
+      if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) {
+        summary.keyRejectedSince = readManagedAgentsStatus(this.home)?.keyRejectedSince ?? summary.at;
+      }
     }
     try {
       return this.finish(summary);
     } finally {
-      rmSync(lock, { recursive: true, force: true });
+      release();
     }
   }
 
-  private async pull(client: Anthropic, config: ManagedAgentsConfig, now: number, summary: ManagedAgentsPullSummary): Promise<void> {
+  private async pull(client: Anthropic, config: ManagedAgentsConfig, now: number, summary: ManagedAgentsPullSummary, target?: { id: string; received?: string }): Promise<void> {
     const statePath = join(this.home, STATE_FILE);
-    const state = readJson<ProgressState>(statePath) ?? { v: 1, sessions: {} };
+    const state: ProgressState = readJson<ProgressState>(statePath) ?? { v: 1, sessions: {} };
     const since = new Date(now - Math.max(1, config.lookbackDays) * 86_400_000).toISOString();
     const max = this.options.maxSessions ?? 200;
     const changed: SessionLike[] = [];
-    for await (const session of client.beta.sessions.list({ "created_at[gte]": since, order: "desc", limit: 100, include_archived: true })) {
-      summary.listed += 1;
-      const paths = managedAgentsSessionPaths(this.mirrorRoot, config.label, session.id);
-      if (!paths) { summary.notes.push(`${session.id}: not a session id Scout accepts`); continue; }
-      const progress = state.sessions[session.id];
-      if (!progress || progress.updatedAt !== session.updated_at || !existsSync(paths.events)) changed.push(session);
-      if (summary.listed >= max) break;
+    let enabledSince: string | null = null;
+    if (target) {
+      if (target.received) {
+        // A note is evidence even when the vendor read fails. Record receipt
+        // before retrieval so a later backstop does not infer a missed webhook.
+        const prior = state.sessions[target.id] ??= { updatedAt: "", lastProcessedAt: null, idsAtLast: [], events: 0 };
+        if (!prior.lastNoteAt || target.received > prior.lastNoteAt) prior.lastNoteAt = target.received;
+        if (prior.unannouncedAt && Date.parse(target.received) >= Date.parse(prior.unannouncedAt) - WEBHOOK_GRACE_MS) {
+          delete prior.unannouncedAt;
+        }
+        writePrivateJson(statePath, state);
+      }
+      const session = await client.beta.sessions.retrieve(target.id);
+      if (session.id !== target.id) throw new Error("Managed Agents returned a different session.");
+      changed.push(session); // Force the event cursor read, even if metadata did not change.
+      summary.listed = 1;
+    } else {
+      const inbox = loadHubConfig(this.home)?.inbox;
+      enabledSince = inbox ? readInboxObservation(this.home, inbox)?.enabledSince ?? null : null;
+      for await (const session of client.beta.sessions.list({ "created_at[gte]": since, order: "desc", limit: 100, include_archived: true })) {
+        summary.listed += 1;
+        const paths = managedAgentsSessionPaths(this.mirrorRoot, config.label, session.id);
+        if (!paths) { summary.notes.push("Skipped an invalid session id."); continue; }
+        const progress = state.sessions[session.id];
+        if (!progress || progress.updatedAt !== session.updated_at || !existsSync(paths.events)) changed.push(session);
+        if (summary.listed >= max) break;
+      }
     }
-    summary.changed = changed.length;
     // Oldest first, so a pass cut short by an error still advances in order.
     for (const session of changed.reverse()) {
       try {
+        const prior = state.sessions[session.id];
+        const metadataChanged = prior?.updatedAt !== session.updated_at;
         const appended = await this.pullSession(client, config, session, state);
+        if (metadataChanged || appended || !target) summary.changed++;
+        const progress = state.sessions[session.id]!;
+        if (!target && enabledSince && metadataChanged && Date.parse(session.updated_at) >= Date.parse(enabledSince)
+          && (!progress.lastNoteAt || now - Date.parse(progress.lastNoteAt) > WEBHOOK_GRACE_MS)) {
+          if (!progress.unannouncedAt || progress.unannouncedAt < enabledSince || now - Date.parse(progress.unannouncedAt) >= 86_400_000) {
+            progress.unannouncedAt = summary.at;
+          }
+        }
         summary.appended += appended;
         if (appended > 0) summary.sessions.push(`${config.label}/${session.id}`);
       } finally {
@@ -299,7 +331,7 @@ export class ManagedAgentsPuller {
     const fileExists = existsSync(paths.events);
     const progress: SessionProgress = previous && fileExists
       ? { ...previous, idsAtLast: [...previous.idsAtLast] }
-      : { updatedAt: "", lastProcessedAt: null, idsAtLast: [], events: 0 };
+      : { updatedAt: "", lastProcessedAt: null, idsAtLast: [], events: 0, lastNoteAt: previous?.lastNoteAt };
     if (!fileExists) writeFileSync(paths.events, "", { mode: 0o600 });
 
     const skip = new Set(progress.idsAtLast);
@@ -342,6 +374,9 @@ export class ManagedAgentsPuller {
   private finish(summary: ManagedAgentsPullSummary): ManagedAgentsPullSummary {
     if (summary.error && summary.error !== this.lastError) this.options.log?.(`[openscout-runtime] Managed Agents pull failed: ${summary.error}`);
     this.lastError = summary.error ?? null;
+    if (summary.changed || summary.appended || summary.error) {
+      recordActivity("pull", summary.error ? `Pull failed: ${summary.error}` : `${summary.changed} changed, ${summary.appended} events appended`, this.home);
+    }
     if (summary.configured || summary.error) {
       try {
         mkdirSync(this.home, { recursive: true, mode: 0o700 });
@@ -357,6 +392,6 @@ function describeError(error: unknown): string {
   if (error instanceof Anthropic.PermissionDeniedError) return "the API key cannot read Managed Agents sessions (403)";
   if (error instanceof Anthropic.NotFoundError) return "the Managed Agents endpoints were not found (404); check the base URL";
   if (error instanceof Anthropic.RateLimitError) return "rate limited (429); the next pass retries";
-  if (error instanceof Anthropic.APIError) return `Anthropic API ${error.status ?? "error"}: ${error.message}`;
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Anthropic.APIError) return `Anthropic API ${error.status ?? "error"}`;
+  return "Could not read the Managed Agents session.";
 }

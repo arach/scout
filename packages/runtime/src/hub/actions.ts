@@ -6,17 +6,21 @@
 
 import { isAbsolute } from "node:path";
 
+import { activityPage, recordActivity } from "./activity.js";
+import { takeHubPassLock } from "./pass-lock.js";
+import { probeInbox } from "./round-trip.js";
 import { HubCollectorService, type HubCollectSummary } from "./collector.js";
 import { connectClaudeCode, disconnectClaudeCode, type ConnectClaudeCodeResult } from "./connect.js";
 import {
   isValidManagedAgentsLabel,
+  isSessionId,
   loadManagedAgentsConfig,
   ManagedAgentsPuller,
   removeManagedAgentsConfig,
   saveManagedAgentsConfig,
   type ManagedAgentsPullSummary,
 } from "./managed-agents.js";
-import { loadHubConfig, loadHubIdentity, type HubConfig } from "./state.js";
+import { loadHubConfig, loadHubIdentity, resolveHubHome } from "./state.js";
 
 export class HubActionError extends Error {
   constructor(message: string, readonly code: string, readonly status = 400) {
@@ -69,19 +73,22 @@ export async function connectManagedAgents(
       "managed_agents_unreadable", 502,
     );
   }
+  recordActivity("connect", `Connected Managed Agents as ${label}.`);
   return { label, lookbackDays, ...summary };
 }
 
 export function disconnectManagedAgents(): { removed: boolean } {
-  return { removed: removeManagedAgentsConfig() };
+  const removed = removeManagedAgentsConfig();
+  if (removed) recordActivity("disconnect", "Disconnected Managed Agents.");
+  return { removed };
 }
 
-function requireHubSetup(): { config: HubConfig; publicKey: Uint8Array } {
+function requireHubSetup() {
   const config = loadHubConfig();
   if (!config) throw new HubActionError("Scout Hub is not set up. Run `scout hub init --inbox <url>`.", "hub_not_initialized", 409);
   const identity = loadHubIdentity();
   if (!identity) throw new HubActionError("This runtime has no Scout Hub key. Run `scout hub init --inbox <url>`.", "hub_not_initialized", 409);
-  return { config, publicKey: identity.publicKey };
+  return { config, identity };
 }
 
 function requireRepoRoot(repoRoot: unknown): string {
@@ -92,9 +99,11 @@ function requireRepoRoot(repoRoot: unknown): string {
 /** Writes the reporter, its config and hooks into the repo. The operator commits them. */
 export function connectClaudeCodeRepo(input: { repoRoot: string; label?: string }): ConnectClaudeCodeResult {
   const repoRoot = requireRepoRoot(input.repoRoot);
-  const { config, publicKey } = requireHubSetup();
+  const { config, identity } = requireHubSetup();
   try {
-    return connectClaudeCode({ repoRoot, config, recipientPublicKey: publicKey, label: input.label });
+    const result = connectClaudeCode({ repoRoot, config, recipientPublicKey: identity.publicKey, label: input.label });
+    if (result.changed.length) recordActivity("connect", `Connected Claude Code as ${result.label}.`);
+    return result;
   } catch (error) {
     throw new HubActionError(error instanceof Error ? error.message : String(error), "connect_failed");
   }
@@ -102,7 +111,38 @@ export function connectClaudeCodeRepo(input: { repoRoot: string; label?: string 
 
 export function disconnectClaudeCodeRepo(input: { repoRoot: string }): { repoRoot: string; changed: string[] } {
   const repoRoot = requireRepoRoot(input.repoRoot);
-  return { repoRoot, ...disconnectClaudeCode(repoRoot) };
+  const { changed } = disconnectClaudeCode(repoRoot);
+  if (changed.length) recordActivity("disconnect", `Disconnected Claude Code repo ${repoRoot}.`);
+  return { repoRoot, changed };
+}
+
+export function readHubActivity(before: string | null = null, limit: string | null = null) {
+  if (before !== null && !/^[0-9a-z]{10}$/.test(before)) throw new HubActionError("Use a returned activity id.", "invalid_cursor");
+  if (limit !== null && (!/^\d+$/.test(limit) || Number(limit) < 1 || !Number.isSafeInteger(Number(limit)))) {
+    throw new HubActionError("Use a positive whole number for limit.", "invalid_limit");
+  }
+  return activityPage(before, Math.min(Number(limit ?? 50), 200));
+}
+
+export async function pullHubSession(id: string, puller: Pick<ManagedAgentsPuller, "nudge"> = new ManagedAgentsPuller()) {
+  if (!isSessionId(id)) throw new HubActionError("Use a Managed Agents session id.", "invalid_session_id");
+  if (!loadManagedAgentsConfig()) throw new HubActionError("Connect Managed Agents first.", "managed_agents_not_connected", 409);
+  const summary = await puller.nudge(id);
+  if (summary.notes.includes("another pull is running")) throw new HubActionError("Another pull is running. Try again.", "hub_busy", 409);
+  if (summary.error) throw new HubActionError(summary.error, "managed_agents_unreadable", 502);
+  return { sessionId: id, ...summary };
+}
+
+export async function testHubInbox() {
+  const { config, identity } = requireHubSetup();
+  const release = takeHubPassLock(resolveHubHome(), "collect");
+  if (!release) throw new HubActionError("The collector is running. Try again.", "hub_busy", 409);
+  try {
+    const result = await probeInbox(config, identity, !!loadManagedAgentsConfig());
+    const failed = result.steps.filter(step => step.result === "failed").map(step => step.name);
+    recordActivity("test", result.ok ? "Inbox round trip passed." : `Inbox test failed: ${failed.join(", ")}.`);
+    return result;
+  } finally { release(); }
 }
 
 export type HubCollectNowResult = { claudeCode: HubCollectSummary | null; managedAgents: ManagedAgentsPullSummary | null };

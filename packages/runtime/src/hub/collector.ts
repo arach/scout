@@ -5,12 +5,14 @@
  * takes effect without a restart.
  */
 
-import { mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { recordActivity } from "./activity.js";
+import { takeHubPassLock } from "./pass-lock.js";
+import { observeInbox, type InboxHealth } from "./inbox-health.js";
 import { applyChunkToMirror, mirrorPathForHeader } from "./mirror.js";
-import { openHubChunk, type HubChunkHeader, type HubKeyPair } from "./seal.js";
-import { loadHubConfig, loadHubIdentity, resolveHubClaudeMirrorRoot, resolveHubHome } from "./state.js";
+import { isHubTestChunk, openHubChunk, type HubChunkHeader, type HubKeyPair } from "./seal.js";
+import { loadHubConfig, loadHubIdentity, resolveHubClaudeMirrorRoot, resolveHubHome, readHubJson, writePrivateJson } from "./state.js";
 
 export type HubInboxItem = { key: string; size: number; uploaded: string };
 
@@ -43,13 +45,20 @@ export class HubInboxClient {
       ...init,
       headers: { authorization: `Bearer ${this.token}`, ...(init.headers ?? {}) },
       signal: init.signal ?? AbortSignal.timeout(30_000),
-    });
+    }).catch(() => { throw new HubInboxError("Could not reach the inbox.", 0); });
     if (!response.ok) throw new HubInboxError(`Inbox ${init.method ?? "GET"} ${path} answered ${response.status}`, response.status);
     return response;
   }
 
-  async health(): Promise<{ ok: boolean; pending?: number; webhooks?: Record<string, boolean> }> {
-    return (await this.request("/v1/inbox/health")).json() as Promise<{ ok: boolean; pending?: number; webhooks?: Record<string, boolean> }>;
+  async health(buckets = false): Promise<InboxHealth> {
+    return (await this.request("/v1/inbox/health" + (buckets ? "?buckets=1" : ""))).json() as Promise<InboxHealth>;
+  }
+
+  async post(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+    const response = await this.request("/v1/inbox/chunks", { method: "POST", body: bytes });
+    const { key } = await response.json() as { key: string };
+    if (typeof key !== "string" || !key.startsWith("c/")) throw new Error("No chunk key in the inbox response.");
+    return key;
   }
 
   async nudges(): Promise<HubInboxNudge[]> {
@@ -96,6 +105,9 @@ export type HubCollectSummary = {
   sessions: string[];
   /** Webhook notes handed to their puller this pass. */
   nudges: number;
+  failureSince?: string;
+  inboxFailure?: "unauthorized" | "unreachable";
+  discardedTests?: number;
   error?: string;
   notes: string[];
 };
@@ -171,29 +183,23 @@ export class HubCollectorService {
     }
     if (!config || !identity) return summary;
     summary.configured = true;
-    const lock = join(this.home, "collect.lock");
-    try {
-      mkdirSync(lock);
-    } catch {
-      // Another process (the CLI or the runtime) is collecting. Take over a lock left by a crash.
-      try {
-        if (Date.now() - statSync(lock).mtimeMs < 5 * 60_000) { summary.notes.push("another collector is running"); return summary; }
-      } catch { /* gone already */ }
-      rmSync(lock, { recursive: true, force: true });
-      mkdirSync(lock);
-    }
+    const release = takeHubPassLock(this.home, "collect");
+    if (!release) { summary.notes.push("another collector is running"); return summary; }
     try {
       const client = new HubInboxClient(config.inbox, config.readToken, this.options.fetch);
+      const health = await client.health(true);
+      observeInbox(this.home, config.inbox, health, summary.at);
       await this.drain(client, identity, summary);
       await this.takeNudges(client, summary);
       this.lastError = null;
     } catch (error) {
+      if (error instanceof HubInboxError) summary.inboxFailure = error.status === 401 ? "unauthorized" : "unreachable";
       summary.error = error instanceof Error ? error.message : String(error);
     }
     try {
       return this.finish(summary);
     } finally {
-      rmSync(lock, { recursive: true, force: true });
+      release();
     }
   }
 
@@ -208,15 +214,20 @@ export class HubCollectorService {
         const bytes = await client.get(item.key);
         try {
           const { header, data } = openHubChunk(bytes, identity);
-          const target = mirrorPathForHeader(this.mirrorRoot, header);
-          if ("reason" in target) throw new Error(target.reason);
-          opened.push({ key: item.key, uploaded: item.uploaded, header, data, target: target.path });
+          if (!isHubTestChunk(header)) {
+            const target = mirrorPathForHeader(this.mirrorRoot, header);
+            if ("reason" in target) throw new Error(target.reason);
+            opened.push({ key: item.key, uploaded: item.uploaded, header, data, target: target.path });
+            continue;
+          }
+          // A probe interrupted after POST left this for the next drain.
+          summary.discardedTests = (summary.discardedTests ?? 0) + 1;
         } catch (error) {
           // Not sealed to this runtime, or not a chunk we accept. It can never apply.
           summary.rejected += 1;
           summary.notes.push(`${item.key}: ${error instanceof Error ? error.message : String(error)}`);
-          await client.delete(item.key);
         }
+        await client.delete(item.key);
       }
       if (!page.cursor || page.items.length === 0) break;
       cursor = page.cursor;
@@ -261,8 +272,11 @@ export class HubCollectorService {
       throw error;
     }
     if (nudges.length === 0) return;
-    this.options.onNudges(nudges);
-    for (const nudge of nudges) await client.deleteNudge(nudge.key);
+    await this.options.onNudges(nudges);
+    for (const nudge of nudges) {
+      await client.deleteNudge(nudge.key);
+      recordActivity("webhook", `${nudge.type} ${nudge.resourceId}`, this.home);
+    }
     summary.nudges = nudges.length;
   }
 
@@ -271,10 +285,17 @@ export class HubCollectorService {
     this.lastError = summary.error ?? null;
     if (summary.configured || summary.error) {
       try {
-        const status = join(this.home, "status.json");
-        const temp = `${status}.${process.pid}.tmp`;
-        writeFileSync(temp, `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
-        renameSync(temp, status);
+        const path = join(this.home, "status.json");
+        const last = readHubJson<HubCollectSummary>(path);
+        const gapChanged = JSON.stringify(summary.waitingFiles) !== JSON.stringify(last?.waitingFiles ?? []);
+        if (summary.error || summary.appended || summary.duplicate || summary.rejected || summary.nudges || summary.discardedTests || gapChanged) {
+          recordActivity("collect", summary.error ? `Collect failed: ${summary.error}`
+            : `${summary.appended} appended, ${summary.duplicate} duplicates, ${summary.rejected} rejected, ${summary.nudges} webhook notes, ${summary.waiting} waiting${summary.discardedTests ? ", discarded interrupted probe" : ""}`, this.home);
+        }
+        if (summary.inboxFailure) {
+          summary.failureSince = last?.inboxFailure === summary.inboxFailure ? last.failureSince ?? last.at : summary.at;
+        }
+        writePrivateJson(path, summary);
       } catch { /* status is best effort */ }
     }
     return summary;

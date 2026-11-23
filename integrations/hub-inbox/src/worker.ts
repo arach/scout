@@ -10,7 +10,7 @@
  *   GET    /v1/inbox/pending        READ_TOKEN   list chunks, oldest first (?after=&limit=)
  *   GET    /v1/inbox/chunks/:key    READ_TOKEN   fetch one chunk
  *   DELETE /v1/inbox/chunks/:key    READ_TOKEN   delete one chunk once collected
- *   GET    /v1/inbox/health         READ_TOKEN   { ok, pending, webhooks }
+ *   GET    /v1/inbox/health         READ_TOKEN   { ok, pending, webhooks, rejections }
  *   POST   /v1/inbox/webhooks/anthropic  signature  a Managed Agents webhook
  *   GET    /v1/inbox/nudges         READ_TOKEN   webhook notes, oldest first
  *   DELETE /v1/inbox/nudges/:key    READ_TOKEN   delete one note once handled
@@ -18,14 +18,15 @@
  * One deployment serves one runtime. Keys sort by arrival time.
  */
 
+import { countRejection, readRejections, REJECTION_PREFIX } from "./rejections.ts";
 import { Webhook } from "standardwebhooks";
 
 export type InboxObject = { key: string; size: number; uploaded: Date };
 
 /** The part of R2Bucket this Worker uses, so tests can pass an in-memory bucket. */
 export interface InboxBucket {
-  put(key: string, value: ArrayBuffer | Uint8Array): Promise<unknown>;
-  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
+  put(key: string, value: ArrayBuffer | Uint8Array, options?: { onlyIf: Headers }): Promise<{ httpEtag: string } | null>;
+  get(key: string): Promise<{ httpEtag: string; arrayBuffer(): Promise<ArrayBuffer> } | null>;
   delete(key: string): Promise<void>;
   list(options: { prefix?: string; startAfter?: string; limit?: number; cursor?: string }): Promise<{
     objects: InboxObject[];
@@ -107,26 +108,36 @@ async function readBody(request: Request, max: number): Promise<Uint8Array | Res
 
 async function receiveAnthropicWebhook(request: Request, env: InboxEnv): Promise<Response> {
   const secret = env.ANTHROPIC_WEBHOOK_SIGNING_KEY?.trim();
-  if (!secret) return error(404, "Not found");
-  const body = await request.text();
-  if (body.length > MAX_WEBHOOK_BYTES) return error(413, "Webhook too large");
+  const refuse = async (reason: string, status: number, message: string) => {
+    await countRejection(env.INBOX, "webhooks/anthropic." + reason);
+    return error(status, message);
+  };
+  if (!secret) return refuse("not_enabled", 404, "Not found");
+  if (Number(request.headers.get("content-length")) > MAX_WEBHOOK_BYTES) return refuse("too_large", 413, "Webhook too large");
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength > MAX_WEBHOOK_BYTES) return refuse("too_large", 413, "Webhook too large");
+  const body = new TextDecoder().decode(bytes);
   let event: { id?: unknown; created_at?: unknown; data?: { type?: unknown; id?: unknown } };
   try {
     // The same library the Anthropic SDK's webhooks.unwrap() uses: signature
     // over id, timestamp and raw body, and a five-minute freshness window.
-    new Webhook(secret).verify(body, {
+    event = new Webhook(secret).verify(body, {
       "webhook-id": request.headers.get("webhook-id") ?? "",
       "webhook-timestamp": request.headers.get("webhook-timestamp") ?? "",
       "webhook-signature": request.headers.get("webhook-signature") ?? "",
-    });
-    event = JSON.parse(body);
-  } catch {
-    return error(400, "Invalid signature");
+    }) as typeof event;
+  } catch (err) {
+    if (err instanceof SyntaxError) return refuse("bad_body", 400, "Not a webhook event");
+    const reason = err instanceof Error && err.message === "Missing required headers" ? "missing_signature"
+      : err instanceof Error && /^Message timestamp too (old|new)$/.test(err.message) ? "stale_timestamp" : "bad_signature";
+    return refuse(reason, 400, "Invalid signature");
   }
-  const eventId = typeof event.id === "string" ? event.id : "";
-  const type = typeof event.data?.type === "string" ? event.data.type : "";
-  const resourceId = typeof event.data?.id === "string" ? event.data.id : "";
-  if (!/^[A-Za-z0-9_-]{1,128}$/u.test(eventId) || !type || !resourceId) return error(400, "Not a webhook event");
+  const eventId = typeof event?.id === "string" ? event.id : "";
+  const type = typeof event?.data?.type === "string" ? event.data.type : "";
+  const resourceId = typeof event?.data?.id === "string" ? event.data.id : "";
+  if (!/^[A-Za-z0-9_-]{1,128}$/u.test(eventId) || !/^[A-Za-z0-9_.-]{1,128}$/.test(type) || !/^[A-Za-z0-9_-]{1,128}$/.test(resourceId)) {
+    return refuse("bad_body", 400, "Not a webhook event");
+  }
   // Keyed by event ID, so Anthropic's retries overwrite one note instead of adding more.
   const key = `${NUDGE_PREFIX}anthropic/${eventId}`;
   const nudge: InboxNudge = {
@@ -145,9 +156,15 @@ export async function handleInboxRequest(request: Request, env: InboxEnv): Promi
   if (request.method === "POST" && path === "/v1/inbox/webhooks/anthropic") return receiveAnthropicWebhook(request, env);
 
   if (request.method === "POST" && path === "/v1/inbox/chunks") {
-    if (!(await authorized(request, env.WRITE_TOKEN))) return error(401, "Unauthorized");
+    if (!(await authorized(request, env.WRITE_TOKEN))) {
+      await countRejection(env.INBOX, "chunks.unauthorized");
+      return error(401, "Unauthorized");
+    }
     const body = await readBody(request, Number(env.MAX_CHUNK_BYTES) || DEFAULT_MAX_CHUNK_BYTES);
-    if (body instanceof Response) return body;
+    if (body instanceof Response) {
+      await countRejection(env.INBOX, body.status === 413 ? "chunks.too_large" : "chunks.bad_body");
+      return body;
+    }
     const key = newKey();
     await env.INBOX.put(key, body);
     return json({ key }, 201);
@@ -159,6 +176,7 @@ export async function handleInboxRequest(request: Request, env: InboxEnv): Promi
   if (request.method === "GET" && path === "/v1/inbox/health") {
     const listed = await env.INBOX.list({ prefix: PREFIX, limit: 1000 });
     return json({
+      ...await readRejections(env.INBOX, url.searchParams.has("buckets")),
       ok: true, pending: listed.objects.length, more: listed.truncated,
       webhooks: { anthropic: Boolean(env.ANTHROPIC_WEBHOOK_SIGNING_KEY?.trim()) },
     });
@@ -215,7 +233,7 @@ export async function expireInbox(env: InboxEnv, now = Date.now()): Promise<numb
   const holdMs = (Number(env.HOLD_DAYS) || 7) * 24 * 60 * 60 * 1000;
   let removed = 0;
   let cursor: string | undefined;
-  for (const prefix of [PREFIX, NUDGE_PREFIX]) {
+  for (const prefix of [PREFIX, NUDGE_PREFIX, REJECTION_PREFIX]) {
     cursor = undefined;
     for (;;) {
       const listed = await env.INBOX.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) });

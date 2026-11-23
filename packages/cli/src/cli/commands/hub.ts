@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
-  collectHubNow,
+  collectHubNow, readHubActivity, pullHubSession, testHubInbox, readHubStatus, HubInboxError, type HubIssue,
   connectClaudeCodeRepo,
   connectManagedAgents,
   disconnectClaudeCodeRepo,
@@ -28,7 +28,7 @@ import {
 import type { ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
 
-type HubCommand = "status" | "init" | "connect" | "disconnect" | "collect";
+type HubCommand = "status" | "init" | "connect" | "disconnect" | "collect" | "activity" | "pull" | "test";
 type HubOptions = {
   command: HubCommand;
   target?: string;
@@ -40,6 +40,8 @@ type HubOptions = {
   apiKeyEnv?: string;
   baseUrl?: string;
   sinceDays?: string;
+  limit?: string;
+  sessionId?: string;
   json: boolean;
   help: boolean;
 };
@@ -54,6 +56,9 @@ export function renderHubCommandHelp(): string {
     "  scout hub disconnect claude-code [<repo>]",
     "  scout hub disconnect managed-agents",
     "  scout hub collect",
+    "  scout hub activity [--limit n] [--json]",
+    "  scout hub pull <session-id> [--json]",
+    "  scout hub test [--json]",
     "",
     "Scout Hub brings agent sessions that run in a vendor's cloud into this runtime.",
     "A reporter in the sandbox seals new transcript bytes to this runtime's key and",
@@ -80,7 +85,7 @@ export function parseHubCommandOptions(args: string[]): HubOptions {
   const result: HubOptions = { command: "status", json: false, help: false };
   const positional: string[] = [];
   const valueFlags: Record<string, keyof HubOptions> = {
-    "--inbox": "inbox", "--label": "label", "--read-token": "readToken", "--write-token": "writeToken",
+    "--limit": "limit", "--inbox": "inbox", "--label": "label", "--read-token": "readToken", "--write-token": "writeToken",
     "--api-key-env": "apiKeyEnv", "--base-url": "baseUrl", "--since-days": "sinceDays",
   };
   for (let index = 0; index < args.length; index += 1) {
@@ -99,8 +104,10 @@ export function parseHubCommandOptions(args: string[]): HubOptions {
     positional.push(arg);
   }
   const command = (positional.shift() ?? "status") as HubCommand;
-  if (!["status", "init", "connect", "disconnect", "collect"].includes(command)) throw new ScoutCliError(`Unknown hub command: ${command}`);
+  if (!["status", "init", "connect", "disconnect", "collect", "activity", "pull", "test"].includes(command)) throw new ScoutCliError(`Unknown hub command: ${command}`);
   result.command = command;
+  if (result.limit && command !== "activity") throw new ScoutCliError("--limit applies to scout hub activity.");
+  if (command === "pull" && !(result.sessionId = positional.shift())) throw new ScoutCliError("scout hub pull needs a session id.");
   if (command === "connect" || command === "disconnect") {
     const target = positional.shift();
     if (target !== "claude-code" && target !== "managed-agents") {
@@ -200,19 +207,29 @@ async function runConnectManagedAgents(options: HubOptions): Promise<{ value: Re
   return { value: { ...result }, text };
 }
 
+function issueLines(issues: HubIssue[]): string[] {
+  return issues.length ? ["Issues:", ...issues.map(i => `  ${i.severity}: ${i.title}. ${i.detail} ${i.fix}`), ""] : [];
+}
+
 async function runStatus(): Promise<{ value: Record<string, unknown>; text: string }> {
   const config = loadHubConfig();
   if (!config) {
+    const { issues } = readHubStatus();
     const managed = managedAgentsStatusLines();
     return {
-      value: { configured: false, managedAgents: managedAgentsStatusValue() },
-      text: ["Claude Code cloud: not set up. Run `scout hub init --inbox <url>`.", ...managed].join("\n"),
+      value: { configured: false, issues, managedAgents: managedAgentsStatusValue() },
+      text: [...issueLines(issues), "Claude Code cloud: not set up. Run `scout hub init --inbox <url>`.", ...managed].join("\n"),
     };
   }
   let inbox: Record<string, unknown>;
+  const at = new Date().toISOString();
+  let issues: HubIssue[];
   try {
-    inbox = { reachable: true, ...(await new HubInboxClient(config.inbox, config.readToken).health()) };
+    const health = await new HubInboxClient(config.inbox, config.readToken).health();
+    inbox = { reachable: true, ...health };
+    issues = readHubStatus(undefined, { at, rejections: health.rejections, enabled: health.webhooks?.anthropic }).issues;
   } catch (error) {
+    issues = readHubStatus(undefined, { at, failure: error instanceof HubInboxError && error.status === 401 ? "unauthorized" : "unreachable" }).issues;
     inbox = { reachable: false, error: error instanceof Error ? error.message : String(error) };
   }
   const statusPath = join(resolveHubHome(), "status.json");
@@ -221,6 +238,7 @@ async function runStatus(): Promise<{ value: Record<string, unknown>; text: stri
   const now = Date.now();
   const sessions = listHubMirroredSessions(resolveHubClaudeMirrorRoot());
   const lines = [
+    ...issueLines(issues),
     `Inbox: ${config.inbox} ${inbox.reachable ? `(reachable, ${inbox.pending ?? "?"} waiting)` : `(not reachable: ${inbox.error})`}`,
     lastCollect
       ? `Last collect: ${lastCollect.at}, ${lastCollect.appended} appended, ${lastCollect.waiting} waiting${lastCollect.error ? `, error: ${lastCollect.error}` : ""}`
@@ -238,7 +256,7 @@ async function runStatus(): Promise<{ value: Record<string, unknown>; text: stri
       : ["  no cloud sessions yet"]),
   ];
   lines.push(...managedAgentsStatusLines());
-  return { value: { configured: true, inbox: { url: config.inbox, ...inbox }, lastCollect, sessions, managedAgents: managedAgentsStatusValue() }, text: lines.join("\n") };
+  return { value: { configured: true, issues, inbox: { url: config.inbox, ...inbox }, lastCollect, sessions, managedAgents: managedAgentsStatusValue() }, text: lines.join("\n") };
 }
 
 function managedAgentsStatusValue(): Record<string, unknown> {
@@ -321,6 +339,26 @@ export async function runHubCommand(context: ScoutCommandContext, args: string[]
       const repoRoot = resolve(context.cwd, options.path ?? ".");
       const { changed } = disconnectClaudeCodeRepo({ repoRoot });
       result = { value: { repoRoot, changed }, text: changed.length ? `Removed from ${repoRoot}: ${changed.join(", ")}. Commit the change.` : "Nothing to remove." };
+      break;
+    }
+    case "activity": {
+      const page = readHubActivity(null, options.limit ?? null);
+      result = { value: page, text: page.items.map(row => `${row.at}  ${row.kind}  ${row.summary}`).join("\n") || "No Hub activity yet." };
+      break;
+    }
+    case "pull": {
+      const pull = await pullHubSession(options.sessionId!);
+      result = { value: pull, text: `${pull.sessionId}: ${managedAgentsPullText(pull)}` };
+      break;
+    }
+    case "test": {
+      const test = await testHubInbox();
+      if (!test.ok) process.exitCode = 1;
+      result = { value: test, text: [
+        `Inbox round trip: ${test.ok ? "passed" : "failed"}`,
+        ...test.steps.map(s => `  ${s.name}: ${s.result} (${s.ms} ms)${s.detail ? ". " + s.detail : ""}`),
+        ...(typeof test.webhooksEnabled === "boolean" ? [`Webhooks: ${test.webhooksEnabled ? "enabled" : "not enabled"}`] : []),
+      ].join("\n") };
       break;
     }
     case "collect": result = await runCollect(); break;

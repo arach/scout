@@ -14,10 +14,17 @@ The inbox also takes webhooks from Claude Managed Agents. Anthropic can deliver 
 | `GET /v1/inbox/pending?after=&limit=` | read | Lists chunks, oldest first. |
 | `GET /v1/inbox/chunks/:key` | read | Returns one chunk. |
 | `DELETE /v1/inbox/chunks/:key` | read | Deletes one chunk after it is collected. |
-| `GET /v1/inbox/health` | read | Returns `{ ok, pending, webhooks }`. |
+| `GET /v1/inbox/health` | read | Returns `{ ok, pending, webhooks, rejections }`. |
 | `POST /v1/inbox/webhooks/anthropic` | signature | Takes a Managed Agents webhook. Off until `ANTHROPIC_WEBHOOK_SIGNING_KEY` is set. |
 | `GET /v1/inbox/nudges` | read | Lists webhook notes, oldest first. |
 | `DELETE /v1/inbox/nudges/:key` | read | Deletes one note after the runtime acts on it. |
+
+Health reports the last 24 hours of refusals as `{ "<route>.<reason>": { count, lastAt } }`.
+The webhook reasons are `bad_signature`, `missing_signature`, `stale_timestamp`, `too_large`, `bad_body` and `not_enabled`.
+The chunk upload reasons are `unauthorized`, `too_large` and `bad_body`.
+The inbox stores hourly counts with one-second resolution. It does not store a refused body or header.
+The same seven-day sweep removes old counters.
+The collector requests `?buckets=1` for cumulative hourly counts so expiration does not hide new refusals.
 
 The write token can only add chunks. It goes into repos, inside `.claude/scout/hub.json`. The read token stays on your machine.
 

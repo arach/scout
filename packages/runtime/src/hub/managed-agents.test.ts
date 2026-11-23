@@ -8,6 +8,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { ManagedAgentsSource } from "../tail/managed-agents-source.js";
 import type { DiscoveredTranscript, TailContext } from "../tail/types.js";
 import { ManagedAgentsPuller, saveManagedAgentsConfig, type ManagedAgentsConfig } from "./managed-agents.js";
+import { saveHubConfig } from "./state.js";
+import { observeInbox } from "./inbox-health.js";
+import { activityPage } from "./activity.js";
 import { readHubStatus } from "./status.js";
 
 const KEY = "sk-ant-test-key";
@@ -48,6 +51,8 @@ beforeAll(() => {
         const sorted = fake.sessions.filter((s) => s.created_at >= since).sort((a, b) => b.created_at.localeCompare(a.created_at));
         return Response.json({ ...page(sorted.map(({ events: _events, ...rest }) => ({ type: "session", ...rest })), url, 1), prev_page: null });
       }
+      const detail = fake.sessions.find(s => url.pathname === "/v1/sessions/" + s.id);
+      if (detail) { const { events: _, ...rest } = detail; return Response.json(rest); }
       const match = /^\/v1\/sessions\/([^/]+)\/events$/u.exec(url.pathname);
       const session = match ? fake.sessions.find((s) => s.id === match[1]) : undefined;
       if (session) {
@@ -159,6 +164,7 @@ describe("Managed Agents puller", () => {
     fake.sessions = [session("sesn_a", 1, [])];
     const summary = await puller.pullOnce();
     expect(summary.error).toBe("the API key was rejected (401)");
+    expect(readHubStatus(home).issues).toMatchObject([{ id: "managed_agents_key", severity: "error" }]);
     expect(existsSync(join(mirror, "acme"))).toBe(false);
     expect(JSON.parse(readFileSync(join(home, "managed-agents.status.json"), "utf8")).error).toBe(summary.error);
   });
@@ -233,14 +239,36 @@ describe("Managed Agents webhooks and status", () => {
       client: (c) => new Anthropic({ apiKey: c.apiKey, baseURL: c.baseURL, maxRetries: 0 }),
     });
     puller.start(); // the first scheduled pass is seconds away
-    puller.nudge(["sesn_a"]);
-    const deadline = Date.now() + 3_000;
-    while (!existsSync(join(mirror, "acme", "sesn_a.jsonl")) && Date.now() < deadline) await Bun.sleep(20);
+    await puller.nudge("sesn_a", new Date().toISOString());
     await puller.stop();
     expect(lines(join(mirror, "acme", "sesn_a.jsonl")).map((event) => event.id)).toEqual(["e1"]);
     const status = JSON.parse(readFileSync(join(home, "managed-agents.status.json"), "utf8"));
     expect(Date.parse(status.lastWebhookAt)).toBeGreaterThan(Date.now() - 10_000);
-    puller.nudge([]); // nothing to do: no pass, no error
+    expect(fake.requests.some(path => path.startsWith("/v1/sessions?"))).toBe(false);
+    expect(await puller.nudge("sesn_a")).toMatchObject({ listed: 1, changed: 0, appended: 0, lastWebhookAt: status.lastWebhookAt });
+    expect(activityPage(null, 50, home).items).toHaveLength(1);
+  });
+
+  test("only an unannounced change from a full poll matures into a webhook warning", async () => {
+    const { home, mirror } = setup();
+    const now = Date.now();
+    let clock = now - 121_000;
+    const inbox = "https://inbox.example";
+    saveHubConfig({ v: 1, inbox, readToken: "r", writeToken: "w", createdAt: "" }, home);
+    observeInbox(home, inbox, { ok: true, webhooks: { anthropic: true } }, new Date(clock - 1000).toISOString());
+    const puller = new ManagedAgentsPuller({ home, mirrorRoot: mirror, now: () => clock });
+    const timestamp = new Date(clock).toISOString();
+    fake.sessions = ["a", "b"].map(id => session(id, 1, [], { updated_at: timestamp, created_at: timestamp }));
+    await puller.nudge("a", timestamp);
+    await puller.pullOnce();
+    await puller.nudge("b"); // A manual repair is not a webhook.
+    expect(readHubStatus(home).issues).toMatchObject([{ id: "webhooks_look_broken", detail: expect.stringContaining(": b.") }]);
+    clock = now;
+    await puller.nudge("b", new Date(now).toISOString());
+    expect(readHubStatus(home).issues).toEqual([]);
+    fake.sessions[0]!.updated_at = new Date(now).toISOString();
+    await puller.pullOnce();
+    expect(readHubStatus(home).issues).toEqual([]); // still inside the grace period
   });
 
   test("hub status lists mirrored sessions with their agent, and never the key", async () => {

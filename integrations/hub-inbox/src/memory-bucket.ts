@@ -2,15 +2,21 @@ import type { InboxBucket, InboxObject } from "./worker.ts";
 
 /** An in-memory stand-in for the R2 bucket, for tests and local runs. */
 export class MemoryInboxBucket implements InboxBucket {
-  readonly objects = new Map<string, { bytes: Uint8Array; uploaded: Date }>();
+  readonly objects = new Map<string, { bytes: Uint8Array; uploaded: Date; httpEtag: string }>();
 
-  async put(key: string, value: ArrayBuffer | Uint8Array): Promise<void> {
-    this.objects.set(key, { bytes: new Uint8Array(value instanceof Uint8Array ? value : new Uint8Array(value)), uploaded: new Date() });
+  async put(key: string, value: ArrayBuffer | Uint8Array, options?: { onlyIf: Headers }) {
+    const old = this.objects.get(key);
+    const condition = options?.onlyIf;
+    if (old && condition?.has("if-none-match")) return null;
+    if (condition?.has("if-match") && old?.httpEtag !== condition.get("if-match")) return null;
+    const httpEtag = '"' + crypto.randomUUID() + '"';
+    this.objects.set(key, { httpEtag, bytes: new Uint8Array(value instanceof Uint8Array ? value : new Uint8Array(value)), uploaded: new Date() });
+    return { httpEtag };
   }
 
   async get(key: string) {
     const found = this.objects.get(key);
-    return found ? { arrayBuffer: async () => found.bytes.slice().buffer as ArrayBuffer } : null;
+    return found ? { httpEtag: found.httpEtag, arrayBuffer: async () => found.bytes.slice().buffer as ArrayBuffer } : null;
   }
 
   async delete(key: string): Promise<void> {
