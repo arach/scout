@@ -1,8 +1,9 @@
-import { chmod, mkdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import { resolveAntigravitySessionRecordsDirectory } from "./antigravity-session-records.js";
 import { isClaudeStatuslineWrapperIsolatedFromSettings } from "./claude-statusline.js";
 import { isProdOpenScoutInstance, resolveOpenScoutInstanceName } from "./instance.js";
 import { readManagedInstalls, removeManagedInstall, upsertManagedInstall } from "./managed-installs.js";
@@ -31,10 +32,11 @@ export const ANTIGRAVITY_HOOK_NAME = "openscout" as const;
 export const ANTIGRAVITY_HOOK_MATCHER = "ask_question|run_command|write_file|edit_file|read_file" as const;
 export const ANTIGRAVITY_PERMISSION_HOOK_WRAPPER = "openscout-antigravity-permission-hook.sh";
 
+export type HarnessHookTarget = "claude" | "antigravity";
 export type HarnessHookState = "applied" | "absent" | "stale";
 
 export type HarnessHookStatus = {
-  harness: "claude" | "antigravity";
+  harness: HarnessHookTarget;
   hook: "permission-request" | "session-attention";
   event: typeof CLAUDE_PERMISSION_HOOK_EVENT | typeof ANTIGRAVITY_HOOK_EVENT;
   state: HarnessHookState;
@@ -73,6 +75,7 @@ export type HarnessHooksOptions = {
   wrapperPath?: string;
   antigravityHooksPath?: string;
   antigravityWrapperPath?: string;
+  antigravitySessionsDir?: string;
   /** How the wrapper starts the Scout CLI, shell-quoted; null when no CLI was found. */
   scoutInvocation?: () => string | null;
   instance?: string;
@@ -358,12 +361,29 @@ async function replaceSettingsFile(path: string, before: SettingsFile, next: Set
   return true;
 }
 
-async function editSettings(path: string, edit: (settings: Settings) => Settings): Promise<boolean> {
+async function editSettings(
+  path: string,
+  edit: (settings: Settings) => Settings,
+  options: { unlinkWhenEmpty?: boolean } = {},
+): Promise<boolean> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const before = await readSettingsFile(path);
     const next = edit(before.settings);
     if (next === before.settings) return false;
     if (!before.exists && Object.keys(next).length === 0) return false;
+    if (options.unlinkWhenEmpty && before.exists && Object.keys(next).length === 0) {
+      const linkStat = await lstat(path).catch(() => null);
+      if (linkStat && !linkStat.isSymbolicLink()) {
+        const current = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return null;
+          throw error;
+        });
+        if (current !== before.text) continue;
+        await rm(path, { force: true });
+        await rmdir(dirname(path)).catch(() => undefined);
+        return true;
+      }
+    }
     if (await replaceSettingsFile(path, before, next)) return true;
   }
   throw new HarnessHooksError(`${path} kept changing while Scout edited it; try again.`, "settings-busy");
@@ -385,6 +405,7 @@ export class HarnessHooks {
   private readonly command: string;
   private readonly antigravityHooksPath: string;
   private readonly antigravityWrapperPath: string;
+  private readonly antigravitySessionsDir: string;
   private readonly antigravityCommand: string;
 
   constructor(private readonly options: HarnessHooksOptions = {}) {
@@ -395,14 +416,20 @@ export class HarnessHooks {
     this.command = shellQuote(this.wrapperPath);
     this.antigravityHooksPath = options.antigravityHooksPath ?? resolveAntigravityHooksPath();
     this.antigravityWrapperPath = options.antigravityWrapperPath ?? resolveAntigravityPermissionHookWrapperPath();
+    this.antigravitySessionsDir = options.antigravitySessionsDir
+      ?? (options.antigravityWrapperPath
+        ? join(dirname(dirname(options.antigravityWrapperPath)), "antigravity-sessions")
+        : resolveAntigravitySessionRecordsDirectory());
     this.antigravityCommand = shellQuote(this.antigravityWrapperPath);
   }
 
-  async status(): Promise<HarnessHookStatus[]> {
+  async status(harness?: HarnessHookTarget): Promise<HarnessHookStatus[]> {
     const out: HarnessHookStatus[] = [];
     const invocation = this.options.scoutInvocation?.() ?? null;
+    const doClaude = this.manageClaude && (!harness || harness === "claude");
+    const doAntigravity = this.manageAntigravity && (!harness || harness === "antigravity");
 
-    if (this.manageClaude) {
+    if (doClaude) {
       const { settings } = await readSettingsFile(this.settingsPath);
       const entries = scoutClaudeHookCommands(settings);
       const base = {
@@ -422,7 +449,7 @@ export class HarnessHooks {
       }
     }
 
-    if (this.manageAntigravity) {
+    if (doAntigravity) {
       const { settings } = await readSettingsFile(this.antigravityHooksPath);
       const entries = scoutAntigravityHookCommands(settings);
       const base = {
@@ -453,28 +480,30 @@ export class HarnessHooks {
     return null;
   }
 
-  async apply(): Promise<HarnessHooksResult> {
+  async apply(harness?: HarnessHookTarget): Promise<HarnessHooksResult> {
+    const doClaude = this.manageClaude && (!harness || harness === "claude");
+    const doAntigravity = this.manageAntigravity && (!harness || harness === "antigravity");
     const skip = async (reason: HarnessHooksSkipReason): Promise<HarnessHooksResult> =>
-      ({ action: "apply", outcome: "skipped", reason, hooks: await this.status() });
+      ({ action: "apply", outcome: "skipped", reason, hooks: await this.status(harness) });
     const gated = this.gate();
     if (gated) return skip(gated);
-    if (this.manageClaude && isClaudeStatuslineWrapperIsolatedFromSettings(this.settingsPath, this.wrapperPath)) {
+    if (doClaude && isClaudeStatuslineWrapperIsolatedFromSettings(this.settingsPath, this.wrapperPath)) {
       return skip("isolated-support-directory");
     }
-    if (this.manageAntigravity && isClaudeStatuslineWrapperIsolatedFromSettings(this.antigravityHooksPath, this.antigravityWrapperPath)) {
+    if (doAntigravity && isClaudeStatuslineWrapperIsolatedFromSettings(this.antigravityHooksPath, this.antigravityWrapperPath)) {
       return skip("isolated-support-directory");
     }
     const invocation = this.options.scoutInvocation?.() ?? null;
     if (!invocation) return skip("scout-cli-not-found");
 
-    if (this.manageClaude) {
+    if (doClaude) {
       const { settings } = await readSettingsFile(this.settingsPath);
       for (const existing of scoutClaudeHookCommands(settings)) {
         const other = wrapperPathOf(existing, CLAUDE_PERMISSION_HOOK_WRAPPER);
         if (other && other !== this.wrapperPath && existsSync(other)) return skip("owned-by-other-install");
       }
     }
-    if (this.manageAntigravity) {
+    if (doAntigravity) {
       const { settings } = await readSettingsFile(this.antigravityHooksPath);
       for (const existing of scoutAntigravityHookCommands(settings)) {
         const other = wrapperPathOf(existing, ANTIGRAVITY_PERMISSION_HOOK_WRAPPER);
@@ -484,7 +513,7 @@ export class HarnessHooks {
 
     let anyChanged = false;
 
-    if (this.manageClaude) {
+    if (doClaude) {
       const script = claudePermissionHookWrapper(invocation);
       const previousScript = await readFile(this.wrapperPath, "utf8").catch(() => null);
       if (previousScript !== script) {
@@ -500,13 +529,13 @@ export class HarnessHooks {
           kind: "hook", owner: "openscout", name: "claude-permission-request",
           title: "Claude Code permission requests answered from Scout",
           status: "active", harness: "claude", provider: "anthropic", targetPath: this.wrapperPath, version: "1",
-          uninstall: { strategy: "manual", command: "scout hooks remove", notes: `Removes the ${CLAUDE_PERMISSION_HOOK_EVENT} entry from ${this.settingsPath} and the script.` },
+          uninstall: { strategy: "manual", command: "scout hooks remove claude", notes: `Removes the ${CLAUDE_PERMISSION_HOOK_EVENT} entry from ${this.settingsPath} and the script.` },
           metadata: { settingsPath: this.settingsPath, event: CLAUDE_PERMISSION_HOOK_EVENT, command: this.command, scoutInvocation: invocation },
         });
       }
     }
 
-    if (this.manageAntigravity) {
+    if (doAntigravity) {
       const script = antigravityPermissionHookWrapper(invocation);
       const previousScript = await readFile(this.antigravityWrapperPath, "utf8").catch(() => null);
       if (previousScript !== script) {
@@ -522,7 +551,7 @@ export class HarnessHooks {
           kind: "hook", owner: "openscout", name: "antigravity-session-attention",
           title: "Antigravity questions and approval gates surfaced in Scout",
           status: "active", harness: "antigravity", provider: "google", targetPath: this.antigravityWrapperPath, version: "1",
-          uninstall: { strategy: "manual", command: "scout hooks remove", notes: `Removes the ${ANTIGRAVITY_HOOK_NAME} entry from ${this.antigravityHooksPath} and the script.` },
+          uninstall: { strategy: "manual", command: "scout hooks remove antigravity", notes: `Removes the ${ANTIGRAVITY_HOOK_NAME} entry from ${this.antigravityHooksPath}, the script, and any session state.` },
           metadata: { settingsPath: this.antigravityHooksPath, event: ANTIGRAVITY_HOOK_EVENT, command: this.antigravityCommand, scoutInvocation: invocation },
         });
       }
@@ -531,16 +560,18 @@ export class HarnessHooks {
     return {
       action: "apply",
       outcome: anyChanged ? "changed" : "unchanged",
-      hooks: await this.status(),
+      hooks: await this.status(harness),
     };
   }
 
-  async remove(): Promise<HarnessHooksResult> {
+  async remove(harness?: HarnessHookTarget): Promise<HarnessHooksResult> {
+    const doClaude = this.manageClaude && (!harness || harness === "claude");
+    const doAntigravity = this.manageAntigravity && (!harness || harness === "antigravity");
     const gated = this.gate();
-    if (gated) return { action: "remove", outcome: "skipped", reason: gated, hooks: await this.status() };
+    if (gated) return { action: "remove", outcome: "skipped", reason: gated, hooks: await this.status(harness) };
     let anyChanged = false;
 
-    if (this.manageClaude) {
+    if (doClaude) {
       const settingsChanged = await editSettings(this.settingsPath, (current) => withoutScoutClaudeHooks(current).settings);
       const hadScript = existsSync(this.wrapperPath);
       await rm(this.wrapperPath, { force: true });
@@ -548,12 +579,18 @@ export class HarnessHooks {
       if (settingsChanged || hadScript) anyChanged = true;
     }
 
-    if (this.manageAntigravity) {
-      const settingsChanged = await editSettings(this.antigravityHooksPath, (current) => withoutScoutAntigravityHooks(current).settings);
+    if (doAntigravity) {
+      const settingsChanged = await editSettings(
+        this.antigravityHooksPath,
+        (current) => withoutScoutAntigravityHooks(current).settings,
+        { unlinkWhenEmpty: true },
+      );
       const hadScript = existsSync(this.antigravityWrapperPath);
+      const hadSessionsDir = existsSync(this.antigravitySessionsDir);
       await rm(this.antigravityWrapperPath, { force: true });
       await rmdir(dirname(this.antigravityWrapperPath)).catch(() => undefined);
-      if (settingsChanged || hadScript) anyChanged = true;
+      await rm(this.antigravitySessionsDir, { recursive: true, force: true });
+      if (settingsChanged || hadScript || hadSessionsDir) anyChanged = true;
     }
 
     if (this.options.managedInstalls !== false) {
@@ -562,14 +599,14 @@ export class HarnessHooks {
           install.kind === "hook"
           && install.owner === "openscout"
           && (
-            (this.manageClaude && install.name === "claude-permission-request")
-            || (this.manageAntigravity && install.name === "antigravity-session-attention")
+            (doClaude && install.name === "claude-permission-request")
+            || (doAntigravity && install.name === "antigravity-session-attention")
           )
         ) {
           await removeManagedInstall(install.id);
         }
       }
     }
-    return { action: "remove", outcome: anyChanged ? "changed" : "unchanged", hooks: await this.status() };
+    return { action: "remove", outcome: anyChanged ? "changed" : "unchanged", hooks: await this.status(harness) };
   }
 }

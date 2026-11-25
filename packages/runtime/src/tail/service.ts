@@ -767,15 +767,15 @@ async function runWatcherPump(watcher: Watcher, observedAt: number): Promise<voi
       watcher.carry = lines.pop() ?? "";
       for (const line of lines) {
         if (!line) continue;
-        const event = watcher.source.parseLine(line, {
+        const events = parsedEventsToArray(watcher.source.parseLine(line, {
           process: watcher.process,
           transcript: watcher.transcript,
           transcriptPath: watcher.transcriptPath,
           lineOffset: watcher.lineCounter,
           state: watcher.state,
-        });
+        }));
         watcher.lineCounter++;
-        if (event) {
+        for (const event of events) {
           rememberWatcherEvent(watcher, event, "all");
         }
       }
@@ -914,7 +914,9 @@ async function seedTail(
           state: watcher.state,
         });
         if (options.reconcileInternal && parsed) {
-          rememberWatcherEvent(watcher, parsed, "internal");
+          for (const event of Array.isArray(parsed) ? parsed : [parsed]) {
+            rememberWatcherEvent(watcher, event, "internal");
+          }
         }
       });
       watcher.lineCounter = lines.length;
@@ -1082,13 +1084,23 @@ export async function withPendingToolCalls(
     const now = await statFile(transcript.transcriptPath);
     if (!now) return transcript;
     const hookTool = transcript.source === "antigravity" ? antigravityHookTools.get(transcript.transcriptPath) ?? null : null;
-    const hookKey = hookTool ? `${hookTool.id ?? ""}:${hookTool.name}` : "";
+    const sessionBusy = transcript.source === "antigravity" && transcript.status === "busy";
+    const hookKey = `${hookTool ? `${hookTool.id ?? ""}:${hookTool.name}` : ""}:${sessionBusy ? "busy" : "idle"}`;
     let read = pendingCallReads.get(transcript.transcriptPath);
-    if (!read || read.size !== now.size || read.mtimeMs !== now.mtimeMs || read.hookKey !== hookKey) {
+    const needsPassiveRecheck = sessionBusy
+      && read?.pending === null
+      && nowMs - now.mtimeMs >= 1_500
+      && nowMs - now.mtimeMs <= 15_000;
+    if (!read || read.size !== now.size || read.mtimeMs !== now.mtimeMs || read.hookKey !== hookKey || needsPassiveRecheck) {
       const tailText = await readTail(transcript.transcriptPath, PENDING_CALL_READ_BYTES);
       const pending = transcript.source === "claude"
         ? findClaudePendingToolCall(tailText)
-        : findAntigravityPendingToolCall(tailText, { hookTool });
+        : findAntigravityPendingToolCall(tailText, {
+            hookTool,
+            workspaceRoot: transcript.cwd,
+            sessionBusy,
+            now: nowMs,
+          });
       read = { size: now.size, mtimeMs: now.mtimeMs, hookKey, pending };
       pendingCallReads.set(transcript.transcriptPath, read);
     }
@@ -1722,7 +1734,11 @@ async function parseRecentTranscriptLineEvents(input: {
         state: parseState,
       });
       index++;
-      if (event) parsed.push(compactEvent(event));
+      if (event) {
+        for (const item of Array.isArray(event) ? event : [event]) {
+          parsed.push(compactEvent(item));
+        }
+      }
     }
 
     const matchingCount = kindQuota

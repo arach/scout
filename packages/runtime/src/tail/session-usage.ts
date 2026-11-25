@@ -221,10 +221,28 @@ function applyPiLine(state: ScanState, line: string): void {
   state.sawTokens = true;
 }
 
+function applyAntigravityLine(state: ScanState, line: string): void {
+  if (!line.includes("\"PLANNER_RESPONSE\"")) return;
+  const entry = parseJson(line);
+  if (!entry || entry.type !== "PLANNER_RESPONSE") return;
+  const model = typeof entry.model === "string" ? entry.model.trim() : "";
+  if (model) state.model = model;
+  const input = num(entry.input_tokens);
+  const output = num(entry.output_tokens);
+  const cacheRead = num(entry.cache_read_tokens);
+  if (input > 0 || output > 0 || cacheRead > 0) {
+    state.totals.input += input;
+    state.totals.output += output;
+    state.totals.cacheRead += cacheRead;
+    state.sawTokens = true;
+  }
+}
+
 function applyUsageLine(state: ScanState, line: string): void {
   if (state.source === "claude") applyClaudeLine(state, line);
   else if (state.source === "codex") applyCodexLine(state, line);
   else if (state.source === "pi") applyPiLine(state, line);
+  else if (state.source === "antigravity") applyAntigravityLine(state, line);
 }
 
 function clipText(text: string): string {
@@ -265,14 +283,17 @@ function newestTurn(source: TranscriptSource, transcript: DiscoveredTranscript, 
   const stop = Math.max(0, lines.length - TURN_TAIL_MAX_EVENTS);
   for (let index = lines.length - 1; index >= stop; index -= 1) {
     if (!lines[index]) continue;
-    let event: TailEvent | null = null;
+    let parsed: TailEvent | TailEvent[] | null = null;
     try {
-      event = source.parseLine(lines[index]!, syntheticContext(transcript, index));
+      parsed = source.parseLine(lines[index]!, syntheticContext(transcript, index));
     } catch {
-      event = null;
+      parsed = null;
     }
-    const turn = event ? turnFromEvent(event) : null;
-    if (turn) return turn;
+    const events = !parsed ? [] : Array.isArray(parsed) ? parsed : [parsed];
+    for (let eventIndex = events.length - 1; eventIndex >= 0; eventIndex -= 1) {
+      const turn = turnFromEvent(events[eventIndex]!);
+      if (turn) return turn;
+    }
   }
   return null;
 }

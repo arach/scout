@@ -115,5 +115,53 @@ describe("findAntigravityPendingToolCall", () => {
     expect(describeAntigravityToolCall("call_mcp_tool", { ServerName: "scout", ToolName: "ask", Arguments: { to: "sol" } })).toMatchObject({
       title: "scout - ask (MCP)",
     });
+    expect(describeAntigravityToolCall("read_file", { Path: "/repo/src/index.ts", StartLine: "10", EndLine: "40" })).toMatchObject({
+      title: "Read file",
+      subject: "/repo/src/index.ts:10-40",
+    });
+  });
+
+  test("passively picks up unresolved BypassSandbox and out-of-workspace file calls when the session is busy", () => {
+    const stepAt = Date.parse("2026-11-24T20:00:00Z");
+    const unsandboxed = jsonl({
+      type: "PLANNER_RESPONSE",
+      source: "MODEL",
+      tool_calls: [{
+        name: "run_command",
+        args: {
+          CommandLine: JSON.stringify("git push origin feat/nav"),
+          BypassSandbox: "true",
+          toolSummary: JSON.stringify("Push branch"),
+        },
+      }],
+    });
+    // Debounces sub-second execution before surfacing passive approval state.
+    expect(findAntigravityPendingToolCall(unsandboxed, { sessionBusy: true, now: stepAt + 500 })).toBeNull();
+    expect(findAntigravityPendingToolCall(unsandboxed, { sessionBusy: true, now: stepAt + 2_500 })).toMatchObject({
+      tool: "run_command",
+      title: "Unsandboxed command",
+      subject: "git push origin feat/nav",
+      detail: "Push branch",
+    });
+    // Never reports stale approval prompts once the session is idle.
+    expect(findAntigravityPendingToolCall(unsandboxed, { sessionBusy: false, now: stepAt + 5_000 })).toBeNull();
+
+    const outsideWorkspace = jsonl({
+      type: "PLANNER_RESPONSE",
+      source: "MODEL",
+      tool_calls: [{
+        name: "edit_file",
+        args: { Path: JSON.stringify("/etc/hosts") },
+      }],
+    });
+    expect(findAntigravityPendingToolCall(outsideWorkspace, {
+      sessionBusy: true,
+      workspaceRoot: "/workspace/project",
+      now: stepAt + 2_500,
+    })).toMatchObject({
+      tool: "edit_file",
+      title: "Edit file",
+      subject: "/etc/hosts",
+    });
   });
 });

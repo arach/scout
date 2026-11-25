@@ -639,7 +639,7 @@ function normalizeAntigravity(
     return { ...base, kind: "assistant_turn", tag: "assistant", text: content };
   }
 
-  if (type === "TOOL_RESPONSE") {
+  if (type === "TOOL_RESPONSE" || type === "GENERIC") {
     return {
       ...base,
       kind: "observation",

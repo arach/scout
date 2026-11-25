@@ -10,6 +10,9 @@
  * The transcript is observed source material. Nothing here answers the prompt.
  */
 
+import { homedir } from "node:os";
+import { resolve } from "node:path";
+
 import { shapeAttentionContext, type AttentionContext } from "../../attention-context.js";
 import { redactSecrets } from "../../secret-redaction.js";
 
@@ -123,6 +126,15 @@ export function parseAntigravityQuestions(rawQuestions: unknown): AntigravityPen
   return questions;
 }
 
+function intArg(value: unknown): number | null {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  if (typeof value === "string" && /^\d+$/u.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
 export function describeAntigravityToolCall(
   tool: string,
   rawInput: unknown,
@@ -179,8 +191,17 @@ export function describeAntigravityToolCall(
     case "read_file":
     case "view_file":
     case "read_resource":
-    case "list_resources":
-      return { title: "Read file", subject: bounded(path, SUBJECT_MAX), detail: null, subjectKind: "path" };
+    case "list_resources": {
+      const startLine = intArg(input.StartLine);
+      const endLine = intArg(input.EndLine);
+      const range = startLine && endLine ? `:${startLine}-${endLine}` : startLine ? `:${startLine}` : "";
+      return {
+        title: normalized === "list_resources" ? "List resources" : "Read file",
+        subject: bounded(path ? `${path}${range}` : text(input.ServerName), SUBJECT_MAX),
+        detail: null,
+        subjectKind: path ? "path" : null,
+      };
+    }
     case "search_web":
       return { title: "Web search", subject: bounded(text(input.query), SUBJECT_MAX), detail: bounded(text(input.domain), DETAIL_MAX), subjectKind: "query" };
     case "read_url_content":
@@ -195,6 +216,16 @@ export function describeAntigravityToolCall(
         title: server && toolName ? `${server} - ${toolName} (MCP)` : toolName ?? "MCP tool",
         subject: bounded(compactArguments(Object.keys(args).length ? args : input), SUBJECT_MAX),
         detail: null,
+        subjectKind: "arguments",
+      };
+    }
+    case "invoke_subagent": {
+      const role = text(input.Role) ?? text(input.TypeName);
+      const prompt = text(input.Prompt);
+      return {
+        title: "Subagent",
+        subject: bounded(role ?? prompt, SUBJECT_MAX),
+        detail: role && prompt ? bounded(prompt, DETAIL_MAX) : null,
         subjectKind: "arguments",
       };
     }
@@ -248,14 +279,53 @@ function isFeedbackArtifactCall(call: PlannerCall): boolean {
   return bool(metadata.RequestFeedback);
 }
 
+const PASSIVE_APPROVAL_MIN_WAIT_MS = 1_500;
+
+function isWithinAllowedRoots(targetPath: string, roots: string[]): boolean {
+  const home = homedir();
+  const expanded = targetPath.startsWith("~/") ? `${home}${targetPath.slice(1)}` : targetPath;
+  const resolved = resolve(expanded);
+  for (const root of roots) {
+    const cleanRoot = resolve(root);
+    if (resolved === cleanRoot || resolved.startsWith(`${cleanRoot}/`)) return true;
+  }
+  return false;
+}
+
+function isPassivePermissionGatedCall(call: PlannerCall, workspaceRoot?: string | null): boolean {
+  const normalized = call.tool.trim().toLowerCase();
+  if (normalized === "run_command" || normalized === "shell_exec") {
+    return bool(call.args.BypassSandbox) && !bool(call.args.IsDaemon);
+  }
+  if (normalized === "write_file" || normalized === "edit_file" || normalized === "read_file" || normalized === "view_file") {
+    const rawPath = text(call.args.Path) ?? text(call.args.TargetFile);
+    if (!rawPath || !workspaceRoot?.trim()) return false;
+    const home = homedir();
+    const allowedRoots = [
+      workspaceRoot.trim(),
+      resolve(home, ".gemini", "antigravity-cli", "brain"),
+      resolve(home, ".gemini", "antigravity", "brain"),
+      resolve(home, ".gemini", "antigravity-ide", "brain"),
+      "/tmp",
+      "/private/tmp",
+    ];
+    return !isWithinAllowedRoots(rawPath, allowedRoots);
+  }
+  return false;
+}
+
 /**
  * Inspect the bounded tail of an Antigravity `transcript.jsonl` for an open
- * user question, plan feedback gate, or step halted in `WAITING` status.
+ * user question, plan feedback gate, unsandboxed/out-of-workspace approval
+ * prompt, or step halted in `WAITING` status.
  */
 export function findAntigravityPendingToolCall(
   jsonl: string,
   options: {
     hookTool?: { id?: string | null; name: string; args?: unknown; at?: number | null } | null;
+    workspaceRoot?: string | null;
+    sessionBusy?: boolean;
+    now?: number;
   } = {},
 ): AntigravityPendingToolCall | null {
   let activeCalls: PlannerCall[] = [];
@@ -276,7 +346,7 @@ export function findAntigravityPendingToolCall(
     const status = typeof step.status === "string" ? step.status : "";
     const at = stepTimestamp(step);
 
-    if (type === "USER_INPUT" && step.source === "USER_EXPLICIT") {
+    if (type === "USER_INPUT" || type === "SYSTEM_MESSAGE") {
       activeCalls = [];
       resolvedCount = 0;
       waitingStep = null;
@@ -291,7 +361,7 @@ export function findAntigravityPendingToolCall(
       continue;
     }
 
-    if (status === "WAITING" && type && type !== "USER_INPUT") {
+    if ((status === "WAITING" || status === "CORTEX_STEP_STATUS_WAITING") && type && type !== "USER_INPUT") {
       const stepIndex = typeof step.step_index === "number" ? step.step_index : 0;
       waitingStep = {
         id: `step-${stepIndex}`,
@@ -318,8 +388,11 @@ export function findAntigravityPendingToolCall(
         }];
       });
       resolvedCount = 0;
-      for (const call of activeCalls) {
-        if (isFeedbackArtifactCall(call)) pendingFeedbackPlan = call;
+      const feedbackCall = activeCalls.find(isFeedbackArtifactCall) ?? null;
+      if (feedbackCall) {
+        pendingFeedbackPlan = feedbackCall;
+      } else if (activeCalls.length > 0) {
+        pendingFeedbackPlan = null;
       }
       continue;
     }
@@ -359,7 +432,10 @@ export function findAntigravityPendingToolCall(
     };
   }
 
-  const askCallIndex = remaining.findIndex((call) => call.tool.toLowerCase() === "ask_question");
+  const askCallIndex = remaining.findIndex((call) => {
+    const lower = call.tool.toLowerCase();
+    return lower === "ask_question" || lower === "notify_user" || lower === "plan_input";
+  });
   if (askCallIndex >= 0) {
     const askCall = remaining[askCallIndex]!;
     return {
@@ -369,6 +445,24 @@ export function findAntigravityPendingToolCall(
       at: askCall.at,
       alsoPending: Math.max(0, remaining.length - askCallIndex - 1),
     };
+  }
+
+  if (options.sessionBusy === true) {
+    const now = options.now ?? Date.now();
+    const gatedIndex = remaining.findIndex((call) => (
+      isPassivePermissionGatedCall(call, options.workspaceRoot)
+      && (call.at === null || now - call.at >= PASSIVE_APPROVAL_MIN_WAIT_MS)
+    ));
+    if (gatedIndex >= 0) {
+      const gatedCall = remaining[gatedIndex]!;
+      return {
+        toolUseId: gatedCall.id,
+        tool: gatedCall.tool,
+        ...describeAntigravityToolCall(gatedCall.tool, gatedCall.args),
+        at: gatedCall.at,
+        alsoPending: Math.max(0, remaining.length - gatedIndex - 1),
+      };
+    }
   }
 
   // An artifact written with RequestFeedback=true at the end of a turn waits on the user's Proceed action.

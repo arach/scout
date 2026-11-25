@@ -3,6 +3,10 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  parseAntigravityQuestions,
+  unwrapAntigravityToolArgs,
+} from "@openscout/agent-sessions";
 import { execSystemFile } from "../system-probes/exec.js";
 import { buildParentChain, classifyAttribution, commandBasename, listProcesses, processResourceFields, readCwd } from "./discover.js";
 import type { DiscoveredProcess, DiscoveredTranscript, TailContext, TailDiscoveryScope, TailEvent, TranscriptSource } from "./types.js";
@@ -24,6 +28,7 @@ function dataRoots(): string[] {
   return [
     join(home, ".gemini", "antigravity-cli"),
     join(home, ".gemini", "antigravity"),
+    join(home, ".gemini", "antigravity-ide"),
   ];
 }
 
@@ -151,7 +156,379 @@ async function processes(): Promise<DiscoveredProcess[]> {
   }));
 }
 
-function parseLine(line: string, ctx: TailContext): TailEvent | null {
+type ToolDiffSummary = { add: number; del: number; preview: string };
+
+function cleanStr(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function cleanInt(value: unknown): number | null {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  if (typeof value === "string" && /^\d+$/u.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+function singleLine(value: string, max = 240): string {
+  const flat = value.replace(/\s+/gu, " ").trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
+}
+
+function computeEditDiff(target: string, replacement: string): ToolDiffSummary | undefined {
+  const oldLines = target.split(/\r?\n/u);
+  const newLines = replacement.split(/\r?\n/u);
+  let prefix = 0;
+  while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) {
+    prefix += 1;
+  }
+  let oldEnd = oldLines.length;
+  let newEnd = newLines.length;
+  while (oldEnd > prefix && newEnd > prefix && oldLines[oldEnd - 1] === newLines[newEnd - 1]) {
+    oldEnd -= 1;
+    newEnd -= 1;
+  }
+  const removed = oldLines.slice(prefix, oldEnd);
+  const added = newLines.slice(prefix, newEnd);
+  if (removed.length === 0 && added.length === 0) return undefined;
+  const preview = [
+    ...removed.slice(0, 8).map((line) => `-${line.slice(0, 160)}`),
+    ...added.slice(0, 8).map((line) => `+${line.slice(0, 160)}`),
+  ].join("\n");
+  return { add: added.length, del: removed.length, preview };
+}
+
+function computeWriteDiff(fileContent: string): ToolDiffSummary | undefined {
+  if (!fileContent) return undefined;
+  const lines = fileContent.split(/\r?\n/u);
+  if (lines.length > 1 && lines.at(-1) === "") lines.pop();
+  if (lines.length === 0) return undefined;
+  const preview = lines.slice(0, 10).map((line) => `+${line.slice(0, 160)}`).join("\n");
+  return { add: lines.length, del: 0, preview };
+}
+
+const SAFE_MCP_HINT_KEYS = [
+  "query",
+  "sessionRef",
+  "target",
+  "agent",
+  "path",
+  "uri",
+  "Uri",
+  "where",
+  "channel",
+  "id",
+] as const;
+
+function formatAntigravityToolEvent(
+  rawName: string,
+  rawArgs: unknown,
+): { summary: string; raw: Record<string, unknown> } {
+  const name = rawName.trim();
+  const lower = name.toLowerCase();
+  const args = unwrapAntigravityToolArgs(rawArgs);
+  const path = cleanStr(args.Path)
+    ?? cleanStr(args.TargetFile)
+    ?? cleanStr(args.file_path)
+    ?? cleanStr(args.path);
+
+  switch (lower) {
+    case "run_command":
+    case "shell_exec": {
+      const command = cleanStr(args.CommandLine) ?? cleanStr(args.command);
+      const description = cleanStr(args.toolSummary) ?? cleanStr(args.description);
+      const bypass = args.BypassSandbox === true || args.BypassSandbox === "true";
+      const summary = command
+        ? singleLine(command, 400)
+        : description
+          ? `Bash ${singleLine(description, 300)}`
+          : name;
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: "Bash",
+          toolName: name,
+          ...(command ? { command: command.slice(0, 1000), arg: singleLine(command, 400) } : description ? { arg: singleLine(description, 300) } : {}),
+          ...(description ? { description: singleLine(description, 300) } : {}),
+          ...(bypass ? { bypassSandbox: true } : {}),
+        },
+      };
+    }
+    case "read_file":
+    case "view_file": {
+      const startLine = cleanInt(args.StartLine);
+      const endLine = cleanInt(args.EndLine);
+      const range = startLine && endLine ? `:${startLine}-${endLine}` : startLine ? `:${startLine}` : "";
+      const arg = path ? `${path}${range}` : null;
+      const summary = arg ? `Read ${arg}` : name;
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: "Read",
+          toolName: name,
+          ...(path ? { path } : {}),
+          ...(arg ? { arg } : {}),
+          ...(startLine ? { startLine } : {}),
+          ...(endLine ? { endLine } : {}),
+        },
+      };
+    }
+    case "edit_file":
+    case "file_change":
+    case "code_action": {
+      const target = typeof args.Target === "string" ? args.Target : null;
+      const replacement = typeof args.Replacement === "string" ? args.Replacement : null;
+      const diff = target !== null && replacement !== null ? computeEditDiff(target, replacement) : undefined;
+      const summary = path ? `Edit ${path}` : name;
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: "Edit",
+          toolName: name,
+          ...(path ? { path, arg: path } : {}),
+          ...(diff ? { diff } : {}),
+        },
+      };
+    }
+    case "write_file": {
+      const fileContent = typeof args.Content === "string" ? args.Content : null;
+      const diff = fileContent !== null ? computeWriteDiff(fileContent) : undefined;
+      const summary = path ? `Write ${path}` : name;
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: "Write",
+          toolName: name,
+          ...(path ? { path, arg: path } : {}),
+          ...(diff ? { diff } : {}),
+        },
+      };
+    }
+    case "search_web": {
+      const query = cleanStr(args.query);
+      const domain = cleanStr(args.domain);
+      const arg = query ? (domain ? `${query} (${domain})` : query) : null;
+      const summary = arg ? `WebSearch ${singleLine(arg, 300)}` : name;
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: "WebSearch",
+          toolName: name,
+          ...(arg ? { arg: singleLine(arg, 300) } : {}),
+          ...(domain ? { domain } : {}),
+        },
+      };
+    }
+    case "read_url_content":
+    case "open_browser_url": {
+      const url = cleanStr(args.Url) ?? cleanStr(args.url);
+      const summary = url ? `WebFetch ${url}` : name;
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: "WebFetch",
+          toolName: name,
+          ...(url ? { arg: url } : {}),
+        },
+      };
+    }
+    case "call_mcp_tool":
+    case "mcp_tool": {
+      const server = cleanStr(args.ServerName);
+      const mcpTool = cleanStr(args.ToolName);
+      const mcpArgs = unwrapAntigravityToolArgs(args.Arguments);
+      let hint: string | null = null;
+      for (const key of SAFE_MCP_HINT_KEYS) {
+        const candidate = cleanStr(mcpArgs[key]);
+        if (candidate) {
+          hint = singleLine(candidate, 200);
+          break;
+        }
+      }
+      const toolId = server && mcpTool
+        ? `mcp__${server}__${mcpTool}`
+        : mcpTool
+          ? `mcp__${mcpTool}`
+          : name;
+      const summary = hint ? `${toolId} ${hint}` : toolId;
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: toolId,
+          toolName: name,
+          ...(server ? { mcpServer: server } : {}),
+          ...(mcpTool ? { mcpTool } : {}),
+          ...(hint ? { arg: hint } : {}),
+        },
+      };
+    }
+    case "read_resource":
+    case "list_resources": {
+      const server = cleanStr(args.ServerName);
+      const uri = cleanStr(args.Uri);
+      const arg = uri ? (server ? `${server}:${uri}` : uri) : server;
+      const tool = lower === "list_resources" ? "LS" : "Read";
+      const summary = arg ? `${tool} ${arg}` : name;
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool,
+          toolName: name,
+          ...(arg ? { arg } : {}),
+        },
+      };
+    }
+    case "invoke_subagent": {
+      const role = cleanStr(args.Role) ?? cleanStr(args.TypeName);
+      const prompt = cleanStr(args.Prompt);
+      const arg = [role, prompt ? singleLine(prompt, 140) : null].filter(Boolean).join(" · ") || null;
+      const summary = arg ? `Agent ${arg}` : "Agent subagent";
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: "Agent",
+          toolName: name,
+          ...(arg ? { arg } : {}),
+        },
+      };
+    }
+    case "define_subagent":
+    case "manage_subagents":
+    case "send_message": {
+      const head = cleanStr(args.Name) ?? cleanStr(args.Action) ?? cleanStr(args.Recipient);
+      const body = cleanStr(args.Description) ?? cleanStr(args.Message);
+      const arg = [head, body ? singleLine(body, 120) : null].filter(Boolean).join(" · ") || null;
+      const summary = arg ? `Agent ${arg}` : name;
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: "Agent",
+          toolName: name,
+          ...(arg ? { arg } : {}),
+        },
+      };
+    }
+    case "update_steps": {
+      const rawSteps = Array.isArray(args.steps) ? args.steps : [];
+      const cleanSteps = rawSteps
+        .slice(0, 12)
+        .flatMap((entry): Array<{ title: string; status: string }> => {
+          const item = unwrapAntigravityToolArgs(entry);
+          const title = cleanStr(item.title);
+          const status = cleanStr(item.status) ?? "pending";
+          return title ? [{ title: singleLine(title, 120), status }] : [];
+        });
+      const done = cleanSteps.filter((item) => item.status === "done").length;
+      const active = cleanSteps.find((item) => item.status === "in_progress")
+        ?? cleanSteps.find((item) => item.status !== "done")
+        ?? cleanSteps.at(-1);
+      const arg = cleanSteps.length > 0
+        ? `${done}/${cleanSteps.length}${active ? ` · ${active.title}` : ""}`
+        : null;
+      const summary = arg ? `TodoWrite ${arg}` : "TodoWrite steps";
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: "TodoWrite",
+          toolName: name,
+          ...(arg ? { arg } : {}),
+          ...(cleanSteps.length ? { steps: cleanSteps } : {}),
+        },
+      };
+    }
+    case "ask_question": {
+      const questions = parseAntigravityQuestions(args.questions);
+      const first = questions[0]?.question ?? cleanStr(args.question);
+      const arg = first ? singleLine(first, 240) : null;
+      const summary = arg ? `AskUserQuestion ${arg}` : "AskUserQuestion";
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: "AskUserQuestion",
+          toolName: name,
+          ...(arg ? { arg } : {}),
+          ...(questions.length ? { questions } : {}),
+        },
+      };
+    }
+    case "manage_task":
+    case "schedule":
+    case "run_workflow":
+    case "swarm": {
+      const action = cleanStr(args.Action) ?? cleanStr(args.action) ?? cleanStr(args.Description) ?? cleanStr(args.Prompt);
+      const target = cleanStr(args.TaskId) ?? cleanStr(args.name) ?? cleanStr(args.ScriptPath) ?? cleanStr(args.CronExpression);
+      const arg = [action, target].filter(Boolean).map((item) => singleLine(item!, 120)).join(" · ") || null;
+      const summary = arg ? `${name} ${arg}` : name;
+      return {
+        summary,
+        raw: {
+          content: summary,
+          tool: name,
+          toolName: name,
+          ...(arg ? { arg } : {}),
+        },
+      };
+    }
+    default: {
+      const searchDir = path
+        ?? cleanStr(args.SearchPath)
+        ?? cleanStr(args.SearchDirectory)
+        ?? cleanStr(args.DirectoryPath);
+      const query = cleanStr(args.Query) ?? cleanStr(args.Pattern) ?? cleanStr(args.query) ?? cleanStr(args.pattern);
+      if (query) {
+        const arg = searchDir ? `${singleLine(query, 120)} ${searchDir}` : singleLine(query, 200);
+        const summary = `Grep ${arg}`;
+        return { summary, raw: { content: summary, tool: "Grep", toolName: name, arg } };
+      }
+      if (searchDir) {
+        const tool = /list|dir/iu.test(name) ? "LS" : "Read";
+        const summary = `${tool} ${searchDir}`;
+        return { summary, raw: { content: summary, tool, toolName: name, path: searchDir, arg: searchDir } };
+      }
+      return { summary: name, raw: { content: name, tool: name } };
+    }
+  }
+}
+
+function makeTailEvent(
+  ctx: TailContext,
+  id: string,
+  ts: number,
+  sessionId: string,
+  kind: TailEvent["kind"],
+  summary: string,
+  raw: Record<string, unknown>,
+): TailEvent {
+  return {
+    id,
+    ts,
+    sessionId,
+    source: SOURCE,
+    kind,
+    summary: summary.slice(0, 500),
+    raw,
+    pid: ctx.process.pid,
+    parentPid: ctx.process.ppid || null,
+    cwd: ctx.transcript.cwd ?? "",
+    project: ctx.transcript.project,
+    harness: ctx.process.harness,
+  };
+}
+
+function parseLine(line: string, ctx: TailContext): TailEvent | TailEvent[] | null {
   let step;
   try { step = JSON.parse(line); } catch { return null; }
   if (!step || !Number.isSafeInteger(step.step_index) || step.step_index < 0) return null;
@@ -159,33 +536,68 @@ function parseLine(line: string, ctx: TailContext): TailEvent | null {
   const sessionId = ctx.transcript.sessionId;
   if (!sessionId || !Number.isFinite(ts)) return null;
   const content = typeof step.content === "string" ? step.content.trim() : "";
-  let kind: TailEvent["kind"];
-  let text: string;
+  const pendingTools = ctx.state
+    ? ((ctx.state.pendingTools as string[] | undefined) ?? (ctx.state.pendingTools = []))
+    : null;
+
   switch (step.type) {
     case "USER_INPUT": {
+      if (pendingTools) pendingTools.length = 0;
       if (step.source !== "USER_EXPLICIT") return null;
       const request = /<USER_REQUEST>([\s\S]*?)(?:<\/USER_REQUEST>|<ADDITIONAL_METADATA>|$)/u.exec(content);
-      text = (request?.[1] ?? content.split("<ADDITIONAL_METADATA>", 1)[0]).trim();
-      kind = "user";
-      break;
+      const text = (request?.[1] ?? content.split("<ADDITIONAL_METADATA>", 1)[0]).trim();
+      if (!text) return null;
+      return makeTailEvent(ctx, `${SOURCE}:${sessionId}:${step.step_index}`, ts, sessionId, "user", text, { content: text });
     }
     case "PLANNER_RESPONSE": {
-      const tools = Array.isArray(step.tool_calls) ? step.tool_calls.flatMap((call: { name?: string } | null) =>
-        typeof call?.name === "string" ? [call.name] : []) : [];
-      kind = content ? "assistant" : "tool";
-      text = content || tools.join(", ");
-      break;
+      const toolCalls = Array.isArray(step.tool_calls)
+        ? step.tool_calls.flatMap((call: { name?: unknown; args?: unknown } | null) =>
+            typeof call?.name === "string" && call.name.trim() ? [{ name: call.name.trim(), args: call.args }] : [])
+        : [];
+      if (pendingTools) {
+        pendingTools.length = 0;
+        for (const call of toolCalls) pendingTools.push(call.name.toLowerCase());
+      }
+      const events: TailEvent[] = [];
+      if (content) {
+        events.push(makeTailEvent(ctx, `${SOURCE}:${sessionId}:${step.step_index}`, ts, sessionId, "assistant", content, { content }));
+      }
+      for (let index = 0; index < toolCalls.length; index += 1) {
+        const call = toolCalls[index]!;
+        const formatted = formatAntigravityToolEvent(call.name, call.args);
+        const eventId = !content && toolCalls.length === 1
+          ? `${SOURCE}:${sessionId}:${step.step_index}`
+          : `${SOURCE}:${sessionId}:${step.step_index}:call:${index}`;
+        events.push(makeTailEvent(ctx, eventId, ts, sessionId, "tool", formatted.summary, formatted.raw));
+      }
+      if (events.length === 0) return null;
+      return events.length === 1 ? events[0]! : events;
     }
-    case "ERROR_MESSAGE":
-      kind = "system";
-      text = typeof step.error === "string" ? step.error : "Antigravity reported an error";
-      break;
-    default: return null;
+    case "GENERIC": {
+      const completedTool = pendingTools?.shift();
+      if (completedTool === "run_command" || completedTool === "shell_exec") {
+        const exitMatch = /^Command exited with code (-?\d+)\./mu.exec(content);
+        const exitCode = exitMatch ? Number(exitMatch[1]) : 0;
+        if (Number.isFinite(exitCode) && exitCode !== 0) {
+          const summary = `res: exit code ${exitCode}`;
+          return makeTailEvent(ctx, `${SOURCE}:${sessionId}:${step.step_index}`, ts, sessionId, "tool-result", summary, {
+            content: `exit code ${exitCode}`,
+            tool: "res",
+            exitCode,
+            outcome: "error",
+          });
+        }
+      }
+      return null;
+    }
+    case "ERROR_MESSAGE": {
+      if (pendingTools) pendingTools.length = 0;
+      const text = typeof step.error === "string" && step.error.trim() ? step.error.trim() : "Antigravity reported an error";
+      return makeTailEvent(ctx, `${SOURCE}:${sessionId}:${step.step_index}`, ts, sessionId, "system", text, { content: text });
+    }
+    default:
+      return null;
   }
-  if (!text) return null;
-  return { id: `${SOURCE}:${sessionId}:${step.step_index}`, ts, sessionId, source: SOURCE, kind,
-    summary: text.slice(0, 500), raw: { content: text }, pid: ctx.process.pid, parentPid: ctx.process.ppid || null,
-    cwd: ctx.transcript.cwd ?? "", project: ctx.transcript.project, harness: ctx.process.harness };
 }
 
 export const AntigravitySource: TranscriptSource = {

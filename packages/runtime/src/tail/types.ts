@@ -192,7 +192,7 @@ export interface TranscriptSource {
     processes: DiscoveredProcess[],
     scope?: TailDiscoveryScope,
   ): Promise<DiscoveredTranscript[]> | DiscoveredTranscript[];
-  parseLine(line: string, ctx: TailContext): TailEvent | null;
+  parseLine(line: string, ctx: TailContext): TailEvent | TailEvent[] | null;
   parseFile?(text: string, ctx: TailContext): TailEvent | TailEvent[] | null;
   /** Locate one exact session outside the discovery activity window. */
   findTranscript?(sessionRef: string): DiscoveredTranscript | null;
