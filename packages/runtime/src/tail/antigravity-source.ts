@@ -17,8 +17,14 @@ export function antigravityIdFromLogPath(path: string): string | null {
     basename(generated) === ".system_generated" && basename(dirname(session)) === "brain" && nativeId.test(id) ? id : null;
 }
 
-function dataRoot(): string {
-  return process.env.OPENSCOUT_TAIL_ANTIGRAVITY_ROOT?.trim() || join(homedir(), ".gemini", "antigravity-cli");
+function dataRoots(): string[] {
+  const configured = process.env.OPENSCOUT_TAIL_ANTIGRAVITY_ROOT?.trim();
+  if (configured) return [configured];
+  const home = homedir();
+  return [
+    join(home, ".gemini", "antigravity-cli"),
+    join(home, ".gemini", "antigravity"),
+  ];
 }
 
 function bound(scope: TailDiscoveryScope, setting: string, fallback: number): number {
@@ -42,9 +48,9 @@ function workspace(uris: string | null): string | null {
   return null;
 }
 
-function transcript(id: string): DiscoveredTranscript | null {
+function transcript(root: string, id: string): DiscoveredTranscript | null {
   if (!nativeId.test(id)) return null;
-  const path = join(dataRoot(), "brain", id, ".system_generated", "logs", "transcript.jsonl");
+  const path = join(root, "brain", id, ".system_generated", "logs", "transcript.jsonl");
   const file = statSync(path, { throwIfNoEntry: false });
   if (!file?.isFile() || file.size === 0) return null;
   return { source: SOURCE, sessionId: id, transcriptPath: path, cwd: null, project: "", harness: "unattributed",
@@ -52,9 +58,9 @@ function transcript(id: string): DiscoveredTranscript | null {
 }
 
 // The JSONL file is the activity clock. The shared index can change for an unrelated conversation.
-function enrich(rows: DiscoveredTranscript[]): DiscoveredTranscript[] {
+function enrich(root: string, rows: DiscoveredTranscript[]): DiscoveredTranscript[] {
   if (!rows.length) return rows;
-  const path = join(dataRoot(), "conversation_summaries.db");
+  const path = join(root, "conversation_summaries.db");
   if (!existsSync(path)) return rows;
   // Prefer the live WAL. A checkpointed WAL-mode database without sidecars can
   // require an immutable read on a read-only connection; close it after this pass.
@@ -82,35 +88,47 @@ function enrich(rows: DiscoveredTranscript[]): DiscoveredTranscript[] {
 }
 
 function discover(_processes: DiscoveredProcess[], scope: TailDiscoveryScope = "shallow"): DiscoveredTranscript[] {
-  const brain = join(dataRoot(), "brain");
-  if (!existsSync(brain)) return [];
   const cutoff = Date.now() - bound(scope, "WINDOW_MS", scope === "hot" ? 600_000 : 86_400_000);
   const limit = bound(scope, "LIMIT", scope === "hot" ? 96 : 256);
-  const rows: DiscoveredTranscript[] = [];
-  for (const entry of readdirSync(brain, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const row = transcript(entry.name);
-    if (row && row.mtimeMs >= cutoff) rows.push(row);
+  const byId = new Map<string, DiscoveredTranscript>();
+  for (const root of dataRoots()) {
+    const brain = join(root, "brain");
+    if (!existsSync(brain)) continue;
+    const rows: DiscoveredTranscript[] = [];
+    for (const entry of readdirSync(brain, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const row = transcript(root, entry.name);
+      if (row && row.mtimeMs >= cutoff) rows.push(row);
+    }
+    for (const row of enrich(root, rows)) {
+      const existing = byId.get(row.sessionId!);
+      if (!existing || row.mtimeMs > existing.mtimeMs) byId.set(row.sessionId!, row);
+    }
   }
-  return enrich(rows.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, limit));
+  return [...byId.values()].sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, limit);
+}
+
+function isAntigravityProcess(command: string): boolean {
+  const base = commandBasename(command).toLowerCase();
+  return base === "agy" || base === "antigravity" || (base.startsWith("language_server_") && command.toLowerCase().includes("antigravity"));
 }
 
 async function processes(): Promise<DiscoveredProcess[]> {
   const all = await listProcesses();
-  const clients = all.filter(p => commandBasename(p.command) === "agy");
+  const clients = all.filter(p => isAntigravityProcess(p.command));
   if (!clients.length) return [];
   const byPid = new Map(all.map(p => [p.pid, p]));
-  const presence = join(dataRoot(), "presence");
+  const presenceDirs = new Set(dataRoots().map(root => join(root, "presence")).filter(dir => existsSync(dir)));
   const held = new Map<number, Set<string>>();
   // Old lock files can survive an exit. Only an open native lock identifies this process's session.
-  if (existsSync(presence)) {
+  if (presenceDirs.size > 0) {
     try {
       const { stdout } = await execSystemFile("lsof", ["-nP", "-p", clients.map(p => p.pid).join(","), "-Fpn"],
         { timeoutMs: 1500, maxStdoutBytes: 512 * 1024 });
       let pid = 0;
       for (const field of stdout.split("\n")) {
         if (field.startsWith("p")) pid = Number(field.slice(1));
-        if (!pid || !field.startsWith("n") || dirname(field.slice(1)) !== presence || !field.endsWith(".lock")) continue;
+        if (!pid || !field.startsWith("n") || !presenceDirs.has(dirname(field.slice(1))) || !field.endsWith(".lock")) continue;
         const id = basename(field.slice(1), ".lock");
         if (!nativeId.test(id)) continue;
         const ids = held.get(pid) ?? new Set<string>();
@@ -122,7 +140,8 @@ async function processes(): Promise<DiscoveredProcess[]> {
   return Promise.all(clients.map(async p => {
     const parentChain = buildParentChain(p.pid, byPid);
     const ids = held.get(p.pid);
-    return { pid: p.pid, ppid: p.ppid, command: "agy", etime: p.etime, ...processResourceFields(p),
+    const base = commandBasename(p.command);
+    return { pid: p.pid, ppid: p.ppid, command: base.toLowerCase() === "agy" ? "agy" : base, etime: p.etime, ...processResourceFields(p),
       cwd: await readCwd(p.pid, p.etime), harness: classifyAttribution(parentChain), parentChain, source: SOURCE,
       nativeSessionId: ids?.size === 1 ? [...ids][0] : null };
   }));
@@ -168,7 +187,11 @@ function parseLine(line: string, ctx: TailContext): TailEvent | null {
 export const AntigravitySource: TranscriptSource = {
   name: SOURCE, discoverProcesses: processes, discoverTranscripts: discover, parseLine,
   findTranscript(id) {
-    const row = transcript(id);
-    return row ? enrich([row])[0] : null;
+    let best: { root: string; row: DiscoveredTranscript } | null = null;
+    for (const root of dataRoots()) {
+      const row = transcript(root, id);
+      if (row && (!best || row.mtimeMs > best.row.mtimeMs)) best = { root, row };
+    }
+    return best ? enrich(best.root, [best.row])[0] : null;
   },
 };

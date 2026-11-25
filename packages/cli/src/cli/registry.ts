@@ -37,7 +37,7 @@ export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
   { name: "where", summary: "Find the top 3 local projects, agents or sessions by topic" },
   { name: "locate", summary: "Find a roughly remembered recipient across machines with local topic evidence" },
   { name: "route", summary: "Deprecated alias for where", canonicalName: "where", status: "deprecated", hidden: true, deprecationMessage: "`scout route` is deprecated; use `scout where`." },
-  { name: "search", summary: "Past harness sessions — explicit index → FTS (prefer over grepping ~/.codex|claude|kimi)" },
+  { name: "search", summary: "Past harness sessions — explicit index → FTS (prefer over grepping ~/.codex|claude|kimi|gemini)" },
   { name: "inbox", summary: "Read recent direct or addressed messages for this identity" },
   { name: "match", summary: "Rendezvous with one participant by shared project topic" },
   { name: "send", hidden: true, summary: "Removed; use ask or reply" },
