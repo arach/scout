@@ -5,13 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  ANTIGRAVITY_PERMISSION_HOOK_WRAPPER,
   CLAUDE_PERMISSION_HOOK_WRAPPER,
   HarnessHooks,
   HarnessHooksError,
+  antigravityPermissionHookWrapper,
   claudePermissionHookWrapper,
+  scoutAntigravityHookCommands,
   scoutClaudeHookCommands,
   shellQuote,
+  withoutScoutAntigravityHooks,
   withoutScoutClaudeHooks,
+  withScoutAntigravityHooks,
   withScoutClaudeHooks,
 } from "./harness-hooks.js";
 
@@ -178,5 +183,41 @@ describe("HarnessHooks", () => {
     expect(scoutClaudeHookCommands(JSON.parse(await readFile(settingsPath, "utf8")))).toHaveLength(1);
     await hooks().remove();
     expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({});
+  });
+
+  test("applies and removes Antigravity hooks.json entries without disturbing existing hooks", async () => {
+    const agyHooksPath = join(dir, "home", ".gemini", "config", "hooks.json");
+    const agyWrapperPath = join(dir, "support", "runtime", "hooks", ANTIGRAVITY_PERMISSION_HOOK_WRAPPER);
+    await mkdir(join(dir, "home", ".gemini", "config"), { recursive: true });
+    const existing = JSON.stringify({
+      "lint-checker": {
+        PostToolUse: [{ matcher: "run_command", hooks: [{ type: "command", command: "./scripts/lint.sh", timeout: 10 }] }],
+      },
+    }, null, 2) + "\n";
+    await writeFile(agyHooksPath, existing);
+
+    const agy = new HarnessHooks({
+      antigravityHooksPath: agyHooksPath,
+      antigravityWrapperPath: agyWrapperPath,
+      instance: "prod",
+      instanceOverride: "",
+      scoutInvocation: () => "'/usr/local/bin/scout'",
+      managedInstalls: false,
+    });
+
+    const applied = await agy.apply();
+    expect(applied.outcome).toBe("changed");
+    expect(applied.hooks).toEqual([expect.objectContaining({ harness: "antigravity", state: "applied" })]);
+    expect(await readFile(agyWrapperPath, "utf8")).toBe(antigravityPermissionHookWrapper("'/usr/local/bin/scout'"));
+    const parsed = JSON.parse(await readFile(agyHooksPath, "utf8"));
+    expect(parsed.openscout.PreToolUse).toHaveLength(1);
+    expect(parsed.openscout.PostToolUse).toHaveLength(1);
+    expect(parsed.openscout.Stop).toEqual([{ type: "command", command: shellQuote(agyWrapperPath), timeout: 10 }]);
+    expect(scoutAntigravityHookCommands(withScoutAntigravityHooks(parsed, shellQuote(agyWrapperPath)))).toEqual([shellQuote(agyWrapperPath)]);
+
+    const removed = await agy.remove();
+    expect(removed.outcome).toBe("changed");
+    expect(await readFile(agyHooksPath, "utf8")).toBe(existing);
+    expect(withoutScoutAntigravityHooks(JSON.parse(existing)).removed).toBe(0);
   });
 });

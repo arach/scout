@@ -16,6 +16,8 @@ export function renderHooksCommandHelp(): string {
     "Scout's hooks in harness settings. The runtime writes them and takes them out.",
     "Claude Code: a PermissionRequest hook, so permission dialogs in any Claude session",
     "can be answered from Scout.",
+    "Antigravity: non-blocking PreToolUse/PostToolUse/Stop hooks, so questions and",
+    "approval gates in native Antigravity sessions show up in Scout.",
     "",
     "apply   Add Scout's entries. Running it again changes nothing.",
     "remove  Take out Scout's entries and the script they run. Other hooks stay as they are.",
@@ -47,7 +49,8 @@ const SKIP_REASONS: Record<HarnessHooksSkipReason, string> = {
 
 function describeHook(hook: HarnessHookStatus): string {
   const label = hook.state === "applied" ? "applied" : hook.state === "absent" ? "not applied" : "needs apply";
-  const lines = [`Claude Code ${hook.event}: ${label}`, `  settings: ${hook.settingsPath}`];
+  const product = hook.harness === "antigravity" ? "Antigravity" : "Claude Code";
+  const lines = [`${product} ${hook.event}: ${label}`, `  settings: ${hook.settingsPath}`];
   if (hook.state !== "absent") lines.push(`  script:   ${hook.wrapperPath}`);
   if (hook.detail) lines.push(`  ${hook.detail} Run \`scout hooks apply\` to fix it, or \`scout hooks remove\`.`);
   return lines.join("\n");

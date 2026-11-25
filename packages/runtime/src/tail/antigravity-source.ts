@@ -76,7 +76,11 @@ function enrich(root: string, rows: DiscoveredTranscript[]): DiscoveredTranscrip
         row.title = meta.title?.trim() || null;
         row.cwd = workspace(meta.workspace_uris);
         row.project = row.cwd ? basename(row.cwd) : "";
-        row.status = meta.status === "CASCADE_RUN_STATUS_IDLE" ? "idle" : meta.status === "CASCADE_RUN_STATUS_RUNNING" ? "busy" : null;
+        row.status = meta.status === "CASCADE_RUN_STATUS_IDLE"
+          ? "idle"
+          : meta.status === "CASCADE_RUN_STATUS_RUNNING" || meta.status === "CASCADE_RUN_STATUS_BUSY"
+            ? "busy"
+            : null;
         const time = Date.parse(meta.last_modified_time ?? "");
         row.statusUpdatedAt = row.status && Number.isFinite(time) && time > 0 ? time : null;
       }
