@@ -11,6 +11,8 @@ import {
  */
 export const SCOUT_RESERVED_RUNTIME_PROFILE_IDS = [
   "antigravity",
+  "neon",
+  "carbon",
   "fable",
   "kimi",
   "grok",
