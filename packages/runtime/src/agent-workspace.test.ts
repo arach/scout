@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createAgentWorkspace, resolveSessionWorkspace, SCOUT_WORKSPACES_DIRNAME } from "./agent-workspace.js";
+import { captureAgentWorktree, createAgentWorkspace, resolveSessionWorkspace, SCOUT_WORKSPACES_DIRNAME } from "./agent-workspace.js";
 import { setExecSystemSpawnForTests } from "./system-probes/exec.js";
 
 const tempRoots: string[] = [];
@@ -207,6 +207,21 @@ describe("createAgentWorkspace", () => {
     expect(existsSync(join(repo, ".gitignore"))).toBe(false);
   }, 20_000);
 });
+
+test("captures changes on the owning branch and keeps the workspace", async () => {
+  const root = makeGitRepo();
+  const workspace = (await createAgentWorkspace(root, "capture"))!;
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const original = git("rev-parse", "HEAD");
+  writeFileSync(join(workspace.path, "result.txt"), "agent work");
+  await expect(captureAgentWorktree(root, { ...workspace, branch: "scout/wrong" })).rejects.toThrow("expected branch");
+  const commit = await captureAgentWorktree(root, workspace);
+  expect(commit).toBe(git("rev-parse", workspace.branch));
+  expect(git("show", `${commit}:result.txt`)).toBe("agent work");
+  expect(git("rev-parse", "HEAD")).toBe(original);
+  expect(existsSync(join(workspace.path, "result.txt"))).toBe(true);
+  expect(await captureAgentWorktree(root, workspace)).toBe(commit);
+}, 20_000);
 
 describe("resolveSessionWorkspace", () => {
   test("runs in the project root when no worktree is requested", async () => {

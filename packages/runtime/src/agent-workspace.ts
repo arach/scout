@@ -312,6 +312,46 @@ export async function createAgentWorkspace(
   }
 }
 
+/**
+ * Capture tracked and unignored changes without retiring the workspace.
+ * The caller must hold an exclusive workspace lease and establish runtime
+ * ownership separately; Git registration is not proof of Scout ownership.
+ * On failure the directory and any staged changes must be kept.
+ */
+export async function captureAgentWorktree(projectRoot: string, workspace: Pick<CreateAgentWorkspaceResult, "path" | "branch">): Promise<string> {
+  const root = realpathSync(projectRoot);
+  const container = join(root, SCOUT_WORKSPACES_DIRNAME);
+  const path = workspace.path;
+  const branchRef = `refs/heads/${workspace.branch}`;
+  if (!workspace.branch.startsWith("scout/") || !lstatSync(container).isDirectory()
+      || relative(container, path) !== basename(path) || !await isMatchingWorktree(root, path, workspace.branch)) {
+    throw new Error("cannot capture: workspace is not the registered Scout worktree on the expected branch");
+  }
+
+  const run = (args: string[]) => execSystemFile("git", args, { cwd: path, timeoutMs: 30_000 });
+  const status = ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"];
+  if ((await run(status)).stdout.length > 0) {
+    if ((await run(["ls-files", "--unmerged"])).stdout) {
+      throw new Error("cannot capture: unresolved merge conflicts; keep the workspace");
+    }
+    await run(["add", "-A", "--", "."]);
+    const staged = (await run(["diff", "--cached", "--raw", "--no-renames", "-z"])).stdout.split("\0");
+    if (staged.some((record, index) => index % 2 === 0 && /^:(?:160000 |[0-7]{6} 160000 )/.test(record))) {
+      throw new Error("cannot capture: Git links do not preserve nested repository contents; keep the workspace");
+    }
+    await run([
+      "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+      "commit", "-m", "Capture agent workspace changes",
+    ]);
+  }
+  const head = await resolveCommit(path, "HEAD");
+  if (!head || head !== await resolveCommit(root, branchRef)
+      || (await run(status)).stdout.length > 0 || !await isMatchingWorktree(root, path, workspace.branch)) {
+    throw new Error("cannot verify the captured workspace commit; keep the workspace");
+  }
+  return head;
+}
+
 export interface SessionWorkspace {
   /** Directory the session runs in. */
   cwd: string;
