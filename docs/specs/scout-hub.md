@@ -1,449 +1,521 @@
-# Scout Hub: Product and Technical Specification
+# Scout Hub
 
-Status: Draft  
-Date: 2026-11-26  
-Layer: Hosted Platform (`hub.oscout.net`), with open protocol and client contracts in `openscout-app/scout`
+Status: draft, decisions settled 2026-11-26. Nothing in this spec is built.
+Layer: Platform (hosted). Wire types and clients: `openscout-app/scout`.
+Hosted service: private platform repo.
 
-> **Principle:** One place things go in, one log, subscriptions anyone can set.
+Scout Hub is the hosted interchange for traffic that crosses machines. It
+accepts events from any source, appends them to one log per workspace, routes
+addressed work to a machine, agent or person, and delivers matching events to
+subscribers. Hub serves the address `https://hub.oscout.net`.
 
-Inside one machine, the local runtime broker already moves everything: its append-only journal, local deliveries, and live streams. Between machines that can reach each other on a LAN, Tailscale, or Iroh, the mesh forwards work directly. **Scout Hub** is the hosted interchange and router for everything *across* the system. It lets external tools, remote MCP clients, cloud machines, vendor sandboxes, and mobile devices get onto Scout's communication bus from anywhere, even when your Macs are asleep.
+Hub does not replace the per-machine broker. Work on one machine never waits on
+Hub. Peers that can dial each other directly keep using the mesh.
 
----
+## Scope
 
-## 1. Promise and Who It Is For
+In scope:
 
-### The promise
+- one append-only event log per workspace;
+- ingress for brokers, Scout Cloud machines, remote MCP clients, vendor-cloud
+  sessions and tool webhooks;
+- routing to online, offline and sleeping targets;
+- subscriptions with a search-style query and four delivery kinds;
+- one outbound link from each broker to Hub;
+- the `scout hub` CLI and the `hub_*` MCP tools.
 
-Put Scout Hub in front of your fleet and everything outside a single machine has one address to send to, one append-only event log to read from, and one subscription model that reaches any person or agent. You do not wire up separate relays, deploy your own Cloudflare buckets, or leave a laptop open on your desk just to keep Slack, webhooks, and remote MCP alive.
+Out of scope:
 
-### Who it is for
+- routing same-machine or direct-mesh traffic through Hub;
+- storing harness transcripts in plaintext;
+- a self-hosted Hub server (the Hub URL stays configurable, see Decisions);
+- compound or windowed triggers (`3 errors in 10m`);
+- general automation that is not Scout coordination (Zapier-style flows);
+- enterprise compliance claims.
 
-1. **Individual builders working across devices and clouds.** You build on a MacBook, check progress and answer agent questions from an iPhone, start work from Claude or ChatGPT over remote MCP, run background tasks on Scout Cloud (Fly machines) or Claude Code on the web, and ship through GitHub and Vercel.
-2. **Small high-trust engineering crews.** Two to ten builders and their agents coordinating across workstations, shared repositories, Slack channels, deploy pipelines, and cloud sandboxes without running enterprise message-bus infrastructure.
+## Current system
 
-### What breaks today without Hub
+These facts are verified at `536ff537`. They must remain true unless a
+requirement below changes them.
 
-Today, cross-machine and external reach in Scout is split across five separate mechanisms, and most of them fail as soon as a laptop sleeps:
+- **Broker.** `packages/runtime/src/broker.ts` (`InMemoryControlRuntime`) is the
+  per-machine bus. It exposes `subscribe(listener)` for `ControlEvent`
+  (`packages/protocol/src/events.ts`) and handles `stream.subscribe`.
+  `broker-daemon.ts` is the composition root.
+- **Journal.** `FileBackedBrokerJournal` (`broker-journal*.ts`) appends to
+  `<control home>/broker-journal.jsonl` with fsync. Each broker is the only
+  writer of its journal and SQLite projections.
+- **Delivery.** `broker-delivery-store.ts` persists `DeliveryIntent` and
+  `DeliveryAttempt` with fenced leases. Transports are listed in
+  `DeliveryTransport` (`packages/protocol/src/common.ts`).
+- **MCP events.** `broker-mcp-events.ts` implements SEP-3415 events for
+  `flight.completed`, `work.waiting` and `message.created` on one machine only.
+- **Ephemeral events.** `EPHEMERAL_CONTROL_EVENT_KINDS` (for example
+  `presence.updated`) fan out live and never enter the journal.
+- **Mesh.** `packages/protocol/src/mesh.ts` defines the hosted addresses
+  `https://mcp.oscout.net` (MCP relay), `https://mesh.oscout.net` (presence
+  rendezvous) and `wss://mesh.oscout.net/v1/relay` (phone pairing relay).
+  `scout mesh bridge` (`packages/cli/src/cli/commands/mesh-bridge.ts`,
+  `packages/runtime/src/mesh-bridge-supervisor.ts`) tunnels the local MCP server
+  to `mcp.oscout.net`. If that Mac is offline, callers get `node_unreachable`.
+- **Today's `scout hub`.** `packages/cli/src/cli/commands/hub.ts` and
+  `packages/runtime/src/hub/` collect vendor-cloud sessions into
+  `<OPENSCOUT_HOME>/hub/`:
+  - `claude-code`: a repo hook seals transcript chunks (`seal.ts`, X25519 +
+    HKDF-SHA256 + AES-256-GCM) and posts them to a user-deployed Cloudflare
+    Worker (`integrations/hub-inbox`). `HubCollectorService` polls it every 15 s.
+  - `managed-agents`: `ManagedAgentsPuller` polls Anthropic's API every 15 s
+    with `$ANTHROPIC_API_KEY`.
+- **Integrations.** Slack (`integration-slack-events.ts`,
+  `slack-worker-supervisor.ts`) and Vercel Board (`vercel-board/service.ts`) run
+  as workers inside one local broker.
+- **Push.** `mobile-push.ts` sends through a separate push relay.
+  `mobile-push-seal.ts` seals payloads per paired phone.
 
-- **Closing your laptop breaks remote MCP.** Remote MCP clients (`Claude`, `ChatGPT`, `Grok Bot`, `Muse`) connect to `https://mcp.oscout.net`, which tunnels over a single WebSocket to `scout mesh bridge` (`packages/cli/src/cli/commands/mesh-bridge.ts`, `packages/cli/src/mcp/mesh-bridge.ts`). When that Mac goes offline, callers hit `node_unreachable`. They cannot read recent activity, queue an ask for when the Mac wakes, or fall back cleanly to a cloud worker.
-- **Integrations depend on one live custodian Mac.** Slack (`packages/runtime/src/integration-slack-events.ts`, `packages/runtime/src/slack-worker-supervisor.ts`) and Vercel Board (`packages/runtime/src/vercel-board/service.ts`) run supervised workers inside one local `scout-broker`. When that Mac sleeps or drops off Wi-Fi, Slack mentions go unanswered and boards stop syncing. GitHub and Vercel deploy webhooks have no durable public Scout endpoint at all.
-- **Vendor cloud sessions require DIY cloud plumbing and stay on one host.** Today's `scout hub` command (`packages/cli/src/cli/commands/hub.ts`, `packages/runtime/src/hub/`) only collects transcripts from Claude Code on the web (via `integrations/hub-inbox/src/worker.ts`, a user-deployed Cloudflare Worker over R2 with manual `wrangler secret put` tokens) and Anthropic Managed Agents (`packages/runtime/src/hub/managed-agents.ts`, polled every 15 seconds with a local API key). Those sessions only appear on the one Mac running the collector, and nothing in Scout can subscribe to events from them.
-- **Hosted relays are fragmented.** MCP uses `https://mcp.oscout.net`, presence rendezvous uses `https://mesh.oscout.net/v1/presence`, phone pairing uses `wss://mesh.oscout.net/v1/relay` (`packages/protocol/src/mesh.ts`), APNs uses a separate push relay (`packages/runtime/src/mobile-push.ts`), and cloud transcripts use a separate R2 Worker. Each carries its own token, config file, and failure mode.
-- **Subscriptions are trapped on one machine and limited to three event shapes.** `InMemoryControlRuntime.subscribe` (`packages/runtime/src/broker.ts`), `subscribeControlEvents` (`packages/runtime/src/broker-control-events.ts`), `BrokerControlStreamService` (`packages/runtime/src/broker-control-stream-service.ts`), and `BrokerMcpEvents` (`packages/runtime/src/broker-mcp-events.ts`) only watch one local broker. `BrokerMcpEvents` exposes only `flight.completed`, `work.waiting`, and `message.created` by exact ID. Neither a person nor an agent can say: *"Notify my phone whenever a production deploy fails"* or *"Wake the `talkie` agent whenever CI fails on `main`."*
+## Terms
 
----
+- **Workspace**: the account or crew that owns one Hub log.
+- **Source**: a producer of Hub events. Kinds: `broker`, `scout-cloud`, `mcp`,
+  `claude-code`, `managed-agents`, `github`, `vercel`, `slack`, `webhook`.
+- **Event**: one `HubEvent` record on the log.
+- **Route**: the delivery of one addressed event (an ask, a reply, a forward) to
+  one target node, agent or person.
+- **Subscription**: a stored `HubFilter` plus one delivery action.
+- **Subscriber**: the principal that receives a subscription's deliveries.
+- **Hub link**: the one outbound WSS connection from a broker to Hub.
+- **Facets**: the unsealed fields of an event that Hub can filter and route on.
 
-## 2. Concepts in Plain Words
+## Wire types
 
-Scout Hub has five nouns. Together they act as an interchange, a router, and a standing subscription bus.
-
-### Sources
-
-A **source** is anything that puts events or requests into Hub:
-
-- **Your Scout machines:** local workstations running `scout-broker` and **Scout Cloud** machines on Fly.
-- **MCP clients:** Claude, ChatGPT, Cursor, Grok Bot, Muse, or any remote MCP caller connected to Hub's MCP gateway.
-- **Vendor agent clouds:** Claude Code on the web, Anthropic Managed Agents, Codex Cloud, Devin.
-- **Tool webhooks:** GitHub (pushes, pull requests, check suites, reviews), Vercel (deployments, build failures), Slack (mentions, DMs, thread replies), Linear, and Sentry.
-
-### The log
-
-**The log** is one append-only, ordered list of `HubEvent` records for your Scout account (or crew workspace). Every accepted event gets a globally unique `id` and a monotonically increasing sequence number (`seq`).
-
-The log holds **coordination events and external signals**: messages, asks, flight state updates, agent Feed posts and shows, cloud session lifecycle markers, and normalized webhook events (such as a failed Vercel deploy or a GitHub review comment). Following Scout's data boundary (*Observe, don't absorb* in [`docs/architecture.md`](../architecture.md#the-data-model)), the log never bulk-imports raw model turns from harness transcripts. Raw cloud transcript bytes travel as sealed sidecar chunks linked from session events.
-
-### Routes
-
-A **route** dispatches addressed work to the specific machine, agent, or person meant to handle it.
-
-When an MCP client calls `ask({ projectPath: "talkie", body: "fix the build" })` or someone mentions `@scout` in a bound Slack channel, Hub resolves the target using Scout's addressing rules (project + capability, `@agent`, `target:<name>`, `session:sess.<token>`, or `--on <host>`). If the target lives on a Scout Cloud machine on Fly, Hub wakes that machine and dispatches the invocation immediately. If the target lives on a sleeping MacBook, Hub commits the accepted receipt to the log, queues the delivery for that node, and dispatches it when the Mac reconnects.
-
-### Subscriptions
-
-A **subscription** is a standing match rule on the log. It pairs a **filter** (what to watch for) with a **delivery action** (who gets it, and whether to notify, send an FYI, or wake an agent with an `ask`). Any authorized person or agent can create one from the CLI, MCP, phone, Mac, or web app.
-
-### Subscribers
-
-A **subscriber** is the person, agent, or client that receives what matches:
-
-- **A person:** a push notification on iOS/Android, an inbox item in the Mac or web app, or a live terminal stream.
-- **A Scout agent:** a project capability or named agent woken via `ask` or handed an FYI message, either on a local Mac or on a Scout Cloud Fly machine.
-- **An MCP client:** receiving SEP-3415 MCP Events over webhook or SSE stream.
-- **An outbound webhook:** a signed HTTP `POST` to a verified URL.
-
-### Subscription examples
-
-| Subscription type | Plain-words intent | Filter | What happens on match |
-| --- | --- | --- | --- |
-| **A keyword** | "Alert me whenever `ENOSPC` or `rollback` comes up anywhere." | `text ~ "ENOSPC" OR text ~ "rollback"` | Interrupt push to phone + Mac inbox item. |
-| **A feed** | "Stream every agent Feed post and screenshot from all my Macs and Fly machines." | `kind IN (post.created, show.created)` | Live Feed timeline on phone and Mac; milestone posts (`milestone: true`) badge the app. |
-| **A project** | "Follow everything happening on `talkie`." | `project = "talkie"` | Project activity feed on phone (PRs, deploys, cloud sessions, flights); interrupts on `flight.failed` or `question.asked`. |
-| **A person** | "Show me whenever `person:alex` asks a question, comments on a PR, or mentions Scout in Slack." | `actor = "person:alex"` | Priority inbox stream on Mac and phone, or FYI delivery to a project orchestrator agent. |
-| **A failing deploy** | "When a Vercel production deploy on `talkie` `main` fails, wake Codex on Scout Cloud to diagnose it and send me the summary." | `source = "vercel" AND kind = "deploy.failed" AND project = "talkie" AND branch = "main"` | Hub dispatches `ask` to `project:talkie` (`harness: codex`, `on: cloud`) with the deploy payload quoted as source material, then pushes the flight handle to the phone. |
-
----
-
-## 3. The User's Path
-
-### 3.1 Connecting a source
-
-Signing in once links a machine to Hub:
-
-```bash
-scout auth login
-scout hub status
-```
-
-`scout auth login` runs a browser PKCE approval flow (evolving `connectMeshBridge` in `packages/cli/src/mcp/mesh-bridge-connect.ts`), binds this machine's Ed25519 node identity (`packages/runtime/src/node-identity.ts`) to the account, saves the Hub credential in the macOS Keychain (or a mode-`0600` token file on Linux), and enables the broker's outbound Hub link under `scout-base`.
-
-Sources connect in one step each:
-
-- **Tool webhooks (GitHub, Vercel, Slack):**
-  ```bash
-  scout hub connect github --repo my-org/talkie
-  scout hub connect vercel --project talkie
-  scout hub connect slack
-  ```
-  An OAuth browser hop installs the GitHub App, Vercel integration, or Slack app (or issues a signed webhook URL `https://hub.oscout.net/v1/ingest/<source-id>` and secret for manual setup). Webhook events land on the Hub log immediately, even when every Mac is off.
-- **Vendor cloud sessions (Claude Code on the web and Managed Agents):**
-  ```bash
-  scout hub connect claude-code ~/dev/talkie
-  scout hub connect managed-agents --api-key-env ANTHROPIC_API_KEY
-  ```
-  Users no longer run `wrangler deploy` or create an R2 bucket. `scout hub connect claude-code` writes `.claude/scout/report.mjs`, `.claude/scout/hub.json`, and gated `.claude/settings.json` hooks (`packages/runtime/src/hub/connect.ts`), pointing the sandbox reporter at Hub's chunk endpoint with a repo-scoped write-only token (`shw_...`) and the owner's X25519 public key. For `managed-agents`, the user chooses whether the API key stays local on this Mac or is stored sealed in Hub so Hub pulls sessions while the Mac is asleep.
-- **Scout Cloud machines:** Fly machines managed by Scout Cloud register with Hub automatically at boot, advertise their repositories and harnesses, sleep when idle, and wake when Hub routes work to them.
-
-### 3.2 An MCP client connecting from anywhere
-
-A user adds `https://hub.oscout.net/mcp` (with `https://mcp.oscout.net` kept as a permanent alias) in Claude, ChatGPT, Cursor, or Grok Bot, or runs `scout login --as muse` inside a remote VM ([`docs/integrations.md`](../integrations.md)).
-
-1. **Identity binding:** Hub runs the MCP OAuth 2.1 consent screen (or verifies a minted `agent_token`) and pins the caller to a `McpEventPrincipal` (`packages/protocol/src/mcp-events.ts`) with an explicit Scout `agentId`.
-2. **Reads that work with the laptop closed:** Tools such as `who`, `hosts`, `messages_inbox`, `broker_feed`, and `hub_log` read directly from Hub's hot projection. They show which Macs are asleep, which Scout Cloud machines are ready to wake, and what work recently completed.
-3. **Asks and replies:** Calling `ask` appends an `invocation.requested` event to Hub's log and routes it:
-   - **Scout Cloud target:** Hub wakes the Fly machine and streams flight updates back.
-   - **Online Mac target:** Hub forwards the invocation over that Mac's open Hub link.
-   - **Sleeping Mac target:** When `--on <mac>` or a Mac-only repo is requested, Hub returns an immediate durable receipt (`state: "queued"`, `reason: "host_offline_queued"`) instead of failing with `node_unreachable`. The Mac executes or surfaces the queued ask when it wakes.
-
-### 3.3 Setting a subscription from the CLI, MCP, or an app
-
-All surfaces write to the same `HubSubscription` API on Hub:
-
-- **CLI:**
-  ```bash
-  # Push to phone when a deploy fails on talkie
-  scout hub subscribe 'source:vercel kind:deploy.failed project:talkie' --notify phone
-
-  # Wake a Scout Cloud agent when main CI fails
-  scout hub subscribe 'source:github kind:check_suite.failed branch:main repo:my-org/talkie' \
-    --ask --project talkie --on cloud --harness codex \
-    --prompt "Inspect the failing check suite and report the root cause or open a fix PR."
-
-  # Stream matching events live in the terminal
-  scout hub tail 'project:talkie OR "auth-migration"'
-
-  # Manage subscriptions
-  scout hub subscriptions
-  scout hub unsubscribe sub_01j...
-  ```
-- **MCP:** Connected agents call `hub_subscribe`, `hub_unsubscribe`, and `hub_subscriptions` to subscribe themselves or the operator, or call SEP-3415 `events/subscribe` (`packages/cli/src/mcp/mcp-events.ts`) to receive webhook or stream callbacks.
-- **Mac and phone apps:** Tapping Subscribe on a project, agent, person, Feed filter, or search bar creates the same `HubSubscription` record, with controls for push urgency (`interrupt`, `badge`, `silent`) and quiet hours.
-
-### 3.4 What arrives on the phone and the Mac
-
-- **On the phone (iOS / Android):**
-  - When a subscribed event or operator question lands on Hub, Hub sends an APNs/FCM push directly (folding in the push relay from `packages/runtime/src/mobile-push.ts`), with sensitive notification payloads sealed per paired phone key (`packages/runtime/src/mobile-push-seal.ts`).
-  - Opening the app connects directly to Hub over HTTPS/WSS. Even with all Macs powered off, the phone shows the unified Feed (`ScoutPost` and `ScoutFeedWork` from `packages/protocol/src/posts.ts` and `packages/protocol/src/feed-work.ts`), webhook alerts, Scout Cloud flights, and open questions, and lets the user reply or start cloud asks.
-  - When a paired Mac is reachable (on LAN via `packages/pairing` LAN beacon, or across networks via Hub's Noise pairing room relay), the phone attaches a direct end-to-end encrypted pairing session for host-local state such as live tmux panes and uncommitted diffs.
-- **On the Mac:**
-  - While awake, `scout-broker` holds one outbound WSS stream to Hub. Routed asks, replies, and relevant log events commit to `broker-journal.jsonl`, project into SQLite, and flow through `scoutd`'s Unix-socket reader so the macOS menu bar HUD, Scout.app, and `scout tui` stay current.
-  - On wake after sleep, the broker sends its last durable `hubSeq` cursor to Hub, replays missed deliveries in sequence order, collects any waiting sealed cloud-session chunks into `<OPENSCOUT_HOME>/hub/`, and resumes queued work idempotently.
-
----
-
-## 4. Architecture Mapped onto Real Modules
-
-### 4.1 Baseline: what exists in the core repo today
-
-1. **The per-machine broker (`packages/runtime/src/broker*.ts`):**
-   - `packages/runtime/src/broker.ts`: `InMemoryControlRuntime` holds the in-memory `RuntimeRegistrySnapshot`, exposes `subscribe(listener: (event: ControlEvent) => void)`, handles `ControlCommand` dispatch (including `SubscribeCommand` with `kind: "stream.subscribe"` and `SubscriptionRequest` in `packages/protocol/src/transports.ts`), and plans message/invocation deliveries across ranked `AgentEndpoint` transports.
-   - `packages/runtime/src/broker-daemon.ts`: the `scout-broker` composition root supervised under `launchd -> scoutd -> scout-base -> scout-broker`. It wires persistence, HTTP/SSE/tRPC routes, mesh services, `BrokerMcpEvents`, `HubCollectorService`, `ManagedAgentsPuller`, `IntegrationSlackEvents`, `BrokerVercelBoardService`, and `mobile-push.ts`.
-   - `packages/runtime/src/broker-journal.ts`, `broker-journal-framing.ts`, `broker-journal-event-refs.ts`, and `broker-journal-record-contract.ts`: `FileBackedBrokerJournal` persists `BrokerJournalEntry` commits to `broker-journal.jsonl` with `fsync` durability and truncation rollback on failed writes. `broker-journal-framing.ts` prefixes rewritten journals with `journal.generation` (`version: 1`, UUID) and wraps multi-entry commits in `journal.batch` envelopes (`count <= 4096`, `bytes <= 16 MiB`, `sha256` payload digest). `broker-journal-event-refs.ts` (`ControlEventThinner` / `ControlEventHydrator`) deduplicates `flight`, `message`, and `invocation` payloads in `control.event.record` lines using `{ field, id, sha256 }` back-references. `broker-journal-record-contract.ts` (`readableJournalKinds`, `journalEntryProblem`) validates whole frames before reducers see entries, isolating corrupt frames in `BrokerQuarantine`. Compaction preserves `BrokerJournalReplayBarrier` markers so `WorkerSQLiteProjection` and `scoutd` native readers resume safely across rewrites.
-   - `packages/runtime/src/broker-control-events.ts` and `broker-control-stream-service.ts`: `ControlEvent` (`packages/protocol/src/events.ts`, `OPENSCOUT_CONTROL_EVENT_VERSION = 1`) covers durable lifecycle facts (`message.posted`, `invocation.requested`, `flight.updated`, `delivery.planned`, `delivery.state.changed`, `collaboration.upserted`, etc.) plus `EPHEMERAL_CONTROL_EVENT_KINDS` (`presence.updated`, `vercel_board.handoff`, `role.slot.written`), which fan out live via `publishEphemeralControlEvent` without entering the 500-event backlog, journal, or SQLite. `BrokerControlStreamService` serves SSE firehose, per-invocation, and per-target inbox streams (`inbox.item`, `inbox.item.updated`), replaying `presenceSnapshot` on connect.
-   - `packages/runtime/src/broker-delivery-store.ts`: persists `DeliveryIntent` and `DeliveryAttempt` (`packages/protocol/src/deliveries.ts`), enforcing fenced leases (`claimDelivery` bumping `metadata.leaseGeneration`, `updateDeliveryStatusIf`) across `DeliveryTransport` kinds (`local_socket`, `websocket`, `pairing_bridge`, `peer_broker`, `mcp_poll`, `webhook`, `claude_stream_json`, `codex_app_server`, `tmux`, etc. in `packages/protocol/src/common.ts`).
-   - `packages/runtime/src/broker-mcp-events.ts`: broker-owned SQLite tables (`mcp_event_subscriptions`, `mcp_event_outbox`, `mcp_event_seen`, `mcp_event_source_states`) implementing SEP-3415 MCP Events (`MCP_EVENTS_PROTOCOL = "2026-07-28"`) for `flight.completed`, `work.waiting`, and `message.created`, drained over leases by `startMcpEventDeliveryWorker` (`packages/cli/src/mcp/mcp-events.ts`). (Separately, `packages/runtime/src/jetstream/index.ts` implements an opt-in loopback NATS JetStream publisher for `message.posted`, explicitly deferring cross-host subscriptions and webhooks.)
-2. **The mesh and phone pairing:**
-   - `packages/protocol/src/mesh.ts`: defines `OPENSCOUT_MESH_PROTOCOL_VERSION = 1`, `OPENSCOUT_IROH_MESH_ALPN = "openscout/mesh/1"`, `NodeMeshEntrypoint` (`iroh`, `cloudflare_tunnel`, `http`, `mobile_pairing`), `TrustedPeerRecord` (Ed25519 SPKI `keyId`, `observe` / `control` tiers), and three hosted URLs: `DEFAULT_OPENSCOUT_MESH_RELAY_URL` (`https://mcp.oscout.net`), `DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL` (`https://mesh.oscout.net`), and `DEFAULT_OPENSCOUT_MOBILE_PAIRING_RELAY_URL` (`wss://mesh.oscout.net/v1/relay`).
-   - `packages/cli/src/cli/commands/mesh.ts`, `mesh-bridge.ts`, `hosts.ts`, and `pair.ts`: `scout mesh` manages discovery, trust-cone enrollment, and `scout mesh bridge` (outbound WSS tunnel from local `createScoutMcpServer` in `packages/cli/src/mcp/scout-mcp.ts` to `mcp.oscout.net`, supervised by `packages/runtime/src/mesh-bridge-supervisor.ts` or `packages/mesh-extension/src/main.ts`). `scout hosts` probes live mesh machines (3s timeout) to show projects and `scout ask --on <host>` commands. `scout pair` drives `@openscout/pairing` (`packages/pairing`): on LAN, a phone discovers the host via LAN beacon and connects directly; off LAN, the host pairing controller holds a room on `wss://mesh.oscout.net/v1/relay` (`packages/runtime/src/relay-transport.ts`, `POST /resolve` by `bridgePublicKey`, Noise E2EE end-to-end) and publishes `mobile_pairing` presence (`accountRoom` + `publicKey`) via `packages/runtime/src/mesh-rendezvous.ts`.
-3. **Today's `scout hub` command:**
-   - `packages/cli/src/cli/commands/hub.ts` and `packages/runtime/src/hub/` (`index.ts`, `seal.ts`, `state.ts`, `mirror.ts`, `collector.ts`, `connect.ts`, `reporter-source.ts`, `managed-agents.ts`), paired with `integrations/hub-inbox/src/worker.ts` (`wrangler.jsonc`).
-   - `claude-code` sandbox hooks seal transcript slices with ephemeral X25519 + HKDF-SHA256 + AES-256-GCM (`seal.ts`) and `POST` them to `/v1/inbox/chunks` on R2; `HubCollectorService` polls `/v1/inbox/pending` every 15s, opens chunks with `identity.json`, appends byte-ordered lines via `mirror.ts`, and deletes collected keys. `ManagedAgentsPuller` polls Anthropic's `beta.sessions` API every 15s into `<OPENSCOUT_HOME>/hub/managed-agents/`.
-
-### 4.2 How hosted Hub relates to each machine's broker
-
-Hub uses **authority-preserving federation** (outbound cursor sync + store-and-forward routing), rather than a stateless relay or a full cloud mirror of local broker databases:
-
-- **Stateless relay is too weak:** pure WebSocket rooms (`relay-transport.ts`, `mesh-bridge.ts`) lose webhooks, remote MCP reads, and subscriptions whenever the host disconnects.
-- **Full broker mirroring is too invasive:** shipping every local `broker-journal.jsonl` entry, local socket heartbeat, and harness transcript to the cloud would violate [`docs/public-source-boundary.md`](../public-source-boundary.md), bloat storage, and put cloud latency in front of local work.
-- **Authority-preserving federation:**
-  1. **Local authority stays local.** Each `scout-broker` remains the sole canonical writer of its `broker-journal.jsonl` and SQLite projections. Same-Mac work never waits on Hub.
-  2. **Direct mesh stays direct.** When peers can dial each other over LAN, Tailscale, or Iroh (`openscout/mesh/1`), `PeerDeliveryWorker` (`packages/runtime/src/peer-delivery.ts`) and `BrokerMeshForwardingService` (`packages/runtime/src/broker-mesh-forwarding-service.ts`) forward bundles directly. Hub provides node presence discovery and serves as a store-and-forward fallback `DeliveryTransport` (`"hub"`) when direct dial fails or the target host is asleep.
-  3. **Selective outbound outbox.** Each connected broker runs `HubOutboxService`, tailing `FileBackedBrokerJournal` via `BrokerJournalReplayBarrier` (just like `JetStreamJournalPublisher` in `packages/runtime/src/jetstream/index.ts`) to publish cross-system facts: node/agent cards, public/workspace channel messages, cross-node flights, operator questions, and Feed posts/shows. `EPHEMERAL_CONTROL_EVENT_KINDS` never enter Hub's durable log; Hub keeps only an in-memory latest-presence map per node/agent.
-  4. **Inbound cursor stream.** Each broker subscribes to Hub over one persistent WSS connection starting from its last acked `hubSeq`, committing inbound asks, replies, peer forwards, and host-targeted subscription deliveries into `BrokerDeliveryStore`.
-
-```mermaid
-flowchart LR
-  subgraph External["External Sources and Clients"]
-    MCP["Remote MCP Clients (Claude, ChatGPT, Muse)"]
-    WH["SaaS Webhooks (GitHub, Vercel, Slack)"]
-    VC["Vendor Agent Clouds (Claude Code Web, Managed Agents)"]
-    PH["Phone and Web Apps (iOS, Android)"]
-  end
-
-  subgraph Hub["Scout Hub (Platform: hub.oscout.net)"]
-    ING["Ingress and Auth Gate (OAuth, HMAC, Agent Tokens)"]
-    LOG["Append-Only Hub Log (Monotonic seq + Idempotency)"]
-    RTR["Router and Offline Queue (Target Resolution + Wake)"]
-    SUB["Subscription Matcher (Filters to Push, Ask, Webhook)"]
-    BLOB["Sealed Chunk Staging (7-day R2 Store)"]
-  end
-
-  subgraph Fleet["Scout Fleet"]
-    MAC["Mac: scout-broker (broker-journal.jsonl + Harnesses)"]
-    FLY["Scout Cloud: Fly Machine (Wake-on-Ask Runtime)"]
-    LAN["Peer Mac on LAN or Tailscale (Direct Mesh + Hub Link)"]
-  end
-
-  MCP <--> ING
-  WH --> ING
-  VC -->|"Sealed chunks + session meta"| ING
-  ING --> LOG
-  VC -.->|"Ciphertext"| BLOB
-  LOG --> RTR
-  LOG --> SUB
-  SUB -->|"APNs and WSS"| PH
-  SUB -->|"Trigger ask or FYI"| RTR
-  PH <-->|"Read log, Ask, Noise relay"| ING
-  RTR <-->|"Outbound WSS cursor link"| MAC
-  RTR <-->|"Wake + dispatch"| FLY
-  RTR <-->|"Outbound WSS cursor link"| LAN
-  MAC <-->|"Direct HTTP or Iroh mesh/1"| LAN
-  BLOB -.->|"Pull and open with identity.json"| MAC
-```
-
-### 4.3 Event identity and ordering
-
-Every record on Hub's log uses one `HubEvent` envelope:
+Add `packages/protocol/src/hub.ts` and export it from
+`packages/protocol/src/index.ts`.
 
 ```ts
+export type HubSourceKind =
+  | "broker" | "scout-cloud" | "mcp" | "claude-code" | "managed-agents"
+  | "github" | "vercel" | "slack" | "webhook";
+
 export interface HubEvent {
-  /** Globally unique ULID/UUIDv7 minted on creation. */
-  id: ScoutId;
-  /** Monotonic per-workspace sequence assigned by Hub on commit (1, 2, 3...). */
-  seq: number;
-  /** Producer idempotency key, e.g. "github:delivery:<guid>" or "node:<nodeId>:evt:<id>". */
-  idempotencyKey: string;
   v: 1;
-  /** "broker" | "mcp" | "scout-cloud" | "claude-code" | "managed-agents" | "github" | "vercel" | "slack" | "webhook" */
+  id: ScoutId;              // UUIDv7, minted by the producer
+  seq: number;              // assigned by Hub on commit, per workspace, starts at 1
+  idempotencyKey: string;   // e.g. "github:delivery:<guid>", "node:<nodeId>:evt:<id>"
   source: HubSourceKind;
-  /** Configured source instance id or origin nodeId. */
-  sourceId: string;
-  /** Domain event kind, e.g. "message.posted", "flight.updated", "post.created", "deploy.failed", "session.chunk_ready". */
-  kind: string;
-  /** Hub commit time (epoch ms) and optional producer timestamp. */
-  ts: number;
-  originTs?: number;
-  /** Unsealed routing and filter facets. */
+  sourceId: string;         // configured source id or origin nodeId
+  kind: string;             // e.g. "flight.updated", "deploy.failed", "session.chunk_ready"
+  ts: number;               // Hub commit time, epoch ms
+  originTs?: number;        // producer time, not used for ordering
   facets: {
-    actorId?: ScoutId;
-    nodeId?: ScoutId;
-    project?: string;
-    repo?: string;
-    branch?: string;
-    conversationId?: ScoutId;
-    invocationId?: ScoutId;
-    flightId?: ScoutId;
-    workId?: ScoutId;
-    sessionHandle?: string;
-    labels?: string[];
+    actorId?: ScoutId; nodeId?: ScoutId; targetNodeId?: ScoutId;
+    project?: string; repo?: string; branch?: string;
+    conversationId?: ScoutId; invocationId?: ScoutId; flightId?: ScoutId;
+    sessionHandle?: string; labels?: string[];
     severity?: "info" | "warn" | "error";
   };
   body:
     | { encoding: "json"; summary: string; data: Record<string, unknown> }
-    | { encoding: "sealed"; alg: "x25519-aes-256-gcm-v1"; recipientKeyId: string; ciphertextRef: string; byteLength: number };
+    | { encoding: "sealed"; alg: "x25519-aes-256-gcm-v1"; recipientKeyId: string;
+        ciphertextRef: string; byteLength: number };
+  untrustedExternalContent?: true;
 }
+
+export interface HubSubscription {
+  id: string;                          // "sub_<ulid>"
+  workspaceId: string;
+  owner: ScoutId;                      // principal that created it
+  query: string;                       // source text, see "Subscription query"
+  filter: HubFilter;                   // parsed form of `query`
+  deliver:
+    | { kind: "notify"; devices: "phone" | "mac" | "all"; urgency: "interrupt" | "badge" | "silent" }
+    | { kind: "fyi"; target: string }
+    | { kind: "ask"; target: string; harness?: string; on?: string; prompt: string }
+    | { kind: "webhook"; url: string };
+  state: "active" | "degraded" | "paused";
+  cursor: number;                      // last delivered seq
+  createdAt: number;
+}
+
+export type HubFilter =
+  | { op: "and" | "or"; args: HubFilter[] }
+  | { op: "not"; arg: HubFilter }
+  | { op: "eq"; field: HubFilterField; value: string }
+  | { op: "text"; value: string };
+
+export type HubFilterField =
+  | "source" | "kind" | "project" | "repo" | "branch" | "actor" | "node"
+  | "label" | "severity";
 ```
 
-- **Ordering:** `seq` gives a strict total order on Hub's log per workspace. Phones, MCP streams, subscription workers, and reconnecting brokers track progress with a single integer `lastSeq` cursor.
-- **Idempotency:** Hub deduplicates `(workspaceId, idempotencyKey)` across an 8-day rolling window (matching `mcp_event_seen` in `packages/runtime/src/broker-mcp-events.ts`). Retried webhooks or replayed broker outbox batches return the existing `seq` without duplicating deliveries.
-- **Causal metadata:** Offline peers preserve `originTs`, `conversationId`, `invocationId`, `flightId`, and `traceparent`; Hub orders their events by commit arrival without claiming cross-host clock synchronization.
+Also:
 
-### 4.4 What Hub stores vs what stays on your machines
+- In `packages/protocol/src/common.ts`, add `"hub"` to `DeliveryTransport` and
+  `"subscription"` to `DeliveryReason`.
+- In `packages/protocol/src/mesh.ts`, add
+  `DEFAULT_OPENSCOUT_HUB_URL = "https://hub.oscout.net"`. Keep the existing
+  `mcp.oscout.net` and `mesh.oscout.net` constants.
 
-| Data | Stored on Hub (Platform) | Stored on Your Machines (`~/.openscout`) |
-| --- | --- | --- |
-| **Coordination log** | Bounded rolling window of `HubEvent` records (24h–90d by tier) indexed by `seq` | Canonical `broker-journal.jsonl`, `control-plane.sqlite`, and immutable `history/` partitions |
-| **Raw harness transcripts** | **Never stored in plaintext.** Only temporary sealed chunks in R2 (7-day TTL) from cloud sandboxes | Canonical `.claude`, `.codex`, and `<OPENSCOUT_HOME>/hub/` JSONL files (`Observe, don't absorb`) |
-| **Source configs & secrets** | Webhook endpoints, OAuth installations, KMS-encrypted signing secrets, optional cloud-pull keys | Repo `.claude/scout/hub.json` write tokens; host-only API keys when local pull is chosen |
-| **Routing & presence** | Enrolled node public keys (`TrustedPeerRecord`), live presence, Scout Cloud Fly machine IDs, offline delivery queues | Local `AgentEndpoint` table (`tmux`, `codex_app_server`, `claude_stream_json`), PIDs, worktrees, route aliases |
-| **Subscriptions** | Workspace `HubSubscription` records, subscriber `seq` cursors, webhook outbox & retry leases | In-process `ControlRuntime.subscribe` callbacks, local SSE streams, `scoutd` Unix-socket HUD projection |
-| **Mobile push & pairing** | Device APNs/FCM tokens, per-device sealed push notifications, opaque Noise pairing rooms | Canonical pairing trust owner (`packages/runtime/src/pairing-security/trust-owner.ts`), Noise private keys |
-| **Code & artifacts** | Explicitly published `ScoutPostFile` ("shows") with retention TTL | Git checkouts, worktrees, uncommitted diffs, local build outputs |
+## Modes of interconnection
 
-### 4.5 Offline machines, wake, and replay
+Hub has one contract: the Hub HTTP API. Every other mode is a client of that
+API or a fixed-purpose channel beside it. A capability must exist in the API
+before the CLI or MCP exposes it.
 
-1. **Mac goes offline while working:** `scout-broker` commits locally to `broker-journal.jsonl` as usual. `HubOutboxService` holds its `BrokerJournalReplayBarrier` cursor and flushes new cross-system events in batch order once connectivity returns.
-2. **Work routed to an offline Mac:** Hub writes the invocation to the log, creates a queued Hub delivery (`status: "accepted"`, `targetNodeId`), and returns an actionable `queued` receipt (never a silent hang). When the Mac reconnects, it presents `lastAckedSeq`, receives missed deliveries in `seq` order, records each via `BrokerRequestReceipts` (`packages/runtime/src/broker-request-receipts.ts`) and `BrokerDeliveryStore` **before** acknowledging `seq` to Hub, and executes once.
-3. **Work routed to a sleeping Scout Cloud machine:** Hub calls Fly's wake API for the target node, holds the delivery lease for 1–3 seconds while `scout-broker` boots and opens its Hub link, and dispatches the invocation immediately.
+### Current state
 
-### 4.6 How `scout hub` today and the hosted MCP gateway fold in
+These facts are verified at `536ff537`:
 
-- **Today's `scout hub` (`packages/cli/src/cli/commands/hub.ts`, `packages/runtime/src/hub/`):** Folds in as two built-in **Hub Sources** (`claude-code` and `managed-agents`). Sandbox reporters continue sealing transcript chunks with `seal.ts` (`0x01` X25519 + AES-256-GCM envelope), posting to Hub's `/v1/sources/claude-code/chunks` instead of a user-managed Cloudflare Worker. Storing a chunk appends a `session.chunk_ready` `HubEvent` on the log, waking `HubCollectorService` over the live Hub link instead of waiting on 15-second blind polling, while exposing active cloud session metadata to iOS and subscriptions immediately. `integrations/hub-inbox` stays in the repo as the self-hosted single-inbox reference worker.
-- **Hosted MCP gateway (`mcp.oscout.net`) and mesh relays (`mesh.oscout.net`):** Consolidate into Hub (`hub.oscout.net`, keeping `mcp.oscout.net` and `mesh.oscout.net` as permanent DNS/route aliases). `scout-broker`'s single Hub link replaces both the separate `scout mesh bridge` child process (`packages/runtime/src/mesh-bridge-supervisor.ts`) and the periodic HTTP rendezvous publisher (`packages/runtime/src/mesh-rendezvous.ts`). Hub terminates MCP HTTP/SSE and SEP-3415 `events/subscribe` at the edge, answering workspace reads and subscription management directly and forwarding host-specific tool calls over the target node's Hub link.
-- **Scout Cloud (`scout-cloud`):** Scout Cloud's hosted relay and MCP gateway *is* Hub, and Fly machines running Scout act as both Hub event sources and wakeable route/subscription targets.
+- On one machine, the CLI and both local MCP servers (`scout mcp` over stdio,
+  `scout mcp serve` over shared HTTP) are clients of the broker HTTP API. The
+  paths are in `scoutBrokerPaths` (`packages/protocol/src/broker-routes.ts`).
+  Local MCP tool selection is set by profile (`docs/mcp-api-posture.md`).
+- Remote MCP clients use the hosted gateway at `mcp.oscout.net`. The gateway
+  has its own tool catalog, `mcp:core` (`packages/protocol/src/mcp-core-tools.ts`).
+  Local profiles do not change that catalog.
+- Agents in a cloud VM with a shell use the remote client and `scout login
+  --as <client>` (OAuth with PKCE), or a static `SCOUT_TOKEN`
+  (`docs/integrations.md`).
 
-### 4.7 Files in `openscout-app/scout` that would change
+### The modes
 
-- **Protocol (`packages/protocol/src/`):**
-  - Add `packages/protocol/src/hub.ts` (re-exported from `packages/protocol/src/index.ts`): `HubEvent`, `HubSourceKind`, `HubSourceConfig`, `HubFilter`, `HubSubscription`, `HubSubscriberTarget`, `HubLinkEnvelope`, `HubCursor`.
-  - Update `packages/protocol/src/mesh.ts`: add `DEFAULT_OPENSCOUT_HUB_URL = "https://hub.oscout.net"` and `HubMeshEntrypoint` (`kind: "hub"`), keeping `mcp.oscout.net` and `mesh.oscout.net` constants as compatibility aliases.
-  - Update `packages/protocol/src/common.ts`: add `"hub"` to `DeliveryTransport` and `"subscription"` to `DeliveryReason`.
-  - Update `packages/protocol/src/events.ts`, `mcp-events.ts`, and `mcp-core-tools.ts`: define `ControlEvent` -> `HubEvent` projection helpers and add `hub_log`, `hub_subscribe`, `hub_unsubscribe`, and `hub_subscriptions` core MCP tool schemas.
-- **Runtime (`packages/runtime/src/`):**
-  - Add `packages/runtime/src/hub/link.ts` and `packages/runtime/src/hub/outbox.ts`: persistent outbound WSS Hub client (`seq` replay, inbound delivery handoff, MCP RPC multiplex) and barrier-safe journal publisher.
-  - Update `packages/runtime/src/hub/index.ts`, `state.ts`, `collector.ts`, `connect.ts`, `managed-agents.ts`, and `seal.ts`: default chunk ingress to Hub when authenticated, trigger `collectOnce()` on `session.chunk_ready` events, and support per-repo `shw_` tokens.
-  - Update `packages/runtime/src/broker-daemon.ts` and `peer-delivery.ts`: wire `BrokerHubLinkService` and `HubOutboxService` into broker startup, and add `"hub"` store-and-forward fallback when direct peer entrypoints fail.
-  - Update `packages/runtime/src/mesh-bridge-supervisor.ts`, `mesh-bridge-config.ts`, `mesh-rendezvous.ts`, `open-scout-network.ts`, and `broker-mcp-events.ts`: route presence and remote MCP over the unified Hub link while preserving local `BrokerMcpEvents` for loopback/offline use.
-- **CLI and MCP (`packages/cli/src/`):**
-  - Update `packages/cli/src/cli/commands/hub.ts` and `packages/cli/src/cli/registry.ts`: add `subscribe`, `unsubscribe`, `subscriptions`, `tail`, `log`, and `sources` subcommands alongside `status`, `connect`, `disconnect`, `collect`, and `init`.
-  - Update `packages/cli/src/mcp/scout-mcp.ts`, `packages/cli/src/mcp/mesh-bridge.ts`, `packages/cli/src/mcp/mcp-events.ts`, and `packages/mesh-extension/src/main.ts`: register Hub MCP tools and speak the unified Hub link envelope.
+| Mode | Who uses it | Transport | Auth |
+| --- | --- | --- | --- |
+| Hub API | apps, services, the CLI, the gateway | HTTPS `/v1/hub/*`, SSE for streams | OAuth access token or scoped `agent_token` |
+| Hub link | brokers and Scout Cloud machines only | one WSS at `/v1/hub/link` | node credential bound to the Ed25519 key |
+| Remote MCP | agents in MCP hosts (Claude, ChatGPT, Cursor) | MCP HTTP at `/mcp` | MCP OAuth 2.1 + PKCE |
+| CLI | people, scripts, agents with a shell | the local broker, or the Hub API when there is no broker | the machine's sign-in, or `scout login` |
+| Webhook ingress | GitHub, Vercel, Slack, generic senders | HTTPS `POST /v1/ingest/<sourceId>` | provider signature |
+| Chunk ingress | `claude-code` reporters in vendor sandboxes | HTTPS `POST /v1/sources/claude-code/chunks` | per-repo `shw_` token |
+| Outbound | subscribers | APNs/FCM push, signed webhook `POST`, MCP events | per subscriber |
 
----
+### Choose a mode
 
-## 5. Security and Trust
+- If the agent runs in an MCP host, use remote MCP.
+- If the agent runs in a VM with a shell and no MCP, use the CLI with
+  `scout login`.
+- If the agent or person is on a machine with a Scout broker, use the local CLI
+  or local MCP. The broker carries the call to Hub over its Hub link. Local
+  clients must not open their own connection to Hub.
+- If the caller is an app, a service or an integration that is not an agent,
+  use the Hub API.
+- If the sender is a third-party tool, use webhook ingress.
+- Only brokers use the Hub link. No other client may use it.
 
-Scout Hub keeps Scout's explicit trust model ([`docs/architecture.md`](../architecture.md#principles)): cryptographic identity and least-surprise permissions for trusted personal and small-team fleets, without claiming untrusted multi-tenant enterprise compliance.
+### Parity
 
-### 5.1 What Hub can read: sealed vs readable events
+One operation has one name and one argument shape in every mode. The API is
+the source of truth.
 
-1. **Sealed payloads (Hub cannot read plaintext):**
-   - **Vendor cloud transcript chunks** (`packages/runtime/src/hub/seal.ts`, X25519 + HKDF-SHA256 + AES-256-GCM), **paired phone terminal/diff streams** (`packages/pairing` Noise bridge), **sealed push notifications** (`packages/runtime/src/mobile-push-seal.ts`), and **private DMs or attachments marked `sealed`**.
-   - Hub sees only unsealed `HubEvent.facets` (`source`, `kind`, `project`, `repo`, `actorId`, `targetNodeId`, `sessionHandle`, timestamps, byte size) and opaque ciphertext.
-2. **Readable coordination envelopes (TLS in transit, encrypted at rest on Hub):**
-   - **Third-party webhooks** (GitHub, Vercel, Slack, Linear—already sent in plaintext HTTPS by those vendors), **public/workspace channel messages**, **Feed posts** (`ScoutPost`), **flight status summaries**, and **remote MCP tool calls** routed through Hub.
+| Operation | Hub API | MCP tool | CLI |
+| --- | --- | --- | --- |
+| Read the log | `GET /v1/hub/events?query=&since=&limit=` | `hub_log` | `scout hub log` |
+| Stream the log | `GET /v1/hub/stream?query=&since=` (SSE) | MCP events (`events/subscribe`) | `scout hub tail` |
+| Create a subscription | `POST /v1/hub/subscriptions` | `hub_subscribe` | `scout hub subscribe` |
+| List subscriptions | `GET /v1/hub/subscriptions` | `hub_subscriptions` | `scout hub subscriptions` |
+| Delete a subscription | `DELETE /v1/hub/subscriptions/<id>` | `hub_unsubscribe` | `scout hub unsubscribe` |
+| Start or continue a task | `POST /v1/hub/asks` | `ask` | `scout ask` |
+| List sources | `GET /v1/hub/sources` | not exposed in `mcp:core` | `scout hub sources` |
+| Connect a source | `POST /v1/hub/sources` | not exposed in `mcp:core` | `scout hub connect` |
 
-#### The keyword subscription tradeoff on sealed content
+Rules:
 
-Hub can only match server-side keywords (`text ~ "ENOSPC"`) against readable fields:
+1. `POST /v1/hub/asks` must accept the same body as the MCP `ask` tool,
+   including `requestId`, and must return the same receipt.
+2. The CLI and MCP must return the same error codes as the API, for example
+   `host_offline_queued`, `wake_failed`, `query_parse_error`, `forbidden` and
+   `rate_limited`. The CLI prints the code and exits nonzero.
+3. Source connection uses a browser OAuth step, so it stays in the CLI and the
+   apps. It is not in `mcp:core`.
+4. Add the `hub_*` tools to `mcp:core`. Locally, add them as a new MCP profile
+   group `hub`, not to the 14 default tools.
+5. Every mode must resolve to one principal. A gateway-authenticated identity
+   overrides any sender field in the request.
 
-- **Structured facet filters always work on Hub**, even for sealed events (`source:claude-code project:talkie kind:session.ended`), because facets live in the unsealed envelope header.
-- **Sealing is never weakened for keyword matching.** Hub never holds private sealing keys. Server-side keyword filters match readable coordination events (webhooks, Feed posts, flight summaries, workspace channels). Full-text search over sealed transcripts stays local on the owner's machines (`scout search`). Where useful, a sandbox reporter may emit explicit coarse facets (`severity: "error"`, exit code) without exposing transcript text.
+## Requirements
 
-### 5.2 Auth for sources and subscribers
+### Log
 
-- **Brokers and Cloud nodes:** Authenticate with account-issued `oshb_` / `osbr_` credentials bound to each node's Ed25519 key (`packages/runtime/src/node-identity.ts`), stored in macOS Keychain or mode-`0600` files and never printed to terminal stdout.
-- **Webhook sources:** Verified at Hub ingress before log commit using provider HMACs (`X-Hub-Signature-256`, `x-vercel-signature`, `X-Slack-Signature` with 5-minute replay guard, `standardwebhooks`). Cloud sandbox reporters upgrade from single-bucket `WRITE_TOKEN` (`integrations/hub-inbox`) to **per-repo revocable write-only tokens** (`shw_<id>_<secret>`) bound to one repo `label`.
-- **Untrusted content framing:** All external webhook and third-party chat text is tagged `untrustedExternalContent: true` and quoted as observed source material when delivered to an agent (matching `BrokerVercelBoardService.dispatch` in `packages/runtime/src/vercel-board/service.ts` and `BrokerMcpEvents`), never injected as raw operator instructions.
-- **MCP clients and subscribers:** Authenticated via OAuth 2.1 + PKCE or scoped `agent_token` (`McpEventPrincipal`); gateway-authenticated identity always overrides tool-supplied sender fields. Subscriptions verify read access both when created and before each delivery (matching `BrokerMcpEvents.authorized` / `deliveryAllowed`), verify external webhook URLs via challenge-response (`packages/runtime/src/mcp-event-webhook.ts`), sign outbound payloads with dual-secret rotation headers, and emit a data-free `terminated` frame when access is revoked.
+1. Hub must assign `seq` on commit. `seq` must increase by one for each
+   committed event in a workspace.
+2. Hub must deduplicate on `(workspaceId, idempotencyKey)` for 8 days. A
+   duplicate must return the existing `seq` and must not create a second
+   delivery.
+3. Hub must order events by commit. Hub must not order by `originTs`.
+4. Hub must keep events for 7 days in the MVP. Longer retention is a later,
+   per-tier setting.
+5. Hub must not store `EPHEMERAL_CONTROL_EVENT_KINDS` on the log. Hub keeps only
+   the latest presence for each node and agent, in memory.
+6. Hub must not store harness transcripts in plaintext. Transcript bytes arrive
+   only as sealed chunks, which Hub keeps for 7 days.
 
-### 5.3 Abuse limits
+### Ingress and auth
 
-- **Ingress rate & size caps:** 60 req/min burst (300/min sustained) per source token/IP (`429` + `Retry-After`); 256 KiB max JSON `HubEvent` envelope; 32 MiB max sealed chunk (`DEFAULT_MAX_CHUNK_BYTES` in `integrations/hub-inbox/src/worker.ts`).
-- **Subscription & outbox bounds:** Max 100 active subscriptions per principal (500 per workspace); max 1,000 pending deliveries per subscription with 7 exponential-backoff retries before marking a dead subscriber `degraded` without slowing the log.
-- **Wake-storm circuit breaker:** Subscription-triggered `ask` dispatches stamp `triggerDepth` (rejected above depth 3) and enforce a per-subscription wake budget (default max 5 agent wakes per 10 minutes), halting self-triggering agent loops and notifying the operator once.
+1. A broker or Scout Cloud machine must authenticate with an account-issued
+   credential bound to its Ed25519 node key (`packages/runtime/src/node-identity.ts`).
+   The CLI stores it in the macOS Keychain, or in a mode-`0600` file on Linux.
+   The CLI must not print it.
+2. Hub must verify each webhook signature before it commits the event:
+   `X-Hub-Signature-256` (GitHub), `x-vercel-signature` (Vercel) and
+   `X-Slack-Signature` with a 5-minute replay window (Slack). If verification
+   fails, Hub returns `401` and commits nothing.
+3. Hub must set `untrustedExternalContent: true` on every event that carries
+   third-party text. Agents must receive that text as quoted source material,
+   not as operator instructions. Follow `vercel-board/service.ts`.
+4. Remote MCP clients must authenticate with OAuth 2.1 + PKCE or a scoped
+   `agent_token`. The authenticated identity overrides any sender field in a
+   tool call.
+5. `claude-code` reporters must use per-repo, revocable, write-only tokens
+   (`shw_<id>_<secret>`). One token must not write for another repo.
 
----
+### Routing
 
-## 6. Open Source vs Paid
+1. Hub must resolve targets with Scout's existing address forms: project plus
+   capability, `@agent`, `target:<name>`, `session:<handle>` and
+   `--on <host>`.
+2. If the target node has an open Hub link, Hub must forward the event over that
+   link.
+3. If the target is a sleeping Scout Cloud machine, Hub must wake it, hold the
+   delivery lease until its Hub link opens, and then forward the event.
+4. If the target is an offline Mac, Hub must queue the delivery and return a
+   receipt with `state: "queued"` and `reason: "host_offline_queued"`. Hub must
+   not return `node_unreachable` for a known, enrolled node.
+5. If direct mesh delivery fails, `peer-delivery.ts` should fall back to the
+   `"hub"` transport.
 
-Scout Hub aligns with the three-layer ownership boundary in [`docs/public-source-boundary.md`](../public-source-boundary.md):
+### Hub link (broker side)
 
-| Layer | Repository & License | What lives there for Hub |
-| --- | --- | --- |
-| **Public core** | `openscout-app/scout` (Apache-2.0) | `@openscout/protocol` (`hub.ts` wire types), `@openscout/runtime` (local broker, direct mesh, outbound `hub/link.ts`, `hub/seal.ts`, source connectors), `@openscout/scout` (`scout hub` CLI, local `scout mcp`), and standalone `integrations/hub-inbox` + `relay-transport.ts`. |
-| **Apps** | Private apps repo | Mac, iOS, Android, and web UIs for the unified Feed, Hub log, source OAuth setup, and visual subscription builder. |
-| **Hosted Platform** | Private platform repo | `hub.oscout.net`: multi-tenant webhook ingress, hosted MCP OAuth gateway, durable `seq` log, subscription matcher, offline host queues, APNs/FCM push service, and Scout Cloud Fly wake controller. |
+1. Each signed-in broker must hold one outbound WSS connection to Hub. It
+   replaces the `scout mesh bridge` child process and the HTTP presence loop in
+   `mesh-rendezvous.ts`.
+2. On connect, the broker must send its last acknowledged `seq`. Hub must then
+   send every queued delivery after that `seq`, in order.
+3. The broker must commit each inbound delivery to `BrokerDeliveryStore` and
+   `BrokerRequestReceipts` before it acknowledges the `seq`. A delivery must
+   run at most once.
+4. `HubOutboxService` must tail the journal through `BrokerJournalReplayBarrier`
+   and publish only cross-system facts: agent and node cards, workspace channel
+   messages, cross-node flights, operator questions, Feed posts and shows.
+5. If the Hub link is down, local work must continue unchanged. The outbox must
+   flush in journal order when the link returns.
+6. If the user is not signed in, the broker must make no calls to `oscout.net`.
 
-- **Local-first invariant preserved:** Core installs, builds, tests, and runs locally or over LAN/Tailscale/Iroh with zero Platform account and zero outbound calls to `oscout.net`.
-- **Paid packaging:** A **Free** personal tier covers remote MCP reach, mobile pairing/push, 24-hour Hub log replay, up to 2 external sources, and 5 push/inbox subscriptions. **Pro** (individual) and **Crew** (shared team) paid tiers unlock 30–90 day log retention, unlimited GitHub/Vercel/Slack/Linear sources, cloud-pulled vendor sessions, **wake-agent-on-subscription** automation, higher event volume, and shared crew channels alongside Scout Cloud compute.
+### Subscriptions
 
----
+1. The CLI, MCP tools and apps must all write the same `HubSubscription` record
+   through one Hub API.
+2. Hub must check that the owner can read an event both when the subscription
+   is created and before each delivery.
+3. `ask` deliveries must carry a `triggerDepth`. Hub must reject a delivery
+   with a depth above 3.
+4. Each subscription with an `ask` delivery must wake an agent at most 5 times in
+   10 minutes. When the budget runs out, Hub must pause the subscription and
+   notify the owner once.
+5. After 7 failed retries with exponential backoff, Hub must set the
+   subscription to `degraded`. A degraded subscriber must not slow the log.
+6. `webhook` deliveries must use a URL verified by challenge-response
+   (`mcp-event-webhook.ts`), and Hub must sign each payload.
+7. If the owner loses access, Hub must send a `terminated` frame with no event
+   data and stop delivering.
 
-## 7. MVP, Next Phases, and Non-Goals
+### Subscription query
 
-### MVP (Ships in 3–4 weeks)
+The query is a search-style string. The CLI parses it into `HubFilter` and sends
+both the string and the parsed form.
 
-1. **Single Hub front door (`hub.oscout.net`, aliasing `mcp.oscout.net` and `mesh.oscout.net`):** One append-only `hub_events` log (`seq`, `idempotencyKey`, `facets`, `body`, 7-day retention) unifying MCP gateway, node presence, Noise pairing rooms, and APNs push behind `scout auth login`.
-2. **Unified Broker Hub Link (`packages/runtime/src/hub/link.ts` + `outbox.ts`):** Replaces the standalone `scout mesh bridge` process and HTTP rendezvous loop; replays missed `seq` items on Mac wake and queues invocations when a target Mac is offline.
-3. **Four initial sources:** (a) Remote MCP gateway, (b) GitHub + Vercel signed webhooks, (c) `claude-code` sealed cloud session chunks hosted on Hub R2 (no user Wrangler deploy), and (d) local + Scout Cloud broker events (`flight.updated`, `question`, `post.created`, `show.created`).
-4. **Initial subscriptions & CLI:** Facet + substring filters (`source`, `kind`, `project`, `repo`, `branch`, `actor`, `text`) delivering to **phone push/inbox**, **Scout agent `ask`/FYI** (with loop guard), and **`scout hub tail` / `scout hub subscribe`**.
+```
+query  := term (("OR" | "AND" | " ") term)*      ; a space means AND
+term   := "-"? (field ":" value | quoted | word)  ; "-" means NOT
+field  := source | kind | project | repo | branch | actor | node | label | severity
+quoted := '"' text '"'                            ; text match
+word   := text                                    ; text match
+```
 
-### Phase 2 (Weeks 5–10)
+- A field term matches the event facet exactly. `kind:` also matches a prefix
+  when the value ends in `.*` (`kind:deploy.*`).
+- A text term matches case-insensitively in `body.summary` and in the string
+  values of `body.data`. A text term never matches a sealed body.
+- A sealed event can still match on its facets.
+- An unknown field must be a parse error. The CLI must show the field and the
+  accepted list.
 
-- Hosted Slack Event Subscriptions and Linear/Sentry webhook sources (removing single-Mac Socket Mode custody as a failure point).
-- Cloud-hosted `ManagedAgentsPuller` (and Codex Cloud / Devin pullers) running inside Hub so vendor sessions appear on mobile while all Macs are off.
-- Mac and iOS visual Subscription Builder, batch digests, quiet hours, and Scout Cloud wake-spend limits.
-- Full SEP-3415 `events/subscribe` webhook delivery directly from Hub for any `HubFilter`.
+Examples:
 
-### Phase 3 (Later)
+```
+source:vercel kind:deploy.failed project:talkie
+source:github kind:check_suite.failed branch:main repo:my-org/talkie
+project:talkie OR "auth-migration"
+"ENOSPC" -source:slack
+```
 
-- Shared **Crew** Hub workspaces (multi-operator channels, shared project/deploy subscriptions, team roster routing).
-- Windowed/compound triggers (*"3 errors in 10m"*, *"PR approved + CI green"*).
-- Customer-owned S3/R2 archive export.
+### Privacy
 
-### Non-Goals
+1. These bodies must be sealed, so that Hub cannot read them: transcript chunks,
+   paired phone streams, push payloads, and DMs or attachments that the user
+   marks `sealed`.
+2. These bodies are readable by Hub, are encrypted at rest and are sent over
+   TLS: webhook payloads, workspace channel messages, Feed posts, flight
+   summaries, and MCP tool calls that pass through Hub.
+3. Hub must not hold any key that opens a sealed body.
+4. Full-text search over transcripts stays local (`scout search`).
 
-- Storing raw local `.claude` or `.codex` transcripts in the cloud (*Observe, don't absorb*).
-- Routing same-Mac or direct-LAN peer traffic through Hub.
-- Global linearizable consensus across partitioned networks.
-- Generic non-Scout ETL/Zapier workflows or untrusted enterprise compliance claims.
+### Limits
 
----
+- Ingress: 60 requests per minute burst and 300 per minute sustained, per source
+  token. Over the limit, Hub returns `429` with `Retry-After`.
+- Maximum JSON event: 256 KiB. Maximum sealed chunk: 32 MiB
+  (`DEFAULT_MAX_CHUNK_BYTES` in `integrations/hub-inbox/src/worker.ts`).
+- Subscriptions: 100 active per principal, 500 per workspace.
+- Pending deliveries: 1,000 per subscription.
 
-## 8. Decisions
+## CLI
 
-Decided by Art on 2026-11-26. The options and reasoning below are kept for the record.
+All commands live under `scout hub` in `packages/cli/src/cli/commands/hub.ts`
+and `registry.ts`. Existing subcommands (`status`, `connect`, `disconnect`,
+`collect`, `init`) keep their behavior.
 
-1. **What Hub can read:** tiered. Transcripts, phone streams and push stay end-to-end sealed; coordination events are readable by Hub and encrypted at rest (Option B).
-2. **Subscriptions:** a search-style query (`source:vercel kind:deploy.failed project:talkie "timeout"`) stored as a small typed filter (Option A).
-3. **CLI:** everything under `scout hub` (`connect`, `subscribe`, `tail`, `status`); `scout mesh bridge` becomes an alias (Option A).
-4. **Self-hosting:** hosted only for now, with an open protocol and a configurable Hub address (Option A).
-5. **Slack and Vercel:** through Hub by default when signed in; local-only setups keep the host-supervised workers (Option C).
+```bash
+scout hub status
+scout hub connect github --repo <owner/repo>
+scout hub connect vercel --project <name>
+scout hub connect slack
+scout hub connect claude-code <repo path>      # existing; points at Hub when signed in
+scout hub connect managed-agents [--pull-on hub|local]
+scout hub sources
+scout hub subscribe '<query>' --notify phone|mac|all [--urgency interrupt|badge|silent]
+scout hub subscribe '<query>' --fyi <target>
+scout hub subscribe '<query>' --ask --project <name> [--on <host>] [--harness <h>] --prompt '<text>'
+scout hub subscribe '<query>' --webhook <url>
+scout hub subscriptions
+scout hub unsubscribe <sub_id>
+scout hub tail '<query>'
+scout hub log [--since <seq>]
+```
 
-Still to verify before building: the 3–4 week MVP estimate.
+`scout mesh bridge` must keep working as an alias that starts the Hub link.
 
-## Options considered
+## MCP tools
 
-### 1. Does Hub see plaintext?
+Add to `packages/protocol/src/mcp-core-tools.ts` and register in
+`packages/cli/src/mcp/scout-mcp.ts`:
 
-- **Option A: Strict E2EE everywhere except routing facets.** Seal all broker events and edge-encrypt incoming SaaS webhooks to the owner's public key immediately at ingress. *(Breaks server-side keyword matching and prevents remote MCP clients like Claude/ChatGPT from reading `messages_inbox` or `broker_feed` when your Mac is asleep.)*
-- **Option B: Tiered ("readable coordination, sealed transcripts & paired streams") with per-conversation `sealed` opt-in.** Keep raw cloud transcripts (`seal.ts`), phone pairing streams (`packages/pairing`), and device push payloads E2EE; keep coordination events (webhooks, Feed posts, workspace channels, flight summaries) readable by Hub and encrypted at rest.
-- **Option C: Plaintext for everything on Hub, including vendor cloud transcripts.** *(Drops the privacy property already shipped in `packages/runtime/src/hub/seal.ts`.)*
-- **Recommendation:** **Option B.** It preserves E2EE on raw code and transcripts while letting remote MCP, keyword subscriptions, and zero-Mac phone feeds work when laptops are closed.
+- `hub_log` (`query?`, `since?`, `limit?`): read events.
+- `hub_subscribe` (`query`, `deliver`): create a subscription for the caller,
+  or for the operator if the caller has that grant.
+- `hub_unsubscribe` (`id`).
+- `hub_subscriptions`.
 
-### 2. What is the subscription filter language?
+Hub must answer `who`, `hosts`, `messages_inbox`, `broker_feed` and `hub_log`
+from its own data when the owning Mac is offline. Hub must forward host-specific
+tool calls over that host's Hub link.
 
-- **Option A: Small typed JSON AST in `@openscout/protocol` + Gmail/GitHub-style query string (`source:vercel kind:deploy.failed project:talkie "timeout"`).** Compiles deterministically to exact facet checks, `IN` lists, `AND`/`OR`/`NOT`, and case-insensitive substring/token matches.
-- **Option B: Structured JSON/CLI flags only (no query string).** *(Awkward in CLI, search bars, and `OR` queries.)*
-- **Option C: Arbitrary regexes, SQL/CEL, or LLM-judged natural-language filters on the bus.** *(Unpredictable cost, latency, and ReDoS risk on hot ingress.)*
-- **Recommendation:** **Option A.** Keep Hub matching deterministic and sub-millisecond; wake an agent when semantic judgment is needed.
+## Failure behavior
 
-### 3. Does the CLI keep `scout hub` for both the hosted service and connecting sources?
+| Condition | Required behavior |
+| --- | --- |
+| Hub unreachable from a broker | Local work continues. Outbox holds and flushes in order on reconnect. |
+| Target Mac offline | Receipt `queued` / `host_offline_queued`; delivered on reconnect. |
+| Scout Cloud wake fails | Delivery fails with `wake_failed` and the Fly error; the asker sees it on the receipt. |
+| Webhook signature invalid | `401`; nothing committed. |
+| Duplicate idempotency key | Existing `seq` returned; no new delivery. |
+| Subscriber endpoint failing | 7 retries, then `degraded`; log unaffected. |
+| Ask loop | Depth above 3 rejected; wake budget pauses the subscription and notifies the owner once. |
+| Owner loses read access | `terminated` frame, no data; delivery stops. |
+| Query has an unknown field | Parse error naming the field; nothing stored. |
 
-- **Option A: Unify everything under `scout hub`.** `scout hub [status]`, `scout hub connect <claude-code|managed-agents|github|vercel|slack>`, `scout hub subscribe|unsubscribe|subscriptions`, and `scout hub tail|log`, while folding `scout mesh bridge` into the automatic Hub link (kept as a deprecated alias).
-- **Option B: Move source connectors to `scout sources` and reserve `scout hub` for the hosted log and subscriptions.** *(Breaks existing `scout hub connect` muscle memory and splits one mental model across two verbs.)*
-- **Option C: Keep `scout hub` for vendor transcripts and name the new command `scout bus` or `scout relay`.** *(Fights the product name **Scout Hub**.)*
-- **Recommendation:** **Option A.** Cloud session connectors *are* Hub sources now, so `scout hub connect <source>` and `scout hub subscribe <filter>` belong under one command, with `--inbox <url>` kept for self-hosted `integrations/hub-inbox`.
+## Files to change
 
-### 4. Is Hub self-hostable or hosted-only?
+Protocol: `packages/protocol/src/hub.ts` (new), `index.ts`, `common.ts`,
+`mesh.ts`, `events.ts` (`ControlEvent` to `HubEvent` projection),
+`mcp-events.ts`, `mcp-core-tools.ts`.
 
-- **Option A: Hosted-only in Platform, with open wire contracts in `@openscout/protocol` and standalone OSS micro-workers (`integrations/hub-inbox`, `relay-transport.ts`).** Keep `OPENSCOUT_HUB_URL` configurable for dev/staging, but do not ship or support a self-hosted full Hub server.
-- **Option B: Open-source the full Hub server in `openscout-app/scout` from day one.** *(Doubles maintenance across GitHub/Slack OAuth apps, APNs keys, and DB ops, and erodes the Platform boundary in [`docs/public-source-boundary.md`](../public-source-boundary.md).)*
-- **Option C: Hosted-only now; ship a stripped-down self-hostable container (`scout-hub-lite`) later only if VPC/team demand justifies it.**
-- **Recommendation:** **Option A now (preserving Option C later via `OPENSCOUT_HUB_URL`).**
+Runtime: `packages/runtime/src/hub/link.ts` (new), `hub/outbox.ts` (new),
+`hub/index.ts`, `hub/state.ts`, `hub/collector.ts`, `hub/connect.ts`,
+`hub/managed-agents.ts`, `broker-daemon.ts`, `peer-delivery.ts`,
+`mesh-bridge-supervisor.ts`, `mesh-bridge-config.ts`, `mesh-rendezvous.ts`,
+`broker-mcp-events.ts` (keep for loopback and offline use).
 
-### 5. Where do Slack and Vercel Board adapters run once Hub launches?
+CLI and MCP: `packages/cli/src/cli/commands/hub.ts`, `cli/registry.ts`,
+`mcp/scout-mcp.ts`, `mcp/mesh-bridge.ts`, `mcp/mcp-events.ts`,
+`packages/mesh-extension/src/main.ts`.
 
-- **Option A: Hub ingress only; remove local `SlackWorkerSupervisor` and `BrokerVercelBoardService`.** *(Breaks local-only open-source users without a Hub account.)*
-- **Option B: Host-supervised on one Mac only, publishing summaries to Hub.** *(Still dies whenever that Mac sleeps.)*
-- **Option C: Hub webhook ingress by default when signed in; host-supervised mode retained for local-only OSS users.**
-- **Recommendation:** **Option C.** Hosted users get 24/7 responsiveness with laptops shut, and local-only open-source users keep full functionality.
+Keep `integrations/hub-inbox` as the self-hosted reference inbox.
+
+The hosted service (ingress, log, router, matcher, push, Fly wake) lives in the
+private platform repo. The public core must not import from it.
+
+## MVP slices
+
+Build in this order. Each slice must pass its checks before the next starts.
+
+1. **Wire types.** `hub.ts`, the `common.ts` and `mesh.ts` additions, and the
+   query parser.
+   - Unit tests parse every example in "Subscription query" to the expected
+     `HubFilter`, and reject an unknown field.
+2. **Log and ingress.** Hosted log with `seq`, idempotency and 7-day retention.
+   GitHub and Vercel webhooks with signature checks.
+   - Sending the same GitHub delivery twice gives one event and the same `seq`.
+   - A bad signature gives `401` and no event.
+3. **Hub link.** `link.ts` and `outbox.ts` in the broker, replacing the bridge
+   and presence loop. `scout mesh bridge` becomes an alias.
+   - Kill the network for 5 minutes during a flight. Local work completes. On
+     reconnect, every cross-system event appears on Hub once, in journal order.
+   - With the user signed out, a packet capture shows no traffic to
+     `oscout.net`.
+4. **Routing and remote MCP.** Queue for offline Macs, wake for Scout Cloud.
+   Hub answers reads when the Mac is offline.
+   - From a remote MCP client, `ask` a sleeping Mac. The receipt is `queued`.
+     Wake the Mac. The ask runs exactly once.
+   - `hub_log` returns results with every Mac offline.
+5. **Subscriptions.** `HubSubscription`, the matcher, `notify` and `ask`
+   deliveries, the CLI commands and the MCP tools. Loop guard and wake budget.
+   - `scout hub subscribe 'source:vercel kind:deploy.failed project:talkie' --notify phone`,
+     then post a failed-deploy webhook. The phone gets one push.
+   - An `ask` subscription that matches its own output stops after 5 wakes in
+     10 minutes, and the owner gets one notice.
+   - Create the same subscription through the API, `hub_subscribe` and
+     `scout hub subscribe`. The three stored records are equal apart from `id`
+     and `createdAt`. A bad query gives `query_parse_error` in all three.
+6. **Vendor-cloud sessions.** Point `claude-code` chunk ingress at Hub when the
+   user is signed in, with per-repo `shw_` tokens. `session.chunk_ready`
+   triggers `collectOnce()` instead of 15-second polling.
+   - A Claude Code on the web session appears in `<OPENSCOUT_HOME>/hub/` with
+     no Wrangler deploy. Hub storage holds ciphertext only.
+
+Later phases: Slack, Linear and Sentry webhook sources through Hub; Managed
+Agents, Codex Cloud and Devin pullers running in Hub; a subscription builder in
+the apps, digests and quiet hours; crew workspaces.
+
+## Decisions
+
+Settled by Art on 2026-11-26.
+
+1. **Privacy is tiered.** Sealed: transcripts, phone streams, push, sealed DMs.
+   Readable: coordination events. Reason: keyword subscriptions and remote MCP
+   must work while every Mac is asleep.
+2. **Subscriptions use a search-style query** parsed to a typed filter. Matching
+   is deterministic. When a match needs judgment, the subscription wakes an
+   agent.
+3. **One CLI command, `scout hub`,** covers sources, subscriptions and the log.
+   `scout mesh bridge` becomes an alias.
+4. **Hub is hosted only for now.** The protocol is open. `OPENSCOUT_HUB_URL`
+   must override the default address, so that a self-hosted Hub stays possible
+   later.
+5. **Slack and Vercel go through Hub when the user is signed in.** Local-only
+   setups keep the broker-supervised workers.
+
+Proposed, not yet confirmed by Art:
+
+6. **Local clients reach Hub through their broker.** A CLI or MCP call on a
+   machine with a broker goes over the broker's Hub link, never directly to
+   Hub. Reason: one credential per machine, and calls queue while offline.
+7. **The Hub API is the only contract.** The CLI and MCP are clients of the
+   API, with the same names and errors.
+
+## Not verified
+
+- The 3–4 week MVP estimate is the drafting model's estimate. Nobody has checked it.
+- The Fly wake time (about 2 s) comes from the Scout Cloud spec draft. Nobody has
+  measured it.
+- Pricing tiers and retention beyond 7 days are not decided.
+- `scout auth login` today issues an `osdist_*` key for distribution access. Using
+  it to issue node credentials for Hub is an assumption. Confirm it in
+  `packages/cli/src/cli/commands/auth.ts` before building slice 3.
