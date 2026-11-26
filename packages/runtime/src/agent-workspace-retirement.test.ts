@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createAgentWorkspace, SCOUT_WORKSPACES_DIRNAME } from "./agent-workspace.js";
+import { admitAgentWorkspaceDispatch, createAgentWorkspace, SCOUT_WORKSPACES_DIRNAME, withAgentWorkspaceRetirement } from "./agent-workspace.js";
 import {
   listScoutWorktrees,
   resolveWorktreeRetirementSettings,
@@ -110,6 +110,27 @@ describe("sweepScoutWorktrees", () => {
     expect(await git(root, "worktree", "list", "--porcelain")).not.toContain(SCOUT_WORKSPACES_DIRNAME);
     // The merged commit stays reachable from main.
     expect(await git(root, "log", "--format=%s", "main")).toContain("add feature.txt");
+  });
+
+  test("a second dispatch keeps the worktree after the first releases its lease", async () => {
+    const root = await makeRepo();
+    const worktree = await agentWorktree(root, "quill");
+    const releaseFirst = admitAgentWorkspaceDispatch(worktree)!;
+    const releaseSecond = admitAgentWorkspaceDispatch(worktree)!;
+    try {
+      releaseFirst();
+      expect((await sweepScoutWorktrees(sweepInput(root))).worktrees[0]).toMatchObject({
+        action: "kept", reasons: ["local dispatch holds this worktree"],
+      });
+    } finally {
+      releaseFirst();
+      releaseSecond();
+    }
+
+    await withAgentWorkspaceRetirement(worktree, async () => {
+      expect(admitAgentWorkspaceDispatch(worktree)).toBeUndefined();
+    });
+    expect((await sweepScoutWorktrees(sweepInput(root))).retired).toBe(1);
   });
 
   test("a dry run reports what it would retire and changes nothing", async () => {

@@ -27,6 +27,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import {
   agentWorkspaceClaimedAt,
+  agentWorkspaceDispatchCount,
   SCOUT_WORKSPACES_DIRNAME,
   withAgentWorkspaceRetirement,
 } from "./agent-workspace.js";
@@ -375,6 +376,7 @@ async function keepReasons(
   baseRefs: readonly string[],
 ): Promise<{ reasons: string[]; usage: WorktreeUsage; lastActivityAt: number }> {
   const reasons: string[] = [];
+  if (agentWorkspaceDispatchCount(candidate.path) > 0) reasons.push("local dispatch holds this worktree");
   if (candidate.locked) reasons.push("locked with git worktree lock");
   const usage = await input.usage(candidate.path);
   reasons.push(...usage.holds);

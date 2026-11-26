@@ -1,3 +1,4 @@
+import { admitAgentWorkspaceDispatch } from "./agent-workspace.js";
 import type {
   ActorIdentity,
   AgentDefinition,
@@ -273,6 +274,13 @@ export class BrokerLocalEndpointResolver {
         // any revive, which would start a second copy beside it.
         const openInPlace = await this.sessionEndpointOpenInPlace(endpoint);
         if (openInPlace) return openInPlace;
+        const ownedPath = endpoint.metadata?.workspaceOwnership ? endpoint.cwd : undefined;
+        const release = ownedPath ? admitAgentWorkspaceDispatch(ownedPath) : undefined;
+        const current = ownedPath ? this.options.runtime.snapshot().endpoints[endpoint.id] : undefined;
+        if (ownedPath && (!release || !current || current.cwd !== ownedPath || current.metadata?.worktreeRetiredAt)) {
+          release?.();
+          throw new Error("The agent workspace is retiring or retired. Start a fresh session to continue.");
+        }
         try {
           const checked = endpoint.transport === "tmux" && endpoint.harness === "claude"
             ? await this.withObservedSessionEvidence(endpoint, { verifyIdentity: true, invocation })
@@ -319,6 +327,8 @@ export class BrokerLocalEndpointResolver {
               lastFailedAt: this.now(),
             },
           });
+        } finally {
+          release?.();
         }
       }
     }

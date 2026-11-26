@@ -59,6 +59,27 @@ export interface AgentWorkspaceBaseOptions {
  */
 const workspaceClaimedAt = new Map<string, number>();
 const workspaceRetirements = new Map<string, Promise<unknown>>();
+const workspaceDispatches = new Map<string, number>();
+
+/** Count in-process launches and turns, including preparation before a worker starts. */
+export function agentWorkspaceDispatchCount(path: string): number {
+  return workspaceDispatches.get(agentWorkspaceKey(path)) ?? 0;
+}
+
+/** Acquire synchronously so retirement cannot pass its final check between admission and launch. */
+export function admitAgentWorkspaceDispatch(path: string): (() => void) | undefined {
+  const key = agentWorkspaceKey(path);
+  if (workspaceRetirements.has(key)) return undefined;
+  workspaceDispatches.set(key, (workspaceDispatches.get(key) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const count = (workspaceDispatches.get(key) ?? 1) - 1;
+    if (count) workspaceDispatches.set(key, count);
+    else workspaceDispatches.delete(key);
+  };
+}
 
 export function agentWorkspaceKey(path: string): string {
   try {
@@ -76,7 +97,8 @@ export function agentWorkspaceClaimedAt(path: string): number | undefined {
 /** Hold new sessions off `path` until `retirement` settles. */
 export async function withAgentWorkspaceRetirement<T>(path: string, retirement: () => Promise<T>): Promise<T> {
   const key = agentWorkspaceKey(path);
-  const pending = retirement();
+  const previous = workspaceRetirements.get(key);
+  const pending = Promise.resolve(previous).catch(() => undefined).then(retirement);
   workspaceRetirements.set(key, pending);
   try {
     return await pending;
