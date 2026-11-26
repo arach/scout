@@ -422,6 +422,10 @@ export async function captureAgentWorktree(projectRoot: string, workspace: Pick<
   }
 
   const run = (args: string[]) => execSystemFile("git", args, { cwd: path, timeoutMs: 30_000 });
+  const index = (await run(["ls-files", "-v", "-z"])).stdout;
+  if (index.split("\0").some((record) => /^[a-zS] /.test(record))) {
+    throw new Error("cannot capture: Git index flags can hide changes; keep the workspace");
+  }
   const status = ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"];
   if ((await run(status)).stdout.length > 0) {
     if ((await run(["ls-files", "--unmerged"])).stdout) {

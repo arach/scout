@@ -264,6 +264,12 @@ test("captures changes on the owning branch and keeps the workspace", async () =
   expect(git("rev-parse", "HEAD")).toBe(original);
   expect(existsSync(join(workspace.path, "result.txt"))).toBe(true);
   expect(await captureAgentWorktree(root, workspace)).toBe(commit);
+  execFileSync("git", ["update-index", "--assume-unchanged", "result.txt"], { cwd: workspace.path });
+  writeFileSync(join(workspace.path, "result.txt"), "hidden edit");
+  await expect(captureAgentWorktree(root, workspace)).rejects.toThrow("index flags");
+  expect(readFileSync(join(workspace.path, "result.txt"), "utf8")).toBe("hidden edit");
+  execFileSync("git", ["update-index", "--no-assume-unchanged", "result.txt"], { cwd: workspace.path });
+  writeFileSync(join(workspace.path, "result.txt"), "agent work");
   const nested = join(workspace.path, "nested");
   git("clone", "-q", root, nested);
   writeFileSync(join(nested, "untracked.txt"), "nested work");
