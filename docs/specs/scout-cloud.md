@@ -361,7 +361,20 @@ Goal: `scout auth login`, `scout cloud up`, `scout ask --on <cloud-host>`, auto-
 
 ---
 
-## 8. Open decisions for Art
+## 8. Decisions
+
+Decided by Art on 2026-11-26. The options and reasoning below are kept for the record.
+
+1. **CLI verb:** a top-level `scout cloud` command (Option A).
+2. **First ask:** `scout ask --on cloud` offers once to create a machine; any other unknown name fails fast (Option A, plus Option B for the reserved name `cloud`).
+3. **Trust:** asymmetric by default; a cloud machine can reply and ask the operator, but cannot start sessions on the Mac unless `--trust control` is passed (Option A).
+4. **Secrets across sleep:** re-sealed by the operator's Mac on wake in the MVP, sealed-at-rest envelope in Phase 2 (Option A).
+5. **Billing:** included monthly credit in the paid plan, then a prepaid wallet with a mandatory hard monthly spend cap (Option A).
+6. **Substrate:** our own managed fleet on Fly Machines for the MVP, Hetzner added in Phase 2 for heavy and always-on machines; bring-your-own cloud in Phase 3 (Option A).
+
+Still to verify before building: the provider numbers quoted in this spec (Fly wake time, Hetzner cost ratio, GPU availability) and the MVP's three-week estimate.
+
+## Options considered
 
 ### Decision 1: CLI verb placement
 
