@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stageAgentWorkspaceClone } from "./agent-workspace-clone.js";
 import { captureAgentWorktree, createAgentWorkspace, matchesAgentWorktreeOwnership, resolveSessionWorkspace, SCOUT_WORKSPACES_DIRNAME } from "./agent-workspace.js";
 import { setExecSystemSpawnForTests } from "./system-probes/exec.js";
 
@@ -207,6 +208,33 @@ describe("createAgentWorkspace", () => {
     expect(existsSync(join(repo, ".gitignore"))).toBe(false);
   }, 20_000);
 });
+
+test("publishes a clean clone-backed worktree with isolated dependencies", async () => {
+  if (process.platform !== "darwin") return;
+  const root = makeGitRepo();
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  writeFileSync(join(root, ".gitignore"), "node_modules/\n");
+  writeFileSync(join(root, "tracked"), "selected base");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  mkdirSync(join(root, "node_modules"));
+  writeFileSync(join(root, "node_modules", "dependency"), "initial");
+  const probe = await stageAgentWorkspaceClone(root);
+  if (!probe) return; // This volume does not support force-only cloning.
+  await probe.dispose();
+  const owned = await createAgentWorkspace(root, "cow", undefined, { ownerSessionId: "owner", fetchBase: false });
+  expect(owned?.ownership).toBeDefined();
+  const dependency = join(owned!.path, "node_modules", "dependency");
+  expect(readFileSync(dependency, "utf8")).toBe("initial");
+  writeFileSync(dependency, "isolated edit");
+  expect(readFileSync(join(root, "node_modules", "dependency"), "utf8")).toBe("initial");
+  expect(await matchesAgentWorktreeOwnership(root, owned!.ownership!)).toBe(true);
+
+  writeFileSync(join(root, "tracked"), "uncommitted source edit");
+  const fallback = await createAgentWorkspace(root, "fallback", undefined, { ownerSessionId: "other", fetchBase: false });
+  expect(readFileSync(join(fallback!.path, "tracked"), "utf8")).toBe("selected base");
+  expect(existsSync(join(fallback!.path, "node_modules"))).toBe(false);
+}, 20_000);
 
 test("claims only a fresh workspace and detects replacement of its Git file", async () => {
   const root = makeGitRepo();

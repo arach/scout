@@ -5,15 +5,14 @@
 // implementation that used to be duplicated byte-for-byte inline in the desktop
 // and web mobile services.
 //
-// The only strategy today is `git worktree add`: branch `scout/<agent>` under
-// `<projectRoot>/.scout-worktrees/<agent>`. A copy-on-write (APFS clonefile) strategy,
-// workspace teardown, and merge-back were prototyped but deferred; see
-// docs/eng/isolation-cow-vs-worktrees.md for the design and the review blockers
-// that gate them.
+// On supported Darwin volumes, dedicated sessions use a clonefile payload
+// with a linked Git index and shared branch storage. Other checkouts use a
+// conventional Git worktree.
 
 import { lstatSync, realpathSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
-import { basename, join, relative, resolve } from "node:path";
+import { mkdir, readdir, rename } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { prepareAgentWorkspaceClonePayload, stageAgentWorkspaceClone } from "./agent-workspace-clone.js";
 import { execSystemFile } from "./system-probes/exec.js";
 
 /** Directory (under the project root) that holds every Scout-created workspace. */
@@ -273,6 +272,47 @@ async function resolveWorktreeBase(
   }
 }
 
+async function publishClonedWorktree(root: string, destination: string, branch: string, base: string): Promise<boolean> {
+  if (process.platform !== "darwin" || !lstatSync(join(root, ".git"), { throwIfNoEntry: false })?.isDirectory()
+      || await resolveCommit(root, "HEAD") !== base
+      || await resolveCommit(root, `refs/heads/${branch}`)) return false;
+  const git = (cwd: string, args: string[]) => execSystemFile("git", args, { cwd, timeoutMs: 30_000 });
+  const stage = await stageAgentWorkspaceClone(root);
+  if (!stage) return false;
+  const parent = dirname(stage.path);
+  const payload = join(parent, "payload");
+  const linked = join(parent, "linked");
+  let registered = false;
+  try {
+    const paths = (await git(root, ["ls-tree", "-rz", "--name-only", base])).stdout.split("\0").filter(Boolean);
+    await prepareAgentWorkspaceClonePayload(stage.path, payload, paths);
+    await git(root, ["worktree", "add", "--detach", "--no-checkout", "--", linked, base]);
+    registered = true;
+    for (const name of await readdir(payload)) await rename(join(payload, name), join(linked, name));
+    await git(linked, ["reset", "--mixed", base]);
+    const dirty = await git(linked, ["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"]);
+    if (dirty.stdout) return false;
+    await git(linked, ["switch", "-c", branch]);
+    if (lstatSync(destination, { throwIfNoEntry: false })) return false;
+    if (realpathSync(dirname(destination)) !== dirname(destination)) return false;
+    await git(root, ["worktree", "move", "--", linked, destination]);
+    registered = false;
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (registered) {
+      // This temporary checkout has never been dispatched. If Git cannot
+      // unregister it, keep the staging directory for operator inspection.
+      await git(root, ["worktree", "remove", "--force", "--", linked]).then(
+        () => { registered = false; },
+        () => undefined,
+      );
+    }
+    if (!registered) await stage.dispose();
+  }
+}
+
 /**
  * Materialize an isolated git worktree for `agentName` under
  * `<projectRoot>/.scout-worktrees/<agentName>`, on branch `scout/<agentName>`
@@ -339,6 +379,11 @@ export async function createAgentWorkspace(
       gitfileIdentity: directoryEntryIdentity(join(workspacePath, ".git")),
     },
   } : {};
+  if (options.ownerSessionId && baseRef && await publishClonedWorktree(projectRoot, workspacePath, branch, baseRef)) {
+    claimAgentWorkspace(workspacePath);
+    return { path: workspacePath, branch, baseRef, ...ownership() };
+  }
+  if (options.ownerSessionId && lstatSync(workspacePath, { throwIfNoEntry: false })) return null;
   try {
     // Use the resolved commit so a concurrent fetch cannot change the start point.
     await execSystemFile("git", ["worktree", "add", "-b", branch, "--", workspacePath, ...(baseRef ? [baseRef] : [])], { cwd: projectRoot, timeoutMs: 10_000 });
