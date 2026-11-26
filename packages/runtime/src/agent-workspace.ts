@@ -19,6 +19,19 @@ import { execSystemFile } from "./system-probes/exec.js";
 /** Directory (under the project root) that holds every Scout-created workspace. */
 export const SCOUT_WORKSPACES_DIRNAME = ".scout-worktrees";
 
+export interface AgentWorktreeOwnership {
+  sessionId: string;
+  path: string;
+  branch: string;
+  directoryIdentity: string;
+  gitfileIdentity: string;
+}
+
+function directoryEntryIdentity(path: string): string {
+  const stat = lstatSync(path, { bigint: true });
+  return `${stat.dev}:${stat.ino}:${stat.birthtimeNs}`;
+}
+
 export interface CreateAgentWorkspaceResult {
   /** Absolute path the agent should run in (its cwdOverride). */
   path: string;
@@ -26,6 +39,7 @@ export interface CreateAgentWorkspaceResult {
   branch: string;
   /** Start commit of a newly created branch. Omitted when reusing a branch or worktree. */
   baseRef?: string;
+  ownership?: AgentWorktreeOwnership;
 }
 
 export interface AgentWorkspaceBaseOptions {
@@ -33,6 +47,8 @@ export interface AgentWorkspaceBaseOptions {
   baseRef?: string;
   /** Refresh a remote-tracking base before use. Defaults to true. */
   fetchBase?: boolean;
+  /** A dedicated session must not inherit a prior workspace. */
+  ownerSessionId?: string;
 }
 
 /**
@@ -282,6 +298,7 @@ export async function createAgentWorkspace(
     await retiring.catch(() => undefined);
   }
   if (lstatSync(workspacePath, { throwIfNoEntry: false })) {
+    if (options.ownerSessionId) return null;
     if (!lstatSync(workspacePath, { throwIfNoEntry: false })?.isDirectory()) return null;
     claimAgentWorkspace(workspacePath);
     return await isMatchingWorktree(projectRoot, workspacePath, branch) ? { path: workspacePath, branch } : null;
@@ -291,11 +308,20 @@ export async function createAgentWorkspace(
   await mkdir(workspaceDir, { recursive: true });
   verifyWorkspaceDir();
 
+  const ownership = () => options.ownerSessionId ? {
+    ownership: {
+      sessionId: options.ownerSessionId,
+      path: workspacePath,
+      branch,
+      directoryIdentity: directoryEntryIdentity(workspacePath),
+      gitfileIdentity: directoryEntryIdentity(join(workspacePath, ".git")),
+    },
+  } : {};
   try {
     // Use the resolved commit so a concurrent fetch cannot change the start point.
     await execSystemFile("git", ["worktree", "add", "-b", branch, "--", workspacePath, ...(baseRef ? [baseRef] : [])], { cwd: projectRoot, timeoutMs: 10_000 });
     claimAgentWorkspace(workspacePath);
-    return { path: workspacePath, branch, ...(baseRef ? { baseRef } : {}) };
+    return { path: workspacePath, branch, ...(baseRef ? { baseRef } : {}), ...ownership() };
   } catch {
     // Branch might already exist — retry attaching to it without -b.
     if (explicitRef !== undefined && await resolveCommit(projectRoot, `refs/heads/${branch}`) !== baseRef) {
@@ -304,7 +330,7 @@ export async function createAgentWorkspace(
     try {
       await execSystemFile("git", ["worktree", "add", "--", workspacePath, branch], { cwd: projectRoot, timeoutMs: 10_000 });
       claimAgentWorkspace(workspacePath);
-      return { path: workspacePath, branch };
+      return { path: workspacePath, branch, ...ownership() };
     } catch {
       // If both fail, fall back to no worktree.
       return null;
@@ -352,6 +378,21 @@ export async function captureAgentWorktree(projectRoot: string, workspace: Pick<
   return head;
 }
 
+/** Validate a persisted claim against the original checkout and filesystem entries. */
+export async function matchesAgentWorktreeOwnership(projectRoot: string, ownership: AgentWorktreeOwnership): Promise<boolean> {
+  try {
+    const root = realpathSync(projectRoot);
+    const container = join(root, SCOUT_WORKSPACES_DIRNAME);
+    return relative(container, ownership.path) === basename(ownership.path)
+      && ownership.branch.startsWith("scout/")
+      && await isMatchingWorktree(root, ownership.path, ownership.branch)
+      && directoryEntryIdentity(ownership.path) === ownership.directoryIdentity
+      && directoryEntryIdentity(join(ownership.path, ".git")) === ownership.gitfileIdentity;
+  } catch {
+    return false;
+  }
+}
+
 export interface SessionWorkspace {
   /** Directory the session runs in. */
   cwd: string;
@@ -359,6 +400,7 @@ export interface SessionWorkspace {
   branch?: string;
   /** Start commit of a newly created branch. */
   baseRef?: string;
+  ownership?: AgentWorktreeOwnership;
 }
 
 /**
@@ -379,6 +421,7 @@ export async function resolveSessionWorkspace(input: AgentWorkspaceBaseOptions &
   const created = await (input.createWorkspace ?? createAgentWorkspace)(input.projectRoot, input.agentName, undefined, {
     baseRef: input.baseRef,
     fetchBase: input.fetchBase,
+    ownerSessionId: input.ownerSessionId,
   });
   if (!created) {
     throw new Error(
@@ -388,5 +431,5 @@ export async function resolveSessionWorkspace(input: AgentWorkspaceBaseOptions &
       + " Ask without workspace new_worktree to run in the project folder.",
     );
   }
-  return { cwd: created.path, branch: created.branch, ...(created.baseRef ? { baseRef: created.baseRef } : {}) };
+  return { cwd: created.path, branch: created.branch, ...(created.baseRef ? { baseRef: created.baseRef } : {}), ...(created.ownership ? { ownership: created.ownership } : {}) };
 }

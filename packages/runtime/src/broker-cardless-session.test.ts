@@ -128,12 +128,20 @@ describe("SCO-070 cardless sessions", () => {
 
   test("registers a session-kind actor + endpoint with no card", async () => {
     const runtime = newRuntime();
+    const workspaceOwnership = {
+      sessionId: "sess-abc12345",
+      path: PROJECT,
+      branch: "scout/archimedes",
+      directoryIdentity: "1:2:3",
+      gitfileIdentity: "4:5:6",
+    };
     const result = await registerCardlessSession(runtime, {
       sessionId: "sess-abc12345",
       handle: "archimedes",
       transport: "codex_app_server",
       harness: "codex",
       cwd: PROJECT,
+      workspaceOwnership,
       nodeId: "node-1",
     });
     const snapshot = runtime.snapshot();
@@ -152,6 +160,7 @@ describe("SCO-070 cardless sessions", () => {
     // The endpoint occupies the identity slot with agentId === sessionId.
     const endpoint = snapshot.endpoints[result.endpointId];
     expect(endpoint?.agentId).toBe("sess-abc12345");
+    expect(endpoint?.metadata?.workspaceOwnership).toEqual(workspaceOwnership);
     expect(isCardlessSessionEndpoint(endpoint!)).toBe(true);
     expect(endpoint?.metadata?.pendingExternalSession).toBe(true);
     expect(endpoint?.metadata?.placement).toBe("background");

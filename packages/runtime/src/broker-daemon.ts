@@ -2822,6 +2822,7 @@ async function createCardlessProjectSessionForDelivery(input: {
       projectRoot,
       agentName: provisionalName,
       workspace: input.workspace,
+      ownerSessionId: sessionId,
     });
   } catch (error) {
     throw new RetryablePreEffectFailure(error instanceof Error ? error.message : String(error));
@@ -2835,6 +2836,7 @@ async function createCardlessProjectSessionForDelivery(input: {
     transport,
     harness,
     cwd: sessionWorkspace.cwd,
+    workspaceOwnership: sessionWorkspace.ownership,
     projectRoot,
     nodeId,
     ...(input.execution?.model?.trim() ? { model: input.execution.model.trim() } : {}),
