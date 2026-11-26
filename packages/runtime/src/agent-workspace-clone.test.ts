@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { stageAgentWorkspaceClone } from "./agent-workspace-clone.js";
+import { prepareAgentWorkspaceClonePayload, stageAgentWorkspaceClone } from "./agent-workspace-clone.js";
 
 test("force-only clone stages outside the checkout and refuses a Git file", async () => {
   const scratch = await mkdtemp(join(tmpdir(), "scout-clone-test-"));
@@ -29,6 +29,35 @@ test("force-only clone stages outside the checkout and refuses a Git file", asyn
       await staged.dispose();
     }
     await expect(lstat(staged.path)).rejects.toThrow();
+  } finally {
+    await rm(scratch, { recursive: true });
+  }
+});
+
+test("clone payload excludes ignored files and refuses dependency links to the source", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "scout-clone-payload-"));
+  try {
+    const clone = join(scratch, "checkout");
+    for (const name of [".git", ".scout-worktrees", "node_modules", "packages"]) {
+      await mkdir(join(clone, name), { recursive: true });
+    }
+    await writeFile(join(clone, ".env"), "not for the agent");
+    await writeFile(join(clone, "packages", "tracked"), "tracked contents");
+    await symlink("../packages/tracked", join(clone, "node_modules", "local"));
+    const payload = join(scratch, "payload");
+    await prepareAgentWorkspaceClonePayload(clone, payload, ["packages/tracked"]);
+    expect(await readFile(join(payload, "node_modules", "local"), "utf8")).toBe("tracked contents");
+    for (const excluded of [".git", ".env", ".scout-worktrees"]) {
+      await expect(lstat(join(payload, excluded))).rejects.toThrow();
+    }
+
+    await mkdir(join(clone, "node_modules"));
+    const outside = join(scratch, "outside");
+    await writeFile(outside, "source");
+    await symlink(outside, join(clone, "node_modules", "escape"));
+    await expect(prepareAgentWorkspaceClonePayload(clone, join(scratch, "unsafe"), []))
+      .rejects.toThrow("dependency symlink escapes");
+    expect(await readFile(outside, "utf8")).toBe("source");
   } finally {
     await rm(scratch, { recursive: true });
   }
