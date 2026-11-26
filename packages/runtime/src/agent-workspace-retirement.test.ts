@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { admitAgentWorkspaceDispatch, createAgentWorkspace, SCOUT_WORKSPACES_DIRNAME, withAgentWorkspaceRetirement } from "./agent-workspace.js";
 import {
+  WorktreeRetirementService,
   listScoutWorktrees,
   resolveWorktreeRetirementSettings,
   scoutWorktreeProjectRoots,
@@ -111,6 +112,42 @@ describe("sweepScoutWorktrees", () => {
     // The merged commit stays reachable from main.
     expect(await git(root, "log", "--format=%s", "main")).toContain("add feature.txt");
   });
+
+  test("captures and retires only after every flight and the worker have stopped", async () => {
+    const root = await makeRepo();
+    const owned = (await createAgentWorkspace(root, "quill", undefined, { ownerSessionId: "session-a" }))!;
+    const entry = endpoint({
+      cwd: owned.path, projectRoot: root,
+      metadata: { cardless: true, placement: "background", workspaceOwnership: owned.ownership },
+    });
+    const finished = { id: "finished", invocationId: "first", requesterId: "op", targetAgentId: "session-a", state: "completed" as const };
+    const second = { ...finished, id: "second", invocationId: "second", state: "running" as const };
+    let active = true;
+    let alive = true;
+    let released = false;
+    const service = new WorktreeRetirementService({
+      nodeId: NODE,
+      snapshot: () => createRuntimeRegistrySnapshot({
+        endpoints: { [entry.id]: entry },
+        flights: { finished, ...(active ? { second } : {}) },
+      }),
+      isEndpointAlive: () => alive,
+      releaseEndpoints: async () => {
+        expect(await git(root, "show", "scout/quill:result.txt")).toBe("captured");
+        released = true;
+      },
+    });
+    writeFileSync(join(owned.path, "result.txt"), "captured");
+    expect(await service.retireOwned("session-a")).toBe(false);
+    alive = false;
+    expect(await service.retireOwned("session-a")).toBe(false);
+    expect(existsSync(owned.path)).toBe(true);
+    active = false;
+    expect(await service.retireOwned("session-a")).toBe(true);
+    expect(released).toBe(true);
+    expect(existsSync(owned.path)).toBe(false);
+    expect(await git(root, "show", "scout/quill:result.txt")).toBe("captured");
+  }, 20_000);
 
   test("a second dispatch keeps the worktree after the first releases its lease", async () => {
     const root = await makeRepo();
