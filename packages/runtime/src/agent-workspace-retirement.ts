@@ -623,7 +623,7 @@ export class WorktreeRetirementService {
 
   /** Capture and remove only a dedicated workspace with a settled, quiescent owner. */
   async retireOwned(sessionId: string): Promise<boolean> {
-    if (this.options.ready && !this.options.ready()) return false;
+    if (!this.settings().enabled || (this.options.ready && !this.options.ready())) return false;
     const { nodeId } = this.options;
     const snapshot = this.options.snapshot();
     if (!Object.values(snapshot.flights).some((flight) =>
@@ -668,11 +668,34 @@ export class WorktreeRetirementService {
     });
   }
 
+  /** Retry from replayed endpoint and flight records, without relying on a terminal-event timer. */
+  async recoverOwned(): Promise<number> {
+    if (!this.settings().enabled || (this.options.ready && !this.options.ready())) return 0;
+    const snapshot = this.options.snapshot();
+    const sessions = new Set(Object.values(snapshot.endpoints).filter((entry) =>
+      entry.nodeId === this.options.nodeId && entry.metadata?.workspaceOwnership
+      && entry.metadata?.placement === "background" && entry.cwd && realpathOrNull(entry.cwd))
+      .map((entry) => entry.agentId));
+    let retired = 0;
+    for (const session of sessions) {
+      try {
+        if (await this.retireOwned(session)) retired++;
+      } catch (error) {
+        this.options.log?.(`[openscout-runtime] owned worktree retirement retained ${session}: ${errorText(error)}`);
+      }
+    }
+    return retired;
+  }
+
   sweep(input: { trigger: WorktreeRetirementReport["trigger"]; dryRun?: boolean; projectRoots?: readonly string[] }): Promise<WorktreeRetirementReport> {
     const run = async (): Promise<WorktreeRetirementReport> => {
       this.running = true;
       try {
         const { nodeId } = this.options;
+        if (input.trigger === "periodic" && !input.dryRun) {
+          const recovered = await this.recoverOwned();
+          if (recovered) this.options.log?.(`[openscout-runtime] recovered retirement of ${recovered} owned worktree(s)`);
+        }
         const projectRoots = input.projectRoots?.length
           ? input.projectRoots
           : scoutWorktreeProjectRoots(this.options.snapshot(), nodeId);
@@ -681,7 +704,14 @@ export class WorktreeRetirementService {
           dryRun: input.dryRun ?? false,
           trigger: input.trigger,
           settings: this.settings(),
-          usage: (path) => scoutWorktreeUsage(this.options.snapshot(), path, { nodeId, isEndpointAlive: this.options.isEndpointAlive }),
+          usage: async (path) => {
+            const snapshot = this.options.snapshot();
+            const usage = await scoutWorktreeUsage(snapshot, path, { nodeId, isEndpointAlive: this.options.isEndpointAlive });
+            if (usage.referencedBy.some((id) => snapshot.endpoints[id]?.metadata?.workspaceOwnership)) {
+              usage.holds.push("owned worktree uses capture-before-retirement");
+            }
+            return usage;
+          },
           releaseEndpoints: this.options.releaseEndpoints,
         });
         if (!report.dryRun) this.lastSweep = report;

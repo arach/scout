@@ -125,8 +125,9 @@ describe("sweepScoutWorktrees", () => {
     let active = true;
     let alive = true;
     let released = false;
-    const service = new WorktreeRetirementService({
+    const makeService = () => new WorktreeRetirementService({
       nodeId: NODE,
+      settings: () => ({ enabled: true, idleHours: 24 }),
       snapshot: () => createRuntimeRegistrySnapshot({
         endpoints: { [entry.id]: entry },
         flights: { finished, ...(active ? { second } : {}) },
@@ -137,13 +138,15 @@ describe("sweepScoutWorktrees", () => {
         released = true;
       },
     });
+    const service = makeService();
     writeFileSync(join(owned.path, "result.txt"), "captured");
     expect(await service.retireOwned("session-a")).toBe(false);
     alive = false;
     expect(await service.retireOwned("session-a")).toBe(false);
     expect(existsSync(owned.path)).toBe(true);
     active = false;
-    expect(await service.retireOwned("session-a")).toBe(true);
+    // A fresh service can recover from records even without a terminal-event timer.
+    expect(await makeService().recoverOwned()).toBe(1);
     expect(released).toBe(true);
     expect(existsSync(owned.path)).toBe(false);
     expect(await git(root, "show", "scout/quill:result.txt")).toBe("captured");
