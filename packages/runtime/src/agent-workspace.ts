@@ -11,9 +11,9 @@
 // docs/eng/isolation-cow-vs-worktrees.md for the design and the review blockers
 // that gate them.
 
-import { existsSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { execSystemFile } from "./system-probes/exec.js";
 
 /** Directory (under the project root) that holds every Scout-created workspace. */
@@ -73,10 +73,20 @@ function claimAgentWorkspace(path: string): void {
   workspaceClaimedAt.set(agentWorkspaceKey(path), Date.now());
 }
 
-async function isGitRepo(projectRoot: string): Promise<boolean> {
+async function isMatchingWorktree(root: string, path: string, branch: string): Promise<boolean> {
   try {
-    await execSystemFile("git", ["rev-parse", "--git-dir"], { cwd: projectRoot, timeoutMs: 2_000 });
-    return true;
+    if (realpathSync(path) !== path || !lstatSync(join(path, ".git")).isFile()) return false;
+    const [top, common, expectedCommon, ref, registered] = await Promise.all([
+      gitOutput(path, ["rev-parse", "--show-toplevel"]),
+      gitOutput(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+      gitOutput(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+      gitOutput(path, ["symbolic-ref", "HEAD"]),
+      gitOutput(root, ["worktree", "list", "--porcelain", "-z"]),
+    ]);
+    return !!top && realpathSync(top) === path
+      && !!common && !!expectedCommon && realpathSync(common) === realpathSync(expectedCommon)
+      && ref === `refs/heads/${branch}`
+      && registered?.split("\0").includes(`worktree ${path}`) === true;
   } catch {
     return false;
   }
@@ -229,7 +239,7 @@ async function resolveWorktreeBase(
  * Materialize an isolated git worktree for `agentName` under
  * `<projectRoot>/.scout-worktrees/<agentName>`, on branch `scout/<agentName>`
  * (or `requestedBranch` when given). An existing worktree at that path is
- * reused as-is.
+ * reused only if Git registers it for this repository and branch.
  *
  * Returns the workspace descriptor, or `null` when the project isn't a git repo
  * (or both `git worktree add` attempts fail) — callers then run the agent in the
@@ -245,26 +255,41 @@ export async function createAgentWorkspace(
   if (explicitRef !== undefined && !validBaseRef(explicitRef)) {
     throw new Error("git worktree baseRef must be non-empty, must not contain a NUL byte, and must not start with '-'");
   }
-  if (!(await isGitRepo(projectRoot))) {
-    return null;
+  if (!agentName || agentName !== basename(agentName) || agentName === "." || agentName === ".." || agentName.includes("\0")) {
+    throw new Error("workspace agent name must be a single path component");
   }
+  const top = await gitOutput(projectRoot, ["rev-parse", "--show-toplevel"]);
+  if (!top || realpathSync(top) !== realpathSync(projectRoot)) return null;
+  projectRoot = realpathSync(projectRoot);
 
   const branch = requestedBranch?.trim() || `scout/${agentName}`;
   validateWorktreeBranch(branch);
   const workspaceDir = join(projectRoot, SCOUT_WORKSPACES_DIRNAME);
   const workspacePath = join(workspaceDir, agentName);
 
-  // A retirement in flight decides whether the path still exists.
-  await workspaceRetirements.get(agentWorkspaceKey(workspacePath))?.catch(() => undefined);
+  const verifyWorkspaceDir = () => {
+    const directory = lstatSync(workspaceDir, { throwIfNoEntry: false });
+    if (directory && (!directory.isDirectory()
+        || relative(projectRoot, realpathSync(workspaceDir)) !== SCOUT_WORKSPACES_DIRNAME)) {
+      throw new Error("workspace directory must be a real directory inside the project");
+    }
+  };
+  verifyWorkspaceDir();
 
-  // Reuse an existing worktree rather than recreate it.
-  if (existsSync(workspacePath)) {
+  // Wait for retirement, then claim before any async Git verification.
+  let retiring: Promise<unknown> | undefined;
+  while ((retiring = workspaceRetirements.get(agentWorkspaceKey(workspacePath)))) {
+    await retiring.catch(() => undefined);
+  }
+  if (lstatSync(workspacePath, { throwIfNoEntry: false })) {
+    if (!lstatSync(workspacePath, { throwIfNoEntry: false })?.isDirectory()) return null;
     claimAgentWorkspace(workspacePath);
-    return { path: workspacePath, branch };
+    return await isMatchingWorktree(projectRoot, workspacePath, branch) ? { path: workspacePath, branch } : null;
   }
 
   const baseRef = await resolveWorktreeBase(projectRoot, explicitRef, options.fetchBase ?? true);
   await mkdir(workspaceDir, { recursive: true });
+  verifyWorkspaceDir();
 
   try {
     // Use the resolved commit so a concurrent fetch cannot change the start point.
@@ -277,7 +302,7 @@ export async function createAgentWorkspace(
       throw new Error(`git worktree could not create branch ${JSON.stringify(branch)} at baseRef ${JSON.stringify(explicitRef)}. Choose a new branch or check git worktree list.`);
     }
     try {
-      await execSystemFile("git", ["worktree", "add", workspacePath, "--", branch], { cwd: projectRoot, timeoutMs: 10_000 });
+      await execSystemFile("git", ["worktree", "add", "--", workspacePath, branch], { cwd: projectRoot, timeoutMs: 10_000 });
       claimAgentWorkspace(workspacePath);
       return { path: workspacePath, branch };
     } catch {

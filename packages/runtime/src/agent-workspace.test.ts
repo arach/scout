@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,7 +64,7 @@ describe("createAgentWorkspace", () => {
     const result = await createAgentWorkspace(root, "explorer");
 
     expect(result).not.toBeNull();
-    expect(result!.path).toBe(join(root, SCOUT_WORKSPACES_DIRNAME, "explorer"));
+    expect(result!.path).toBe(join(realpathSync(root), SCOUT_WORKSPACES_DIRNAME, "explorer"));
     expect(result!.branch).toBe("scout/explorer");
     expect(statSync(result!.path).isDirectory()).toBe(true);
 
@@ -118,6 +118,24 @@ describe("createAgentWorkspace", () => {
       .rejects.toThrow('could not create branch "scout/explorer" at baseRef');
     expect(existsSync(join(root, SCOUT_WORKSPACES_DIRNAME, "explorer"))).toBe(false);
   });
+
+  test("refuses unmanaged paths, mismatched branches, and symlinked workspace roots", async () => {
+    const root = makeGitRepo();
+    const otherRoot = makeGitRepo();
+    const container = join(root, SCOUT_WORKSPACES_DIRNAME);
+    symlinkSync(otherRoot, container, "dir");
+    await expect(createAgentWorkspace(root, "explorer")).rejects.toThrow("must be a real directory");
+    await expect(createAgentWorkspace(root, "../escape")).rejects.toThrow("single path component");
+    expect(existsSync(join(otherRoot, "explorer"))).toBe(false);
+    rmSync(container);
+
+    const unmanaged = join(container, "unmanaged");
+    mkdirSync(unmanaged, { recursive: true });
+    expect(await createAgentWorkspace(root, "unmanaged")).toBeNull();
+    expect(existsSync(unmanaged)).toBe(true);
+    expect(await createAgentWorkspace(root, "explorer")).not.toBeNull();
+    expect(await createAgentWorkspace(root, "explorer", "wrong")).toBeNull();
+  }, 20000);
 
   test("reuses an existing workspace at the same path", async () => {
     const root = makeGitRepo();
@@ -203,7 +221,7 @@ describe("resolveSessionWorkspace", () => {
     const head = git(root, "rev-parse", "HEAD");
     const workspace = await resolveSessionWorkspace({ projectRoot: root, agentName: "quill", workspace: "new_worktree" });
 
-    expect(workspace).toEqual({ cwd: join(root, SCOUT_WORKSPACES_DIRNAME, "quill"), branch: "scout/quill", baseRef: head });
+    expect(workspace).toEqual({ cwd: join(realpathSync(root), SCOUT_WORKSPACES_DIRNAME, "quill"), branch: "scout/quill", baseRef: head });
     expect(git(workspace.cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe("scout/quill");
     expect(git(workspace.cwd, "rev-parse", "HEAD")).toBe(head);
   });
