@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { realpathSync, appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { namedChannelNaturalKey } from "@openscout/protocol";
 
+import { execSystemFile } from "./system-probes/exec.js";
+import { stageAgentWorkspaceClone } from "./agent-workspace-clone.js";
 import type { RuntimeRegistrySnapshot } from "./registry.js";
 import { createBrokerDaemonTestHarness } from "./test-helpers/broker-daemon-harness.test";
 
@@ -99,6 +101,57 @@ describe("broker daemon local agent routing", () => {
       }),
     ]));
   }, 15_000);
+
+  test("dev broker only creates an owned workspace for an explicit isolation ask", async () => {
+    const project = realpathSync(mkdtempSync(join(tmpdir(), "scout-ask-workspaces-")));
+    broker.temporaryDirectories.add(project);
+    const git = async (...args: string[]) => (await execSystemFile("git", args, { cwd: project, timeoutMs: 5_000 })).stdout;
+    await git("init", "-qb", "main");
+    writeFileSync(join(project, ".gitignore"), "node_modules/\n.scout-worktrees/\n");
+    await git("add", ".gitignore");
+    await git("config", "user.name", "Test");
+    await git("config", "user.email", "test@example.test");
+    await git("commit", "-qm", "base");
+    mkdirSync(join(project, "node_modules"));
+    writeFileSync(join(project, "node_modules", "fixture"), "dependency");
+    const clone = await stageAgentWorkspaceClone(project);
+    await clone?.dispose();
+    const harness = await broker.startBroker({ devInstance: true, startupTimeoutMs: 15_000, env: { OPENSCOUT_CORE_AGENTS: "" } });
+    const ask = (requestId: string, isolate: boolean) => broker.postJson<{ targetAgentId: string; accepted: boolean; flight: { id: string; invocationId: string } }>(
+      harness.baseUrl, "/v1/deliver", {
+        requestId,
+        target: { kind: "project_path", projectPath: project },
+        execution: { harness: "claude", session: "new", placement: "background" },
+        invocationMetadata: isolate ? { askWorkspace: "new_worktree" } : {},
+        intent: "consult", ensureAwake: false, body: isolate ? "Edit the fixture." : "Read the fixture.",
+      },
+    );
+    const shared = await ask("read-workspace", false);
+    expect(shared.accepted).toBe(true);
+    expect(existsSync(join(project, ".scout-worktrees"))).toBe(false);
+
+    const isolated = await ask("write-workspace", true);
+    expect(isolated.accepted).toBe(true);
+    const snapshot = await broker.getJson<RuntimeRegistrySnapshot>(harness.baseUrl, "/v1/snapshot");
+    const endpoints = Object.values(snapshot.endpoints);
+    expect(endpoints.find((endpoint) => endpoint.agentId === shared.targetAgentId)?.cwd).toBe(project);
+    const worker = endpoints.find((endpoint) => endpoint.agentId === isolated.targetAgentId);
+    expect(worker?.cwd).not.toBe(project);
+    const ownership = worker?.metadata?.workspaceOwnership as { sessionId: string; path: string; branch: string };
+    expect(ownership?.sessionId).toBe(isolated.targetAgentId);
+    expect(ownership?.path).toBe(worker?.cwd);
+    expect(ownership?.branch).toMatch(/^scout\//);
+    const cwd = worker!.cwd!;
+    expect(existsSync(join(cwd, ".gitignore"))).toBe(true);
+    if (clone) expect(readFileSync(join(cwd, "node_modules", "fixture"), "utf8")).toBe("dependency");
+    writeFileSync(join(cwd, "result"), "captured by retirement");
+    await broker.postJson(harness.baseUrl, "/v1/flights", {
+      ...isolated.flight, targetAgentId: isolated.targetAgentId, requesterId: "operator",
+      state: "completed", completedAt: Date.now(),
+    });
+    expect(await broker.waitFor(async () => existsSync(cwd), (exists) => !exists)).toBe(false);
+    expect(await git("cat-file", "blob", `${ownership.branch}:result`)).toBe("captured by retirement");
+  }, 30_000);
 
   test("resolves a fresh session's card and preserves its observed runtime in channel history", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "scout-joiner-project-"));
