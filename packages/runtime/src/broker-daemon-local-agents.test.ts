@@ -145,13 +145,28 @@ describe("broker daemon local agent routing", () => {
     expect(existsSync(join(cwd, ".gitignore"))).toBe(true);
     if (clone) expect(readFileSync(join(cwd, "node_modules", "fixture"), "utf8")).toBe("dependency");
     writeFileSync(join(cwd, "result"), "captured by retirement");
+    const second = {
+      id: "second-workspace-flight", invocationId: "second-workspace-invocation",
+      targetAgentId: isolated.targetAgentId, requesterId: "operator", startedAt: Date.now(),
+    };
+    await broker.postJson(harness.baseUrl, "/v1/flights", { ...second, state: "running" });
+    expect((await broker.getJson<RuntimeRegistrySnapshot>(harness.baseUrl, "/v1/snapshot"))
+      .flights[second.id]?.state).toBe("running");
     await broker.postJson(harness.baseUrl, "/v1/flights", {
       ...isolated.flight, targetAgentId: isolated.targetAgentId, requesterId: "operator",
       state: "completed", completedAt: Date.now(),
     });
-    expect(await broker.waitFor(async () => existsSync(cwd), (exists) => !exists)).toBe(false);
+    // The first terminal-event attempt starts after one second.
+    await Bun.sleep(2_000);
+    expect(existsSync(cwd)).toBe(true);
+    await broker.postJson(harness.baseUrl, "/v1/flights", {
+      ...second, state: "completed", completedAt: Date.now(),
+    });
+    expect(await broker.waitFor(async () => existsSync(cwd), (exists) => !exists, {
+      attempts: 175, intervalMs: 200,
+    })).toBe(false);
     expect(await git("cat-file", "blob", `${ownership.branch}:result`)).toBe("captured by retirement");
-  }, 30_000);
+  }, 60_000);
 
   test("resolves a fresh session's card and preserves its observed runtime in channel history", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "scout-joiner-project-"));
