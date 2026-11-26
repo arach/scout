@@ -276,7 +276,9 @@ export class BrokerLocalEndpointResolver {
         if (openInPlace) return openInPlace;
         const ownedPath = endpoint.metadata?.workspaceOwnership ? endpoint.cwd : undefined;
         const release = ownedPath ? admitAgentWorkspaceDispatch(ownedPath) : undefined;
-        const current = ownedPath ? this.options.runtime.snapshot().endpoints[endpoint.id] : undefined;
+        const current = ownedPath ? this.options.runtime.endpointsForAgent(endpoint.agentId, {
+          nodeId: this.options.nodeId, includeOffline: true,
+        }).find((entry) => entry.id === endpoint.id) : undefined;
         if (ownedPath && (!release || !current || current.cwd !== ownedPath || current.metadata?.worktreeRetiredAt)) {
           release?.();
           throw new Error("The agent workspace is retiring or retired. Start a fresh session to continue.");
