@@ -399,7 +399,19 @@ Scout Hub aligns with the three-layer ownership boundary in [`docs/public-source
 
 ---
 
-## 8. Open Decisions for Art
+## 8. Decisions
+
+Decided by Art on 2026-11-26. The options and reasoning below are kept for the record.
+
+1. **What Hub can read:** tiered. Transcripts, phone streams and push stay end-to-end sealed; coordination events are readable by Hub and encrypted at rest (Option B).
+2. **Subscriptions:** a search-style query (`source:vercel kind:deploy.failed project:talkie "timeout"`) stored as a small typed filter (Option A).
+3. **CLI:** everything under `scout hub` (`connect`, `subscribe`, `tail`, `status`); `scout mesh bridge` becomes an alias (Option A).
+4. **Self-hosting:** hosted only for now, with an open protocol and a configurable Hub address (Option A).
+5. **Slack and Vercel:** through Hub by default when signed in; local-only setups keep the host-supervised workers (Option C).
+
+Still to verify before building: the 3–4 week MVP estimate.
+
+## Options considered
 
 ### 1. Does Hub see plaintext?
 
