@@ -368,8 +368,15 @@ holds a call alone. The Antigravity post-tool hook forwards tool output to
 - Every call that raises a signal writes `signal`, `signalLine`, and `held` (true
   when the signal caused the ask) to the decision record.
   `scout permissions log --signal <name>` and `scout permissions stats` read them back.
-- An explicit allow rule the operator wrote settles `download-execute`,
-  `agent-config` and `push-scope` for the calls it matches.
+- An allow rule the operator wrote settles `agent-config` and `push-scope` only
+  when it names the exact command or path, with no wildcard: `Bash(git push:*)`
+  or a bare `Edit` settles nothing. `download-execute` is settled only by an exact
+  allow of the whole command that holds the download; after `curl -o x.sh …`, an
+  allow of `Bash(sh x.sh)` still holds the call. Allow rules never match chained
+  commands, so today no allow settles `download-execute`.
+- Native hooks, the tmux watcher and the permission requests that reach the
+  runtime's ACP invocation (`invokeAcpAgent`) all read the same signals. Turning a signal off does not
+  lift the rules' own hold on agent config, secrets or Scout's policy file.
 - The operator can turn a signal off, or scope it out of some projects, at the top
   level or in a project grant. A grant's setting wins over the top level:
 

@@ -90,8 +90,12 @@ function withRules(
   let verdict = decided;
   if (decided.act !== "deny") {
     const hit = context.signals.assess(context.sessionId, signalCall, continuationSignalSettings(policy, resolved.source));
-    const settled = hit && CALL_SIGNALS.has(hit.signal) && decided.list === "allow" && decided.rule && !decided.rule.startsWith("mode:")
-      && decided.reason.startsWith("allow ");
+    // Only an operator allow that names this exact call settles a call signal.
+    // A download run later is never settled by an allow of the run step alone:
+    // the allow has to name the whole command that holds the download.
+    const settled = hit && CALL_SIGNALS.has(hit.signal) && decided.act === "continue" && decided.list === "allow" && decided.rule
+      && !decided.rule.startsWith("mode:") && decided.reason.startsWith("allow ") && namesExactly(decided.rule, call, root)
+      && (hit.signal !== "download-execute" || hit.inCall === true);
     if (hit && !settled) {
       const named = { signal: hit.signal, signalLine: hit.line, ...(hit.source ? { signalSource: hit.source } : {}) };
       verdict = decided.act === "continue"

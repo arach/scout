@@ -51,6 +51,7 @@ import {
 import { appendContinuationAudit, continuationPolicyPath, type ContinuationAuditEntry } from "./continuation/grants.js";
 import { readContinuationAudit } from "./continuation/permission-log.js";
 import { PermissionSignals, signalCallFor } from "./continuation/signals.js";
+import { configureAcpPermissionSignals } from "./acp-agent-invocation.js";
 import { permissionWaitPatch } from "./broker-blocked-reply.js";
 import { BrokerPermissionService, type PermissionDecisionLog } from "./broker-permission-service.js";
 import { configureManagedPermissionHandler } from "./managed-permission.js";
@@ -3515,6 +3516,7 @@ const operatorAttentionService = new BrokerOperatorAttentionService({
  * last week of the record so a restart keeps its memory.
  */
 const permissionSignals = new PermissionSignals({ policyPath: continuationPolicyPath() });
+configureAcpPermissionSignals(permissionSignals);
 try {
   permissionSignals.seed(readContinuationAudit(undefined, Date.now() - 7 * 24 * 3_600_000));
 } catch (error) {

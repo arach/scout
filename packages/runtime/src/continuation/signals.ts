@@ -14,6 +14,9 @@
  */
 import { homedir } from "node:os";
 import { basename, isAbsolute, resolve, sep } from "node:path";
+import { absolutePath, agentConfigTarget, secretTarget, shellSegments, writtenFiles, type ShellSegment } from "./shell.js";
+
+export { agentConfigTarget, secretTarget, shellSegments, type ShellSegment };
 
 export const PERMISSION_SIGNALS = [
   "download-execute",
@@ -50,6 +53,8 @@ export type PermissionSignalHit = {
   line: string;
   /** Where the untrusted input came from, when the signal depends on one. */
   source?: string;
+  /** download-execute only: the download is part of this same command, not an earlier call. */
+  inCall?: boolean;
 };
 
 type Stamp = { at: number; what: string };
@@ -77,186 +82,12 @@ const COMMON_HOSTS = [
 const SESSION_LIMIT = 500;
 const SESSION_TTL_MS = 24 * 3_600_000;
 
-/* ── shell reading ─────────────────────────────────────────────────────── */
-
-/** A simple command inside a compound one, with whether output was piped into it. */
-export type ShellSegment = { words: string[]; text: string; pipedFrom: string[] | null; redirects: string[] };
-
-/**
- * Split a shell command into simple commands: `;`, `&&`, `||`, newlines and
- * pipes, plus the bodies of `$(…)`, backticks, `<(…)`, `bash -c '…'` and
- * `eval '…'`. Quotes are honoured; this is a reader, not a shell.
- */
-export function shellSegments(command: string, depth = 0): ShellSegment[] {
-  if (depth > 3) return [];
-  const out: ShellSegment[] = [];
-  const nested: string[] = [];
-  let words: string[] = [];
-  let word = "";
-  let text = "";
-  let quote: "'" | '"' | null = null;
-  let previous: ShellSegment | null = null;
-  let piped = false;
-  let redirects: string[] = [];
-  let redirectNext = false;
-  const endWord = () => {
-    if (!word) return;
-    if (redirectNext) { redirects.push(word); redirectNext = false; } else words.push(word);
-    word = "";
-  };
-  const endSegment = (pipe: boolean) => {
-    endWord();
-    if (words.length) {
-      const segment: ShellSegment = { words, text: text.trim(), pipedFrom: piped && previous ? previous.words : null, redirects };
-      out.push(segment);
-      previous = segment;
-    } else if (!pipe) previous = null;
-    piped = pipe;
-    words = [];
-    text = "";
-    redirects = [];
-  };
-  for (let index = 0; index < command.length; index++) {
-    const char = command[index]!;
-    const next = command[index + 1];
-    if (quote) {
-      if (char === quote) quote = null;
-      else if (quote === '"' && char === "$" && next === "(") {
-        const body = balanced(command, index + 1);
-        nested.push(body.inner);
-        word += command.slice(index, body.end + 1);
-        text += command.slice(index, body.end + 1);
-        index = body.end;
-        continue;
-      } else word += char;
-      text += char;
-      continue;
-    }
-    if (char === "'" || char === '"') { quote = char; text += char; continue; }
-    if (char === "\\" && next !== undefined) { word += next; text += char + next; index++; continue; }
-    if ((char === "$" || char === "<" || char === ">") && next === "(") {
-      const body = balanced(command, index + 1);
-      nested.push(body.inner);
-      word += command.slice(index, body.end + 1);
-      text += command.slice(index, body.end + 1);
-      index = body.end;
-      continue;
-    }
-    if (char === "`") {
-      const end = command.indexOf("`", index + 1);
-      const close = end < 0 ? command.length : end;
-      nested.push(command.slice(index + 1, close));
-      index = close;
-      continue;
-    }
-    if (char === ";" || char === "\n") { endSegment(false); continue; }
-    if (char === "&" && next === "&") { endSegment(false); index++; continue; }
-    if (char === "|" && next === "|") { endSegment(false); index++; continue; }
-    if (char === "|") { endSegment(true); if (next === "&") index++; continue; }
-    if (char === "&") { endSegment(false); continue; }
-    if (char === ">" || (char === "<" && next !== "<")) {
-      if (char === ">" && /^\d$/.test(word)) word = "";
-      endWord();
-      if (char === ">") {
-        if (next === ">") index++;
-        if (command[index + 1] === "&") { index++; while (/\d/.test(command[index + 1] ?? "")) index++; continue; }
-        redirectNext = true;
-      }
-      text += char;
-      continue;
-    }
-    if (/\s/.test(char)) { endWord(); text += char; continue; }
-    word += char;
-    text += char;
-  }
-  endSegment(false);
-  const expanded: ShellSegment[] = [];
-  for (const segment of out) {
-    const stripped = stripAssignments(segment);
-    expanded.push(stripped);
-    const [head, flag, body] = stripped.words;
-    if (head && /^(?:ba|z|da|k)?sh$/.test(basename(head)) && flag === "-c" && body) expanded.push(...shellSegments(body, depth + 1));
-    if (head === "eval" && stripped.words.length > 1) expanded.push(...shellSegments(stripped.words.slice(1).join(" "), depth + 1));
-  }
-  for (const body of nested) expanded.push(...shellSegments(body, depth + 1));
-  return expanded;
-}
-
-function balanced(text: string, open: number): { inner: string; end: number } {
-  let level = 0;
-  for (let index = open; index < text.length; index++) {
-    if (text[index] === "(") level++;
-    else if (text[index] === ")" && --level === 0) return { inner: text.slice(open + 1, index), end: index };
-  }
-  return { inner: text.slice(open + 1), end: text.length - 1 };
-}
-
-function stripAssignments(segment: ShellSegment): ShellSegment {
-  let start = 0;
-  while (start < segment.words.length - 1 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(segment.words[start]!)) start++;
-  let words = segment.words.slice(start);
-  // `sudo`, `env`, `nohup`, `time`, `exec`, `command` run the rest.
-  while (words.length > 1 && /^(?:sudo|env|nohup|time|exec|command|xargs)$/.test(words[0]!)) {
-    words = words.slice(1);
-    while (words.length > 1 && (words[0]!.startsWith("-") || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]!))) words = words.slice(1);
-  }
-  return { ...segment, words };
-}
+/* ── shell reading: one parser for the rules and the signals (./shell.ts) ── */
 
 const SHELLS = /^(?:(?:ba|z|da|k|fi)?sh|python[\d.]*|node|perl|ruby|bun|deno|php)$/;
 const FETCHERS = /^(?:curl|wget|aria2c|http|https|xh|fetch)$/;
 
 /* ── paths and hosts ───────────────────────────────────────────────────── */
-
-function absolutePath(path: string, cwd: string): string {
-  const home = homedir();
-  if (path === "~") return home;
-  if (path.startsWith("~/")) return resolve(home, path.slice(2));
-  return isAbsolute(path) ? resolve(path) : resolve(cwd, path);
-}
-
-/** The agent and tool config a write must not touch unseen. */
-export function agentConfigTarget(path: string, cwd: string, policyPath?: string): string | null {
-  const absolute = absolutePath(path, cwd);
-  const parts = absolute.split(sep);
-  const name = parts[parts.length - 1] ?? "";
-  const home = homedir();
-  // Antigravity keeps its plans and walkthroughs under ~/.gemini/antigravity/brain: notes, not config.
-  if (absolute.startsWith(`${home}/.gemini/antigravity/brain/`)) return null;
-  for (const dir of [".claude", ".codex", ".cursor", ".gemini", ".agents", ".vscode", ".windsurf", ".continue"]) {
-    if (parts.includes(dir)) return dir === ".vscode" ? ".vscode settings" : `${dir}/`;
-  }
-  if (name === ".mcp.json" || name === "mcp.json") return name;
-  const git = parts.lastIndexOf(".git");
-  if (git >= 0 && (parts[git + 1] === "hooks" || (parts[git + 1] === "config" && git + 2 === parts.length))) return `.git/${parts[git + 1]}`;
-  if (/^(?:\.?venv|env|virtualenv)$/.test(parts[parts.length - 3] ?? "") && parts[parts.length - 2] === "bin") return "a virtualenv interpreter";
-  if (/^\.(?:zshrc|zshenv|zprofile|zlogin|bashrc|bash_profile|bash_login|profile|kshrc|tcshrc|cshrc|inputrc)$/.test(name)) return `~/${name}`;
-  if (absolute.startsWith(`${home}/.config/fish/`)) return "fish config";
-  if (absolute.startsWith(`${home}/.config/git/`) || absolute === `${home}/.gitconfig`) return "git config";
-  if (policyPath && absolute === resolve(policyPath)) return "Scout's permission rules";
-  if (name === "continuation-policy.json" && parts.includes(".openscout")) return "Scout's permission rules";
-  return null;
-}
-
-/** A secret by path: `.env`, `~/.ssh`, `~/.aws`, cloud and package credentials. */
-export function secretTarget(path: string, cwd: string): string | null {
-  const absolute = absolutePath(path, cwd);
-  const home = homedir();
-  const name = basename(absolute);
-  if (name === ".env" || (/^\.env\./.test(name) && !/\.(?:example|sample|template|dist|defaults?)$/.test(name))) return name;
-  for (const [prefix, label] of [
-    [`${home}/.ssh`, "~/.ssh"], [`${home}/.aws`, "~/.aws"], [`${home}/.config/gcloud`, "~/.config/gcloud"],
-    [`${home}/.azure`, "~/.azure"], [`${home}/.kube`, "~/.kube"], [`${home}/.docker/config.json`, "~/.docker"],
-    [`${home}/.netrc`, "~/.netrc"], [`${home}/.npmrc`, "~/.npmrc"], [`${home}/.pypirc`, "~/.pypirc"],
-    [`${home}/.config/gh/hosts.yml`, "gh credentials"], [`${home}/Library/Keychains`, "the keychain"],
-    [`${home}/.gnupg`, "~/.gnupg"],
-  ] as const) {
-    if (absolute === prefix || absolute.startsWith(`${prefix}/`)) return label;
-  }
-  if (/\.(?:pem|key|p12|pfx)$/.test(name) && !name.endsWith(".pub")) return name;
-  if (/^id_(?:rsa|ed25519|ecdsa|dsa)$/.test(name)) return name;
-  return null;
-}
 
 const URL_IN_TEXT = /\b(?:https?|wss?|ftp):\/\/[^\s'"`<>|;)]+/gi;
 
@@ -328,20 +159,6 @@ function executedFiles(segment: ShellSegment, cwd: string): string[] {
 }
 
 /** Files a command writes: redirects, `tee`, `sed -i`, `cp`/`mv`/`install`/`ln` destinations, `git config` writes. */
-function writtenFiles(segment: ShellSegment, cwd: string): string[] {
-  const [head, ...args] = segment.words;
-  const files = [...segment.redirects];
-  const plain = args.filter((arg) => !arg.startsWith("-"));
-  if (head === "tee") files.push(...plain);
-  if ((head === "sed" || head === "perl") && args.some((arg) => /^-[a-zA-Z]*i/.test(arg)) && plain.length) files.push(plain[plain.length - 1]!);
-  if (head && /^(?:cp|mv|install|ln|rsync|touch)$/.test(head) && plain.length) files.push(head === "touch" ? plain[0]! : plain[plain.length - 1]!);
-  if (head === "git" && args[0] === "config" && !args.some((arg) => /^--(?:get|get-all|get-regexp|list|show-origin|show-scope|global|system)$|^-l$/.test(arg)) && plain.length >= 3) {
-    files.push(".git/config");
-  }
-  if (head === "git" && args[0] === "-C" && args[1] && args[2] === "config" && plain.length >= 4) files.push(resolve(absolutePath(args[1], cwd), ".git/config"));
-  return files.filter(Boolean).map((file) => absolutePath(file, cwd));
-}
-
 /** Secrets a call reads, by any tool. */
 function secretReads(call: SignalCall): string[] {
   const found = new Set<string>();
@@ -595,24 +412,26 @@ export class PermissionSignals {
         const fetcher = segment.pipedFrom && FETCHERS.test(segment.pipedFrom[0] ?? "") ? segment.pipedFrom : null;
         if (fetcher && SHELLS.test(basename(segment.words[0] ?? ""))) {
           const host = hostsInText(fetcher.join(" "))[0];
-          return { signal: "download-execute", line: `Pipes a download${host ? ` from ${host}` : ""} straight into ${basename(segment.words[0]!)}` };
+          return { signal: "download-execute", line: `Pipes a download${host ? ` from ${host}` : ""} straight into ${basename(segment.words[0]!)}`, inCall: true };
         }
         const [head, flag] = segment.words;
         if (head && SHELLS.test(basename(head)) && (flag === "-c" || segment.words.includes("-c")) && /\$\(\s*(?:curl|wget)\b|`\s*(?:curl|wget)\b/.test(segment.text)) {
-          return { signal: "download-execute", line: `Runs a download through ${basename(head)} -c` };
+          return { signal: "download-execute", line: `Runs a download through ${basename(head)} -c`, inCall: true };
         }
-        if (head === "eval" && /\$\(\s*(?:curl|wget)\b/.test(segment.text)) return { signal: "download-execute", line: "Evaluates a download" };
-        if (head && /^(?:source|\.|(?:ba|z)?sh)$/.test(head) && /<\(\s*(?:curl|wget)\b/.test(segment.text)) return { signal: "download-execute", line: `Runs a download through ${head}` };
+        if (head === "eval" && /\$\(\s*(?:curl|wget)\b/.test(segment.text)) return { signal: "download-execute", line: "Evaluates a download", inCall: true };
+        if (head && /^(?:source|\.|(?:ba|z)?sh)$/.test(head) && /<\(\s*(?:curl|wget)\b/.test(segment.text)) return { signal: "download-execute", line: `Runs a download through ${head}`, inCall: true };
       }
       // A file fetched earlier in the session, or earlier in this command.
       const fetched = new Map(state?.fetched ?? []);
+      const fetchedHere = new Set<string>();
       for (const segment of segments) {
-        for (const file of fetchedFiles(segment, call.cwd)) fetched.set(file, outboundHosts(segment)[0] ?? "the network");
+        for (const file of fetchedFiles(segment, call.cwd)) { fetched.set(file, outboundHosts(segment)[0] ?? "the network"); fetchedHere.add(file); }
         for (const file of executedFiles(segment, call.cwd)) {
           const from = fetched.get(file);
           if (from) {
             const verb = segment.words[0] === "chmod" ? "Makes executable" : segment.words[0] === "source" || segment.words[0] === "." ? "Sources" : "Runs";
-            return { signal: "download-execute", line: `${verb} ${basename(file)}, downloaded from ${from} in this session`, source: `a download from ${from}` };
+            const inCall = fetchedHere.has(file);
+            return { signal: "download-execute", line: `${verb} ${basename(file)}, downloaded from ${from} ${inCall ? "in this command" : "in this session"}`, source: `a download from ${from}`, inCall };
           }
         }
       }
