@@ -109,6 +109,25 @@ describe("rule writes and the dry run", () => {
     expect(push.matches[0]).toMatchObject({ wouldBe: "unchanged", shadowedBy: { rule: "Bash(git push:*)", list: "ask" } });
   });
 
+  test("a dry run shows an allow that lifts a default deny, and the record labels it", () => {
+    const { audit, policy } = scratch();
+    writeFileSync(policy, JSON.stringify({ version: 1, grants: [{ scope: "project", path: project, level: "workspace" }] }));
+    appendContinuationAudit(line({ at: 1, outcome: "denied", decision: "denied", command: "rm -rf ./dist", rule: "Bash(rm -rf:*)", list: "deny" }), audit);
+    appendContinuationAudit(line({ at: 2, outcome: "denied", decision: "denied", command: "rm -rf ./src", rule: "Bash(rm -rf:*)", list: "deny" }), audit);
+    const narrow = dryRunPermissionRule({ list: "allow", rule: "Bash(rm -rf ./dist:*)", project }, loadContinuationPolicy(policy), audit);
+    expect(narrow.matches).toHaveLength(1);
+    expect(narrow.matches[0]).toMatchObject({
+      command: "rm -rf ./dist", wouldBe: "allow", overrides: ["Bash(rm -rf:*)"],
+      wouldBeLabel: "allow Bash(rm -rf ./dist:*) (overrides default deny Bash(rm -rf:*))",
+    });
+    const broad = dryRunPermissionRule({ list: "allow", rule: "Bash(*)", project }, loadContinuationPolicy(policy), audit);
+    expect(broad.matches.map((row) => row.shadowedBy?.rule)).toEqual(["Bash(rm -rf:*)", "Bash(rm -rf:*)"]);
+
+    appendContinuationAudit(line({ at: 3, rule: "Bash(rm -rf ./dist:*)", list: "allow", overrides: ["Bash(rm -rf:*)"], command: "rm -rf ./dist" }), audit);
+    expect(readPermissionLog({ since: 3 }, audit)[0]?.label).toBe("allow Bash(rm -rf ./dist:*) (overrides default deny Bash(rm -rf:*))");
+    expect(readPermissionLog({ since: 2, until: 2 }, audit)[0]?.label).toBe("deny Bash(rm -rf:*)");
+  });
+
   test("the first ask rule written keeps the default asks; a project rule goes on its grant", () => {
     const { audit, policy } = scratch();
     writeFileSync(policy, JSON.stringify({ version: 1, allowModel: false, grants: [{ scope: "project", path: project, level: "workspace" }] }));

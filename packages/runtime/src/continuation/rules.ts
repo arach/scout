@@ -41,8 +41,14 @@ export type PermissionRuleMatch = {
   list: PermissionList;
   rule: string;
   scope: string;
-  /** A built-in allow rule: a label for an `auto` judgement, never an allow by itself. */
+  /**
+   * A built-in rule. A built-in allow is a label for an `auto` judgement and
+   * never allows by itself; a built-in deny gives way to an operator allow
+   * that names its command family.
+   */
   builtin: boolean;
+  /** The built-in deny rules this operator allow lifts. */
+  overrides?: string[];
 };
 
 /** One tool call, in the harness-neutral shape the rules read. */
@@ -207,19 +213,78 @@ export function matchPermissionRules(
   scopes: readonly PermissionRuleScope[],
   call: PermissionCall,
 ): PermissionRuleMatch | null {
-  for (const list of PERMISSION_LISTS) {
-    for (const scope of scopes) {
-      for (const rule of scope.rules[list]) {
-        // An allow rule never reads a command it cannot split safely.
-        if (list === "allow" && call.tool === "Bash" && unsplittable(call.command)) continue;
-        const subjects = list === "allow" ? [call] : bashSegments(call);
-        if (subjects.some((subject) => permissionRuleMatches(rule, subject))) {
-          return { list, rule, scope: scope.scope, builtin: list === "allow" && scope.builtin.allow === true };
-        }
-      }
+  const covers = (list: PermissionList, rule: string): boolean => {
+    // An allow rule never reads a command it cannot split safely.
+    if (list === "allow" && call.tool === "Bash" && unsplittable(call.command)) return false;
+    const subjects = list === "allow" ? [call] : bashSegments(call);
+    return subjects.some((subject) => permissionRuleMatches(rule, subject));
+  };
+  const matches = (list: PermissionList): PermissionRuleMatch[] => scopes.flatMap((scope) => scope.rules[list]
+    .filter((rule) => covers(list, rule))
+    .map((rule) => ({ list, rule, scope: scope.scope, builtin: scope.builtin[list] === true })));
+
+  const denies = matches("deny");
+  // A deny the operator wrote always wins.
+  const written = denies.find((match) => !match.builtin);
+  if (written) return written;
+  // A built-in deny gives way only to an allow the operator wrote that names
+  // every denied command family (see `namesDeniedFamily`).
+  const lifted = denies.length
+    ? matches("allow").find((allow) => !allow.builtin && denies.every((deny) => namesDeniedFamily(allow.rule, deny.rule)))
+    : undefined;
+  if (denies.length && !lifted) return denies[0]!;
+  const ask = matches("ask")[0];
+  if (ask) return ask;
+  if (lifted) return { ...lifted, overrides: denies.map((deny) => deny.rule) };
+  return matches("allow")[0] ?? null;
+}
+
+/**
+ * True when an operator's allow rule names the command family a built-in
+ * deny rule covers, so it may lift that deny for the calls it matches.
+ *
+ * - Bash: the allow's fixed text (everything before its first wildcard)
+ *   starts with the deny's command and spells every fixed word of the deny,
+ *   in order. `Bash(rm -rf ./dist:*)` names `Bash(rm -rf:*)`; `Bash(*)`,
+ *   `Bash`, `Bash(rm:*)` do not, and `Bash(git push:*)` does not name
+ *   `Bash(git push * --force*)`.
+ * - Read/Edit/Write: the allow's last path segment starts with the deny's
+ *   fixed file name. `Read(./.env.example)` names `Read(//**\/.env.*)`;
+ *   `Read(**)` and `Read` do not.
+ * - Any other tool: never.
+ */
+export function namesDeniedFamily(allowRule: string, denyRule: string): boolean {
+  const allow = parsePermissionRule(allowRule);
+  const deny = parsePermissionRule(denyRule);
+  if (!allow || !deny || allow.pattern === null || deny.pattern === null) return false;
+  const sameTool = allow.tool === deny.tool || (deny.tool === "Edit" && allow.tool === "Write");
+  if (!sameTool) return false;
+  if (deny.tool === "Bash") {
+    const fixed = (pattern: string) => pattern.replace(/:\*$/, "").split(/\s+/).filter(Boolean);
+    const allowWords = fixedPrefix(allow.pattern.replace(/:\*$/, "")).split(/\s+/).filter(Boolean);
+    const denyWords = fixed(deny.pattern).map((word) => word.split(/[*?]/)[0]!).filter(Boolean);
+    if (!denyWords.length || allowWords[0] !== denyWords[0]) return false;
+    let at = 0;
+    for (const word of denyWords) {
+      while (at < allowWords.length && !allowWords[at]!.startsWith(word)) at++;
+      if (at === allowWords.length) return false;
+      at++;
     }
+    return true;
   }
-  return null;
+  if (deny.tool === "Read" || deny.tool === "Edit" || deny.tool === "Write") {
+    const name = (pattern: string) => pattern.replace(/\/+$/, "").split("/").pop() ?? "";
+    const denyName = fixedPrefix(name(deny.pattern));
+    const allowName = name(allow.pattern);
+    return denyName.length > 0 && fixedPrefix(allowName).startsWith(denyName);
+  }
+  return false;
+}
+
+/** The text before a pattern's first wildcard. */
+function fixedPrefix(pattern: string): string {
+  const cut = pattern.search(/[*?]/);
+  return (cut < 0 ? pattern : pattern.slice(0, cut)).trimEnd();
 }
 
 /**

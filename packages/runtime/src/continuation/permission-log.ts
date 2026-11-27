@@ -31,7 +31,6 @@ import {
   type PermissionCall,
   type PermissionList,
   type PermissionMode,
-  type PermissionRuleMatch,
 } from "./rules.js";
 
 export const PERMISSION_DECISIONS = ["approved", "asked", "denied", "closed", "answered"] as const;
@@ -49,6 +48,10 @@ export type PermissionRecordRow = {
   rule: string;
   list: string;
   ruleScope?: string;
+  /** The built-in deny rules the allow rule lifted. */
+  overrides?: string[];
+  /** The rule as the page shows it: `allow Bash(rm -rf ./dist:*) (overrides default deny Bash(rm -rf:*))`. */
+  label: string;
   risk: string;
   reason: string;
   agentId?: string;
@@ -141,6 +144,8 @@ export function permissionRecordRow(entry: ContinuationAuditEntry): PermissionRe
     rule: entry.rule ?? (decision === "answered" ? "operator" : "mode:auto"),
     list: entry.list ?? (decision === "answered" ? "operator" : "mode"),
     ...(entry.ruleScope ? { ruleScope: entry.ruleScope } : {}),
+    ...(entry.overrides?.length ? { overrides: entry.overrides } : {}),
+    label: ruleLabel(entry.list ?? (decision === "answered" ? "operator" : "mode"), entry.rule ?? (decision === "answered" ? "operator" : "mode:auto"), entry.overrides),
     risk: entry.risk,
     reason: entry.reason,
     ...(entry.agentId ? { agentId: entry.agentId } : {}),
@@ -273,6 +278,10 @@ export type PermissionRuleDryRun = {
     /** The decision this rule would give the call now, or the rule that would still win over it. */
     wouldBe: PermissionList | "unchanged";
     shadowedBy?: { rule: string; list: PermissionList; scope: string };
+    /** The built-in deny rules the new allow rule would lift for this call. */
+    overrides?: string[];
+    /** `allow Bash(rm -rf ./dist:*) (overrides default deny Bash(rm -rf:*))`. */
+    wouldBeLabel?: string;
   }>;
   total: number;
 };
@@ -302,21 +311,25 @@ export function dryRunPermissionRule(
     if (matches.length >= (input.limit ?? 50)) continue;
     const resolved = resolveContinuationGrant(policy, { herdrSession: "", paneId: "", cwd: call.root, foregroundCwd: call.root });
     const mode: PermissionMode = resolved.level === "ask" ? "default" : "auto";
-    const existing = matchPermissionRules(continuationPermissionScopes(policy, resolved.source, mode), call);
-    const winner = winnerOf(existing, list);
+    // The new rule joins the existing ones; whatever then decides the call is the answer.
+    const decided = matchPermissionRules([candidate, ...continuationPermissionScopes(policy, resolved.source, mode)], call);
+    const ours = decided !== null && decided.scope === scope && decided.list === list && decided.rule === rule && !decided.builtin;
+    const winner = !ours && decided && !(decided.list === "allow" && decided.builtin) ? decided : null;
     matches.push({
       ...row,
       wouldBe: winner ? "unchanged" : list,
       ...(winner ? { shadowedBy: { rule: winner.rule, list: winner.list, scope: winner.scope } } : {}),
+      ...(ours && decided.overrides ? { overrides: decided.overrides } : {}),
+      ...(!winner ? { wouldBeLabel: ruleLabel(list, rule, ours ? decided.overrides : undefined) } : {}),
     });
   }
   return { rule, list, scope, matches, total };
 }
 
-/** An existing match that outranks a new rule in `list`. Built-in allow labels never do. */
-function winnerOf(existing: PermissionRuleMatch | null, list: PermissionList): PermissionRuleMatch | null {
-  if (!existing || existing.builtin) return null;
-  return PERMISSION_LISTS.indexOf(existing.list) < PERMISSION_LISTS.indexOf(list) ? existing : null;
+/** `allow Bash(rm -rf ./dist:*) (overrides default deny Bash(rm -rf:*))`. */
+function ruleLabel(list: string, rule: string, overrides?: string[]): string {
+  if (list === "mode" || list === "operator") return rule;
+  return overrides?.length ? `${list} ${rule} (overrides default deny ${overrides.join(", ")})` : `${list} ${rule}`;
 }
 
 function rowCall(row: PermissionRecordRow): PermissionCall | null {

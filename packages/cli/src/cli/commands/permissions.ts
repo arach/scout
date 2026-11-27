@@ -78,7 +78,7 @@ function parse(args: string[]): Options | "help" {
   return { command, query };
 }
 
-type Row = { at: number; decision: string; via?: string; answer?: string; rule: string; list: string; agentName?: string; agentId?: string; tool?: string; command: string | null; reason: string };
+type Row = { at: number; decision: string; via?: string; answer?: string; rule: string; list: string; label?: string; agentName?: string; agentId?: string; tool?: string; command: string | null; reason: string };
 type Counts = Record<string, number>;
 type Stats = {
   since: number; until: number; total: number; byDecision: Counts;
@@ -87,7 +87,7 @@ type Stats = {
   byVia: Array<{ via: string; total: number }>;
 };
 type RulesView = { path: string; defaultMode: string; precedence: string; scopes: Array<{ scope: string; mode: string; lists: Record<string, Array<{ rule: string; builtin: boolean }>> }> };
-type DryRun = { rule: string; list: string; scope: string; total: number; matches: Array<Row & { wouldBe: string; shadowedBy?: { rule: string; list: string } }> };
+type DryRun = { rule: string; list: string; scope: string; total: number; matches: Array<Row & { wouldBe: string; wouldBeLabel?: string; shadowedBy?: { rule: string; list: string } }> };
 
 function when(at: number): string {
   return new Date(at).toISOString().replace("T", " ").slice(0, 16);
@@ -96,7 +96,7 @@ function when(at: number): string {
 function renderRow(row: Row): string {
   const who = row.agentName ?? row.agentId ?? "unknown agent";
   const how = row.decision === "answered" ? `answered ${row.answer ?? ""}${row.via ? ` via ${row.via}` : ""}` : row.decision;
-  return `${when(row.at)}  ${how.padEnd(18)} ${row.rule.padEnd(28)} ${who} · ${row.tool ?? "?"} ${row.command ?? ""}`.trimEnd();
+  return `${when(row.at)}  ${how.padEnd(18)} ${(row.label ?? row.rule).padEnd(28)} ${who} · ${row.tool ?? "?"} ${row.command ?? ""}`.trimEnd();
 }
 
 function renderStats(stats: Stats): string {
@@ -122,7 +122,8 @@ function renderRules(view: RulesView): string {
 function renderDryRun(result: DryRun): string {
   const lines = [`${result.list} ${result.rule} (${result.scope}) would have matched ${result.total} past records`];
   for (const match of result.matches) {
-    lines.push(`  ${renderRow(match)}${match.shadowedBy ? `  — ${match.shadowedBy.list} ${match.shadowedBy.rule} still wins` : ""}`);
+    const outcome = match.shadowedBy ? `  — ${match.shadowedBy.list} ${match.shadowedBy.rule} still wins` : match.wouldBeLabel ? `  → ${match.wouldBeLabel}` : "";
+    lines.push(`  ${renderRow(match)}${outcome}`);
   }
   return lines.join("\n");
 }

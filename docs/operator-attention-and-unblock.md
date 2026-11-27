@@ -296,6 +296,17 @@ rule copies between it and `~/.claude/settings.json`:
   entry continues nothing that it did before.
 - A deny is sent back to the harness when it offers one. Otherwise the operator
   is asked.
+- A built-in deny gives way to an allow rule the operator wrote that names its
+  command family, for the calls that allow matches.
+  `allow Bash(rm -rf ./dist:*)` on a project lifts the default
+  `deny Bash(rm -rf:*)` for that path in that project, and the record labels it
+  `allow Bash(rm -rf ./dist:*) (overrides default deny Bash(rm -rf:*))`. An allow
+  names a Bash deny when its fixed text, before the first wildcard, starts with
+  the denied command and spells every fixed word of the deny in order.
+  `Bash(*)`, `Bash`, and `Bash(rm:*)` lift nothing. A path allow names a path
+  deny when its last segment starts with the deny's file name
+  (`Read(./.env.example)` names `Read(//**/.env.*)`). A deny the operator wrote
+  always wins, and an ask rule still holds a lifted call.
 
 ### The decision record
 

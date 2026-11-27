@@ -60,6 +60,7 @@ export {
   DEFAULT_PERMISSION_RULES,
   PERMISSION_LISTS,
   matchPermissionRules,
+  namesDeniedFamily,
   parsePermissionRule,
   permissionRuleMatches,
   permissionToolName,

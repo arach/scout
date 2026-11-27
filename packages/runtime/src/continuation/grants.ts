@@ -250,6 +250,8 @@ export type ContinuationAuditEntry = {
   list?: string;
   /** Where the rule is defined: `policy` or `project:<path>`. */
   ruleScope?: string;
+  /** The built-in deny rules this operator allow rule lifted. */
+  overrides?: string[];
   agentId?: string;
   agentName?: string;
   /** Where the answer went: a tmux/Herdr pane, a native harness hook, or a Scout-managed session. */

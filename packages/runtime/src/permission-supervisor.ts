@@ -38,6 +38,8 @@ export type PermissionSupervisorVerdict = {
   list?: PermissionList | "mode";
   /** Where the rule is defined: `policy` or `project:<path>`. */
   ruleScope?: string;
+  /** The built-in deny rules an operator allow lifted for this call. */
+  overrides?: string[];
 };
 
 type Grant = ReturnType<typeof resolveContinuationGrant>;
@@ -47,6 +49,12 @@ type Grant = ReturnType<typeof resolveContinuationGrant>;
  * judgement (today's risk classes) and runs only when no deny or ask rule
  * covers the call and no explicit allow rule does.
  */
+/** `allow Bash(rm -rf ./dist:*) (overrides default deny Bash(rm -rf:*))`, as the record shows it. */
+export function permissionRuleLabel(match: { list: string; rule: string; overrides?: string[] }): string {
+  const label = `${match.list} ${match.rule}`;
+  return match.overrides?.length ? `${label} (overrides default deny ${match.overrides.join(", ")})` : label;
+}
+
 function withRules(
   policy: ContinuationPolicyFile,
   resolved: Grant,
@@ -60,7 +68,9 @@ function withRules(
   const grant: Grant = outside ? { ...resolved, level: "workspace" } : resolved;
   const mode: PermissionMode = grant.level === "ask" ? "default" : "auto";
   const match = call ? matchPermissionRules(continuationPermissionScopes(policy, resolved.source, mode), { ...call, root }) : null;
-  const named = match ? { rule: match.rule, list: match.list, ruleScope: match.scope } : null;
+  const named = match
+    ? { rule: match.rule, list: match.list, ruleScope: match.scope, ...(match.overrides ? { overrides: match.overrides } : {}) }
+    : null;
   const risk: ContinuationRisk = call?.tool === "Bash" ? classifyContinuationRisk(call.command) : "unknown";
   if (match?.list === "deny") {
     return offered.deny
@@ -72,7 +82,7 @@ function withRules(
   }
   if (match?.list === "allow" && !match.builtin) {
     if (!offered.once) return { act: "notify", reason: "one-time approval is not offered", risk, grant: grant.source, ...named };
-    return { act: "continue", level: grant.level, reason: `allow rule ${match.rule}`, risk, grant: grant.source, ...named };
+    return { act: "continue", level: grant.level, reason: permissionRuleLabel(match), risk, grant: grant.source, ...named };
   }
   const verdict = judge(grant);
   // A built-in allow rule names what auto passed; it never passes anything itself.

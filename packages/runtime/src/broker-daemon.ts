@@ -3596,10 +3596,15 @@ function writeAudit(entry: ContinuationAuditEntry): void {
   }
 }
 
+/** The built-in denies an operator allow lifted, and the label the record shows for it. */
+function auditOverrides(overrides: string[] | undefined): Partial<ContinuationAuditEntry> {
+  return overrides?.length ? { overrides } : {};
+}
+
 /** One audit line per decision on a permission record: asked, answered, approved, denied or closed. */
 function auditPermissionDecision(entry: PermissionDecisionLog): void {
   const request = entry.record.metadata?.permissionRequest as { sessionId?: string; projectRoot?: string; native?: { harness?: string; tool?: string; display?: unknown } } | undefined;
-  const kept = entry.record.metadata?.permissionVerdict as Partial<Record<"rule" | "list" | "ruleScope" | "risk" | "grant" | "reason", string>> | undefined;
+  const kept = entry.record.metadata?.permissionVerdict as Partial<Record<"rule" | "list" | "ruleScope" | "overrides" | "risk" | "grant" | "reason", string>> | undefined;
   const verdict = entry.verdict;
   const native = request?.native;
   const prompt = entry.prompt?.text ?? entry.record.summary ?? "";
@@ -3620,6 +3625,7 @@ function auditPermissionDecision(entry: PermissionDecisionLog): void {
     rule: entry.decision === "answered" ? "operator" : verdict?.rule ?? kept?.rule ?? "mode:default",
     list: entry.decision === "answered" ? "operator" : verdict?.list ?? kept?.list ?? "mode",
     ...((verdict?.ruleScope ?? kept?.ruleScope) ? { ruleScope: verdict?.ruleScope ?? kept?.ruleScope } : {}),
+    ...(entry.decision === "answered" ? {} : auditOverrides(verdict?.overrides ?? kept?.overrides?.split(", "))),
     ...auditAgent(entry.record.askedById ?? entry.record.createdById),
     level: verdict?.level ?? "ask", grant: verdict?.grant ?? kept?.grant ?? "default",
     command: command ? command.slice(0, 500) : null, risk: verdict?.risk ?? kept?.risk ?? "unknown",
@@ -3649,6 +3655,7 @@ function auditSupervisorAnswer(input: {
     ...(input.verdict.rule ? { rule: input.verdict.rule } : {}),
     ...(input.verdict.list ? { list: input.verdict.list } : {}),
     ...(input.verdict.ruleScope ? { ruleScope: input.verdict.ruleScope } : {}),
+    ...auditOverrides(input.verdict.overrides),
     ...auditAgent(input.agentId),
     level: input.verdict.level ?? "ask", grant: input.verdict.grant,
     command: input.command ? input.command.slice(0, 500) : null, risk: input.verdict.risk,

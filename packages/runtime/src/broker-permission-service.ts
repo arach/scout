@@ -407,5 +407,6 @@ export function verdictSummary(verdict: PermissionSupervisorVerdict): Record<str
     act: verdict.act, reason: verdict.reason, risk: verdict.risk, grant: verdict.grant,
     ...(verdict.rule ? { rule: verdict.rule } : {}), ...(verdict.list ? { list: verdict.list } : {}),
     ...(verdict.ruleScope ? { ruleScope: verdict.ruleScope } : {}),
+    ...(verdict.overrides?.length ? { overrides: verdict.overrides.join(", ") } : {}),
   };
 }

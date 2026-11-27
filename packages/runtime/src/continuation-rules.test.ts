@@ -5,6 +5,7 @@ import { parseContinuationPolicy, type ContinuationPolicyFile } from "./continua
 import {
   DEFAULT_PERMISSION_RULES,
   matchPermissionRules,
+  namesDeniedFamily,
   parsePermissionRule,
   permissionRuleMatches,
   permissionScope,
@@ -112,10 +113,13 @@ describe("precedence", () => {
     expect(matchPermissionRules([scope], bash("bun test; rm x"))).toBeNull();
   });
 
-  test("a deny in any scope beats an allow in a narrower one", () => {
+  test("a deny the operator wrote in any scope beats an allow in a narrower one", () => {
     const project = permissionScope("project:/work/app", { allow: ["Bash(sudo:*)"] }, { deny: false, ask: false, allow: false });
-    const policy = permissionScope("policy", undefined, { deny: true, ask: true, allow: false });
-    expect(matchPermissionRules([project, policy], bash("sudo ls"))).toMatchObject({ list: "deny", scope: "policy" });
+    const policy = permissionScope("policy", { deny: ["Bash(sudo:*)"] }, { deny: true, ask: true, allow: false });
+    expect(matchPermissionRules([project, policy], bash("sudo ls"))).toMatchObject({ list: "deny", scope: "policy", builtin: false });
+    // The same allow against the built-in sudo deny names it, so it lifts it.
+    const defaults = permissionScope("policy", undefined, { deny: true, ask: true, allow: false });
+    expect(matchPermissionRules([project, defaults], bash("sudo ls"))).toMatchObject({ list: "allow", overrides: ["Bash(sudo:*)"] });
   });
 });
 
@@ -231,5 +235,76 @@ describe("no loosening by default", () => {
     for (const list of ["allow", "ask", "deny"] as const) {
       for (const rule of DEFAULT_PERMISSION_RULES[list]) expect(parsePermissionRule(rule)).not.toBeNull();
     }
+  });
+});
+
+describe("an operator allow over a built-in deny", () => {
+  const native = (command: string, policy: ContinuationPolicyFile, cwd = root) =>
+    decideNativeToolSupervisor({ projectRoot: cwd, cwd, toolName: "Bash", toolInput: { command } }, policy);
+  const policy = (grant: Record<string, unknown> = {}, top?: Record<string, unknown>) => parseContinuationPolicy({
+    version: 1,
+    grants: [{ scope: "project", path: root, level: "workspace", ...grant }],
+    ...(top ? { permissions: top } : {}),
+  });
+
+  test("with no allow rule, the default deny still wins", () => {
+    expect(native("rm -rf ./dist", policy())).toMatchObject({ act: "deny", rule: "Bash(rm -rf:*)", list: "deny" });
+    expect(native("sudo ls", policy())).toMatchObject({ act: "deny", rule: "Bash(sudo:*)" });
+  });
+
+  test("an allow that names the family lifts the default deny for what it matches, and the record says so", () => {
+    const lifted = policy({ permissions: { allow: ["Bash(rm -rf ./dist:*)"] } });
+    expect(native("rm -rf ./dist", lifted)).toMatchObject({
+      act: "continue", rule: "Bash(rm -rf ./dist:*)", list: "allow", ruleScope: `project:${root}`, overrides: ["Bash(rm -rf:*)"],
+      reason: "allow Bash(rm -rf ./dist:*) (overrides default deny Bash(rm -rf:*))",
+    });
+    // Only for that path, and only inside that project.
+    expect(native("rm -rf ./src", lifted)).toMatchObject({ act: "deny", rule: "Bash(rm -rf:*)" });
+    expect(native("rm -rf ./dist", lifted, "/work/other")).toMatchObject({ act: "deny", rule: "Bash(rm -rf:*)" });
+    // A chained command is never lifted: an allow does not read one.
+    expect(native("rm -rf ./dist && rm -rf ~", lifted)).toMatchObject({ act: "deny" });
+    // `sudo rm -rf ./dist` meets the sudo deny; an allow that spells it out lifts that one.
+    expect(native("sudo rm -rf ./dist", policy({ permissions: { allow: ["Bash(sudo rm -rf ./dist)"] } }))).toMatchObject({ act: "continue", overrides: ["Bash(sudo:*)"] });
+  });
+
+  test("a deny the operator wrote beats any operator allow", () => {
+    const both = policy({ permissions: { allow: ["Bash(rm -rf ./dist:*)"] } }, { deny: ["Bash(rm -rf:*)"] });
+    expect(native("rm -rf ./dist", both)).toMatchObject({ act: "deny", rule: "Bash(rm -rf:*)", ruleScope: "policy" });
+    const sameScope = policy({ permissions: { allow: ["Bash(make preview)"], deny: ["Bash(make preview)"] } });
+    expect(native("make preview", sameScope)).toMatchObject({ act: "deny", rule: "Bash(make preview)" });
+  });
+
+  test("a broad allow does not lift a default deny", () => {
+    for (const allow of ["Bash(*)", "Bash", "Bash(rm:*)", "Bash(rm *)", "Bash(* -rf:*)"]) {
+      expect(native("rm -rf ./dist", policy({ permissions: { allow: [allow] } }))).toMatchObject({ act: "deny", rule: "Bash(rm -rf:*)" });
+    }
+    expect(native("git push origin main --force", policy({ permissions: { allow: ["Bash(git push:*)"] } }))).toMatchObject({ act: "deny", rule: "Bash(git push * --force*)" });
+  });
+
+  test("an ask rule still holds a call whose deny was lifted", () => {
+    const lifted = policy({ permissions: { allow: ["Bash(rm -rf ./dist:*)"], ask: ["Bash(rm:*)"] } });
+    expect(native("rm -rf ./dist", lifted)).toMatchObject({ act: "notify", list: "ask", rule: "Bash(rm:*)" });
+  });
+
+  test("names the family: fixed text starts with the command and spells every fixed word", () => {
+    expect(namesDeniedFamily("Bash(rm -rf ./dist:*)", "Bash(rm -rf:*)")).toBe(true);
+    expect(namesDeniedFamily("Bash(rm -rf:*)", "Bash(rm -rf:*)")).toBe(true);
+    expect(namesDeniedFamily("Bash(git push origin --force-with-lease)", "Bash(git push * --force*)")).toBe(true);
+    expect(namesDeniedFamily("Bash(*)", "Bash(rm -rf:*)")).toBe(false);
+    expect(namesDeniedFamily("Bash", "Bash(rm -rf:*)")).toBe(false);
+    expect(namesDeniedFamily("Bash(rm:*)", "Bash(rm -rf:*)")).toBe(false);
+    expect(namesDeniedFamily("Bash(echo rm -rf)", "Bash(rm -rf:*)")).toBe(false);
+    expect(namesDeniedFamily("Bash(git push:*)", "Bash(git push * --force*)")).toBe(false);
+    expect(namesDeniedFamily("Read(./.env.example)", "Read(//**/.env.*)")).toBe(true);
+    expect(namesDeniedFamily("Read(**)", "Read(//**/.env)")).toBe(false);
+    expect(namesDeniedFamily("Read", "Read(//**/.env)")).toBe(false);
+    expect(namesDeniedFamily("Edit(./.env)", "Read(//**/.env)")).toBe(false);
+  });
+
+  test("a path allow lifts the .env deny for that file only", () => {
+    const lifted = policy({ permissions: { allow: ["Read(./.env.example)"] } });
+    const call = (path: string) => decideNativeToolSupervisor({ projectRoot: root, cwd: root, toolName: "Read", toolInput: { file_path: path } }, lifted);
+    expect(call(`${root}/.env.example`)).toMatchObject({ act: "continue", overrides: ["Read(//**/.env.*)"] });
+    expect(call(`${root}/.env.local`)).toMatchObject({ act: "deny" });
   });
 });
