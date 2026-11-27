@@ -55,6 +55,8 @@ export type NativePermissionAsk = {
 export type NativePermissionOpened =
   | { requestId: string }
   | { decision: "allow"; reason: string; grant: string }
+  /** A deny rule refused the call. The hook tells the harness why. */
+  | { decision: "deny"; reason: string; grant: string; rule?: string }
   | { skipped: "no_live_session" | "scout_managed" | "no_escalation" };
 
 /** One `addRules` allow entry, in Claude Code's own PermissionUpdate shape. */
@@ -71,6 +73,10 @@ export type NativePermissionOutcome =
   | { state: "ended"; reason: string };
 
 export class NativePermissionAskError extends Error {}
+
+function denied(verdict: PermissionSupervisorVerdict): NativePermissionOpened {
+  return { decision: "deny", reason: verdict.reason, grant: verdict.grant, ...(verdict.rule ? { rule: verdict.rule } : {}) };
+}
 
 type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void; settled: boolean };
 function deferred<T>(): Deferred<T> {
@@ -141,6 +147,7 @@ export class NativePermissionRequests {
       if (verdict?.act === "continue") {
         return { decision: "allow", reason: verdict.reason, grant: verdict.grant };
       }
+      if (verdict?.act === "deny") return denied(verdict);
       if (ask.escalate === false) {
         return { skipped: "no_escalation" };
       }
@@ -182,6 +189,7 @@ export class NativePermissionRequests {
       live.id = await this.deps.permissions.raise({
         prompt,
         actorId,
+        ...(verdict ? { verdict } : {}),
         native: {
           harness: "antigravity",
           tool: ask.toolName,
@@ -205,6 +213,7 @@ export class NativePermissionRequests {
     if (claudeVerdict?.act === "continue") {
       return { decision: "allow", reason: claudeVerdict.reason, grant: claudeVerdict.grant };
     }
+    if (claudeVerdict?.act === "deny") return denied(claudeVerdict);
 
     const now = (this.deps.now ?? Date.now)();
     const always = nativeAllowRuleUpdates(ask.suggestions);
@@ -236,7 +245,7 @@ export class NativePermissionRequests {
     const context = await nativePermissionContext(ask, record);
     const actorId = `native:${ask.harness}:${ask.sessionId}`;
     live.id = await this.deps.permissions.raise({
-      prompt, actorId,
+      prompt, actorId, ...(claudeVerdict ? { verdict: claudeVerdict } : {}),
       native: { context, harness: ask.harness, pid: record.pid, tool: ask.toolName, display: nativePermissionDisplay(ask),
         ...(always.length ? { alwaysRules: nativeAllowRuleLabels(always) } : {}), ...(record.jobId ? { jobId: record.jobId } : {}) },
     });

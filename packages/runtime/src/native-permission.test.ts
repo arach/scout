@@ -389,3 +389,36 @@ test("antigravity native permissions auto-allow in-policy calls, skip non-escala
     await h.native.close();
   }
 });
+
+test("a deny rule refuses a native call straight back, with no card, for both harnesses", async () => {
+  const policy = { allowModel: false, grants: [{ scope: "project" as const, path: "/tmp/project", level: "workspace" as const }] };
+  const h = harness({
+    supervisor: (req) => decideNativeToolSupervisor({ projectRoot: req.cwd, cwd: req.cwd, toolName: req.toolName, toolInput: req.toolInput }, policy),
+  });
+  try {
+    for (const call of [
+      { harness: "antigravity" as const, sessionId: "agy-session-1", cwd: "/tmp/project", toolName: "run_command", toolInput: { CommandLine: "sudo ls" }, escalate: false },
+      ask,
+    ]) {
+      expect(await h.native.open(call)).toMatchObject({ decision: "deny", rule: expect.stringMatching(/^Bash\((sudo|rm -rf):\*\)$/) });
+    }
+    expect(h.notified).toEqual([]);
+    expect(h.records.size).toBe(0);
+  } finally {
+    await h.native.close();
+  }
+});
+
+test("an ask rule raises the card and keeps the verdict on the record", async () => {
+  const policy = { allowModel: false, grants: [{ scope: "project" as const, path: "/tmp/project", level: "silent" as const }] };
+  const h = harness({
+    supervisor: (req) => decideNativeToolSupervisor({ projectRoot: req.cwd, cwd: req.cwd, toolName: req.toolName, toolInput: req.toolInput }, policy),
+  });
+  try {
+    const result = await h.native.open({ ...ask, toolInput: { command: "git push origin main" } });
+    if (!("requestId" in result)) throw new Error("expected a card");
+    expect(h.records.get(result.requestId)?.metadata?.permissionVerdict).toMatchObject({ rule: "Bash(git push:*)", list: "ask" });
+  } finally {
+    await h.native.close();
+  }
+});

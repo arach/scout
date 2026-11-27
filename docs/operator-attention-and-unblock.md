@@ -261,7 +261,65 @@ read or check. Higher grant levels keep their existing risk meaning for in-proje
 operations; outside filesystem effects always escalate. Unknown prompts,
 unrecognized or broader `Yes` choices, sensitive or outside paths, and requests
 without an exact one-time allow choice stay with the operator. The supervisor
-never chooses a session-wide or persistent project grant or a denial.
+never chooses a session-wide or persistent project grant. It denies only when a
+deny rule covers the call.
+
+### Permission rules
+
+The policy file also holds rules in Claude Code's `Tool(pattern)` syntax, so a
+rule copies between it and `~/.claude/settings.json`:
+
+```json
+{
+  "version": 1,
+  "grants": [{ "scope": "project", "path": "/Users/me/dev/app", "level": "workspace",
+               "permissions": { "allow": ["Bash(make preview)"] } }],
+  "permissions": {
+    "allow": [], "ask": ["Bash(git push:*)"], "deny": ["Bash(rm -rf:*)"],
+    "defaultMode": "default"
+  }
+}
+```
+
+- Precedence is deny, then ask, then allow, then the mode. A deny or ask rule in
+  any scope wins over an allow rule in any scope.
+- The mode is `auto` inside a grant above `ask`, where the risk classes above
+  decide what no rule covers. Elsewhere it is `default`, which asks. Only an
+  explicit `"defaultMode": "auto"` judges calls outside every grant.
+- A project grant's `permissions` lists apply to calls inside that project.
+- Deny and ask rules read every part of a chained command. An allow rule never
+  matches a command with shell operators, quoting or expansion.
+- A list the file leaves out takes the built-in default
+  (`DEFAULT_PERMISSION_RULES` in `packages/runtime/src/continuation/rules.ts`).
+  Its deny and ask rules only tighten. Its allow rules name what `auto` already
+  passes and never allow anything by themselves, so a file with no `permissions`
+  entry continues nothing that it did before.
+- A deny is sent back to the harness when it offers one. Otherwise the operator
+  is asked.
+
+### The decision record
+
+`$OPENSCOUT_HOME/logs/continuation-audit.jsonl` gets one line for each decision:
+`approved` or `denied` by the watcher, `asked` (a card was raised), `answered` by
+the operator (with `answer` and `via`: ios, mac-companion, web or cli), or
+`closed` with no answer (the session stopped waiting, the prompt went away, or
+the operator dismissed it). Each line names the `rule` and `list` (or
+`mode:auto` / `mode:default`), the agent's `agentId` and `agentName`, the
+project, the tool, the command and the time. The live file rolls over at 1 MiB
+into gzipped segments beside it, which are kept for 45 days.
+
+The broker reads it back for the watcher's page. Every route is machine-local:
+
+- `GET /v1/permissions/log`, filtered by `since`, `until`, `decision`, `agent`,
+  `rule`, `tool`, `project` and `via`.
+- `GET /v1/permissions/stats`, with counts by decision, rule, agent, surface and tool.
+- `GET /v1/permissions/rules`, with each scope's lists and the defaults marked.
+- `GET /v1/permissions/rules/dry-run?list=&rule=&project=`, with the past records
+  a rule would match and any deny or ask rule that would still win over it.
+- `POST /v1/permissions/rules {list, rule, project?}` appends a rule. It requires
+  operator proof, so an agent cannot write one.
+
+`scout permissions log|stats|rules|dry-run` prints the read routes.
 
 Grant resolution checks both the recorded project root and the actual working
 directory, including any narrower grant. Codex requests must carry an absolute
@@ -274,8 +332,9 @@ the grant, risk, and reason. Delivery still goes through the same live-prompt
 revalidation and no-replay protection as an operator decision. A failed automatic
 delivery notifies the operator of the uncertain outcome without replaying it. If
 the operator is already answering, the supervisor yields to that decision. This
-slice covers Scout-managed requests through `wait`; native Claude requests through
-`raise` keep their existing human-only path.
+slice covers Scout-managed requests through `wait`. Native Claude Code and
+Antigravity requests consult the supervisor before `raise`; an allow or a deny
+goes straight back to the hook.
 
 A runtime restart loses the live callback. Each record names the node that wrote
 it, and the runtime reconciles the open records of its own node that no process
