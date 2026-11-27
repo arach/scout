@@ -620,6 +620,19 @@ describe("the decision record", () => {
     expect(h.logs[1]).toMatchObject({ answer: "once", via: "ios", delivered: true });
   });
 
+  test("a watcher that throws holds the call for the operator, with a record and a card, and never approves", async () => {
+    const h = harness({ supervisor: () => { throw new Error("policy file unreadable"); } });
+    const answers: string[] = [];
+    const waiting = h.service.wait(invocation, prompt(answers));
+    await until(() => h.notifications.length === 1);
+    expect(answers).toEqual([]);
+    expect(h.records.get("permission-1")).toMatchObject({ state: "open", metadata: { permissionVerdict: { act: "notify", reason: "watcher error" } } });
+    expect(h.logs[0]).toMatchObject({ decision: "asked", reason: "watcher error" });
+    await h.service.decide("permission-1", "v", "deny", undefined, undefined, "ios");
+    await waiting;
+    expect(answers).toEqual(["deny"]);
+  });
+
   test("a deny rule answers no itself and writes a denied line", async () => {
     const h = harness({ supervisor: () => deny });
     const answers: string[] = [];

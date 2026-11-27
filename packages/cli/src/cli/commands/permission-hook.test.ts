@@ -55,7 +55,7 @@ describe("scout permission-hook claude", () => {
     await handleClaudePermissionHook(hook, r.deps);
     expect(r.posts).toHaveLength(1);
     expect(JSON.parse(r.out[0]!)).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest",
-      decision: { behavior: "deny", message: "The operator's Scout permission rules deny this call (Bash(rm -rf:*))." } } });
+      decision: { behavior: "deny", message: "The operator's Scout permission rules deny this call." } } });
   });
 
   test("a denial carries a message for the model", async () => {
@@ -180,7 +180,7 @@ describe("scout permission-hook antigravity", () => {
         hookEventName: "PreToolUse", conversationId: sessionId, cwd: "/tmp/workspace", workspacePaths: ["/tmp/workspace"],
         toolCall: { id: "t0", name: "run_command", args: { CommandLine: "sudo ls", BypassSandbox: false } },
       }), { ...ruleDenyRun.deps, recordsDirectory, now: () => now });
-      expect(ruleDenyRun.out.map((l) => JSON.parse(l))).toEqual([{ decision: "deny", reason: "The operator's Scout permission rules deny this call (Bash(sudo:*))." }]);
+      expect(ruleDenyRun.out.map((l) => JSON.parse(l))).toEqual([{ decision: "deny", reason: "The operator's Scout permission rules deny this call." }]);
 
       // 2. Escalation approved in Scout returns decision: allow and clears waiting record.
       const allowRun = runtime([{ requestId: "perm-agy-1" }, { state: "open" }, { state: "decided", decision: "allow" }]);

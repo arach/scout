@@ -39,6 +39,7 @@ import {
 } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { homedir } from "node:os";
+import { redactSecrets } from "./redact.js";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
@@ -278,7 +279,9 @@ export function appendContinuationAudit(
 ): void {
   mkdirSync(dirname(path), { recursive: true });
   rotateContinuationAudit(path);
-  appendFileSync(path, `${JSON.stringify(entry)}\n`, { encoding: "utf8", mode: 0o600 });
+  // Commands carry tokens often enough that the record never keeps them.
+  const line = { ...entry, command: redactSecrets(entry.command), reason: redactSecrets(entry.reason) };
+  appendFileSync(path, `${JSON.stringify(line)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 /** The live file rolls over at this size; each rolled segment is gzipped beside it. */

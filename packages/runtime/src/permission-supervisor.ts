@@ -10,6 +10,7 @@ import { parseContinuationDialog } from "./continuation/dialog.js";
 import type { ContinuationLevel } from "./continuation/policy.js";
 import {
   continuationPermissionScopes,
+  continuationPolicyPath,
   loadContinuationPolicy,
   resolveContinuationGrant,
   type ContinuationPolicyFile,
@@ -20,7 +21,9 @@ import {
   type PermissionCall,
   type PermissionList,
   type PermissionMode,
+  parsePermissionRule,
 } from "./continuation/rules.js";
+import { absolutePath, agentConfigTarget, broadRoot, readFiles, scoutPolicyTarget, secretTarget, shellSegments, writtenFiles } from "./continuation/shell.js";
 
 export const PERMISSION_SUPERVISOR_ACTOR_ID = "permission-supervisor";
 
@@ -63,8 +66,9 @@ function withRules(
   offered: { once: boolean; deny: boolean },
   judge: (grant: Grant) => PermissionSupervisorVerdict,
 ): PermissionSupervisorVerdict {
-  // Only an explicit `defaultMode: "auto"` judges calls outside every grant.
-  const outside = resolved.level === "ask" && resolved.source === "default" && policy.defaultMode === "auto";
+  // Only an explicit `defaultMode: "auto"` judges calls outside every grant,
+  // and never with `/`, the home folder or a folder above it as the project.
+  const outside = resolved.level === "ask" && resolved.source === "default" && policy.defaultMode === "auto" && !broadRoot(root);
   const grant: Grant = outside ? { ...resolved, level: "workspace" } : resolved;
   const mode: PermissionMode = grant.level === "ask" ? "default" : "auto";
   const match = call ? matchPermissionRules(continuationPermissionScopes(policy, resolved.source, mode), { ...call, root }) : null;
@@ -80,14 +84,68 @@ function withRules(
   if (match?.list === "ask") {
     return { act: "notify", reason: `ask rule ${match.rule}`, risk, grant: grant.source, ...named };
   }
+  let verdict: PermissionSupervisorVerdict;
   if (match?.list === "allow" && !match.builtin) {
-    if (!offered.once) return { act: "notify", reason: "one-time approval is not offered", risk, grant: grant.source, ...named };
-    return { act: "continue", level: grant.level, reason: permissionRuleLabel(match), risk, grant: grant.source, ...named };
+    verdict = offered.once
+      ? { act: "continue", level: grant.level, reason: permissionRuleLabel(match), risk, grant: grant.source, ...named }
+      : { act: "notify", reason: "one-time approval is not offered", risk, grant: grant.source, ...named };
+  } else {
+    const judged = judge(grant);
+    // A built-in allow rule names what auto passed; it never passes anything itself.
+    verdict = judged.act === "continue" && match?.builtin ? { ...judged, ...named! } : { ...judged, rule: `mode:${mode}`, list: "mode" };
   }
-  const verdict = judge(grant);
-  // A built-in allow rule names what auto passed; it never passes anything itself.
-  if (verdict.act === "continue" && match?.builtin) return { ...verdict, ...named! };
-  return { ...verdict, rule: `mode:${mode}`, list: "mode" };
+  if (verdict.act !== "continue" || !call) return verdict;
+  // Whatever passed it, a call that touches a secret or agent config continues
+  // only under an operator rule that names that exact path or command, and a
+  // write to Scout's own policy file never continues on its own.
+  const guard = guardedCall(call, root);
+  if (!guard) return verdict;
+  const exact = match && !match.builtin && match.list === "allow" && namesExactly(match.rule, call, root);
+  if (guard.kind !== "policy" && exact) return verdict;
+  const { level: _level, ...held } = verdict;
+  return { ...held, act: "notify", reason: guard.reason, risk: guard.kind === "secret" ? "secrets" : verdict.risk };
+}
+
+type Guard = { kind: "policy" | "config" | "secret"; reason: string };
+
+/** The protected thing a call touches: Scout's policy file, agent config, or a secret. */
+export function guardedCall(call: Omit<PermissionCall, "root">, root: string): Guard | null {
+  const policyPath = continuationPolicyPath();
+  const writes: string[] = [];
+  const reads: string[] = [];
+  if ((call.tool === "Edit" || call.tool === "Write") && call.path) writes.push(absolutePath(call.path, root));
+  if (call.tool === "Read" && call.path) reads.push(absolutePath(call.path, root));
+  if (call.tool === "Bash" && call.command) {
+    for (const segment of shellSegments(call.command)) {
+      writes.push(...writtenFiles(segment, root));
+      reads.push(...readFiles(segment).map((file) => absolutePath(file, root)));
+    }
+    if (SECRET_PATH.test(call.command) && !reads.some((file) => secretTarget(file, root))) reads.push(call.command);
+  }
+  for (const file of writes) {
+    if (scoutPolicyTarget(file, policyPath)) return { kind: "policy", reason: "writes Scout's permission rules" };
+  }
+  for (const file of writes) {
+    const target = agentConfigTarget(file, root, policyPath);
+    if (target) return { kind: "config", reason: `writes agent config (${target})` };
+  }
+  for (const file of [...reads, ...writes]) {
+    const secret = file === call.command ? "a secret path" : secretTarget(file, root);
+    if (secret) return { kind: "secret", reason: `touches a secret (${secret})` };
+  }
+  return null;
+}
+
+/** An allow rule with no wildcard that names this very path or command. */
+function namesExactly(rule: string, call: Omit<PermissionCall, "root">, root: string): boolean {
+  const parsed = parsePermissionRule(rule);
+  if (!parsed || parsed.pattern === null || /[*?]/.test(parsed.pattern)) return false;
+  if (parsed.tool === "Bash") return call.tool === "Bash" && call.command?.trim().replace(/\s+/g, " ") === parsed.pattern.replace(/\s+/g, " ");
+  if (!call.path || (parsed.tool !== call.tool && !(parsed.tool === "Edit" && call.tool === "Write"))) return false;
+  const pattern = parsed.pattern;
+  const target = pattern.startsWith("//") ? pattern.slice(1) : pattern.startsWith("~/") ? absolutePath(pattern, root)
+    : resolve(root, pattern.replace(/^\//, ""));
+  return resolve(target) === absolutePath(call.path, root);
 }
 
 function dialogCall(dialog: ReturnType<typeof parseContinuationDialog>): Omit<PermissionCall, "root"> | null {

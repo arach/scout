@@ -7,6 +7,7 @@
  * operator proof. Nothing here is reachable by an agent on its own.
  */
 
+import { redactSecrets } from "./redact.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { dirname, isAbsolute, resolve, sep } from "node:path";
@@ -147,12 +148,12 @@ export function permissionRecordRow(entry: ContinuationAuditEntry): PermissionRe
     ...(entry.overrides?.length ? { overrides: entry.overrides } : {}),
     label: ruleLabel(entry.list ?? (decision === "answered" ? "operator" : "mode"), entry.rule ?? (decision === "answered" ? "operator" : "mode:auto"), entry.overrides),
     risk: entry.risk,
-    reason: entry.reason,
+    reason: redactSecrets(entry.reason),
     ...(entry.agentId ? { agentId: entry.agentId } : {}),
     ...(entry.agentName ? { agentName: entry.agentName } : {}),
     ...(entry.projectRoot ? { project: entry.projectRoot } : {}),
     ...(entry.tool ? { tool: entry.tool } : {}),
-    command: entry.command,
+    command: redactSecrets(entry.command) ?? null,
     ...(entry.requestId ? { requestId: entry.requestId } : {}),
     ...(entry.sessionId ? { sessionId: entry.sessionId } : {}),
     ...(entry.backend ? { backend: entry.backend } : {}),

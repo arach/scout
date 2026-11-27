@@ -71,9 +71,13 @@ type AntigravityHookInput = {
 
 type Opened = { requestId?: string; skipped?: string; decision?: "allow" | "deny"; reason?: string; grant?: string; rule?: string };
 
-/** What the harness tells its agent when one of the operator's deny rules refused the call. */
-function ruleDeniedMessage(opened: Opened): string {
-  return opened.rule ? `The operator's Scout permission rules deny this call (${opened.rule}).` : "The operator's Scout permission rules deny this call.";
+/**
+ * What the harness tells its agent when one of the operator's deny rules
+ * refused the call. It names no rule: an agent that learns which pattern
+ * matched learns how to step around it. The rule goes to the record.
+ */
+function ruleDeniedMessage(_opened: Opened): string {
+  return "The operator's Scout permission rules deny this call.";
 }
 type Outcome = { state?: "open" | "decided" | "ended"; decision?: "allow" | "deny"; updatedPermissions?: unknown; reason?: string };
 

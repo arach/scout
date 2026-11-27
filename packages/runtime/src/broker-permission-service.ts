@@ -64,6 +64,7 @@ export class BrokerPermissionService {
     transition: (invocationId: string, state: "waiting" | "running", requestId: string | null) => Promise<unknown>;
     notify: (invocation: InvocationRequest, record: QuestionRecord, prompt: ManagedPermissionPrompt) => void;
     supervisor?: (prompt: ManagedPermissionPrompt) => PermissionSupervisorVerdict;
+    warn?: (message: string) => void;
     /** Told once per decision: an ask, an answer, an automatic approve or deny, or a close nobody answered. */
     log?: (entry: PermissionDecisionLog) => void;
     sleep?: (ms: number) => Promise<void>;
@@ -72,9 +73,15 @@ export class BrokerPermissionService {
   async wait(invocation: InvocationRequest, prompt: ManagedPermissionPrompt): Promise<void> {
     const id = this.deps.createId();
     const flight = this.deps.flight(invocation.id);
-    const automatic = prompt.supervisorVerdict === undefined
-      ? this.deps.supervisor?.(prompt)
-      : prompt.supervisorVerdict;
+    // A watcher that throws never approves: the call waits for the operator,
+    // with the record and its card made as for any other ask.
+    let automatic: PermissionSupervisorVerdict | null | undefined;
+    try {
+      automatic = prompt.supervisorVerdict === undefined ? this.deps.supervisor?.(prompt) : prompt.supervisorVerdict;
+    } catch (error) {
+      automatic = { act: "notify", reason: "watcher error", risk: "unknown", grant: "error" };
+      this.deps.warn?.(`[openscout-runtime] permission watcher error: ${error instanceof Error ? error.message : String(error)}`);
+    }
     const record: QuestionRecord = {
       id, kind: "question", state: "open", acceptanceState: "none",
       title: "Permission request", summary: prompt.text,

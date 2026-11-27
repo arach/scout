@@ -55,10 +55,13 @@ describe("permission supervisor", () => {
     ["rm -r dist", "destructive"],
     ["curl https://example.com", "network"],
     ["git push origin main", "publish"],
-    ["cat .env", "secrets"],
     ["bun test && git push origin main", "unknown"],
   ])("escalates %s at workspace level", (command, risk) => {
     expect(decidePermissionSupervisor(prompt(claude(command)), grants())).toMatchObject({ act: "notify", risk });
+  });
+
+  test("cat .env meets the built-in .env deny, as a Read would", () => {
+    expect(decidePermissionSupervisor(prompt(claude("cat .env")), grants())).toMatchObject({ act: "deny", list: "deny", rule: "Read(//**/.env)", risk: "secrets" });
   });
 
   test("never turns folder trust into a one-time approval", () => {
@@ -280,7 +283,7 @@ describe("permission supervisor", () => {
         "cd /work/app-hero && bun run build",
         "bun run --cwd /work/app-hero deploy",
         "git -C /work/app-hero log --output=/tmp/out",
-      ]) expect(run(command).act).toBe("notify");
+      ]) expect(run(command).act).not.toBe("continue");
     });
 
     test("a narrower grant below the project keeps its say", () => {

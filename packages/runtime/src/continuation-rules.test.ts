@@ -117,9 +117,11 @@ describe("precedence", () => {
     const project = permissionScope("project:/work/app", { allow: ["Bash(sudo:*)"] }, { deny: false, ask: false, allow: false });
     const policy = permissionScope("policy", { deny: ["Bash(sudo:*)"] }, { deny: true, ask: true, allow: false });
     expect(matchPermissionRules([project, policy], bash("sudo ls"))).toMatchObject({ list: "deny", scope: "policy", builtin: false });
-    // The same allow against the built-in sudo deny names it, so it lifts it.
+    // Against the built-in sudo deny, an allow lifts it only for the exact words it names.
     const defaults = permissionScope("policy", undefined, { deny: true, ask: true, allow: false });
-    expect(matchPermissionRules([project, defaults], bash("sudo ls"))).toMatchObject({ list: "allow", overrides: ["Bash(sudo:*)"] });
+    expect(matchPermissionRules([project, defaults], bash("sudo ls"))).toMatchObject({ list: "deny", builtin: true });
+    const exact = permissionScope("project:/work/app", { allow: ["Bash(sudo ls)"] }, { deny: false, ask: false, allow: false });
+    expect(matchPermissionRules([exact, defaults], bash("sudo ls"))).toMatchObject({ list: "allow", overrides: ["Bash(sudo:*)"] });
   });
 });
 
@@ -264,7 +266,7 @@ describe("an operator allow over a built-in deny", () => {
     // A chained command is never lifted: an allow does not read one.
     expect(native("rm -rf ./dist && rm -rf ~", lifted)).toMatchObject({ act: "deny" });
     // `sudo rm -rf ./dist` meets the sudo deny; an allow that spells it out lifts that one.
-    expect(native("sudo rm -rf ./dist", policy({ permissions: { allow: ["Bash(sudo rm -rf ./dist)"] } }))).toMatchObject({ act: "continue", overrides: ["Bash(sudo:*)"] });
+    expect(native("sudo rm -rf ./dist", policy({ permissions: { allow: ["Bash(sudo rm -rf ./dist)"] } }))).toMatchObject({ act: "continue", overrides: expect.arrayContaining(["Bash(sudo:*)", "Bash(rm -rf:*)"]) });
   });
 
   test("a deny the operator wrote beats any operator allow", () => {
@@ -278,7 +280,7 @@ describe("an operator allow over a built-in deny", () => {
     for (const allow of ["Bash(*)", "Bash", "Bash(rm:*)", "Bash(rm *)", "Bash(* -rf:*)"]) {
       expect(native("rm -rf ./dist", policy({ permissions: { allow: [allow] } }))).toMatchObject({ act: "deny", rule: "Bash(rm -rf:*)" });
     }
-    expect(native("git push origin main --force", policy({ permissions: { allow: ["Bash(git push:*)"] } }))).toMatchObject({ act: "deny", rule: "Bash(git push * --force*)" });
+    expect(native("git push origin main --force", policy({ permissions: { allow: ["Bash(git push:*)"] } }))).toMatchObject({ act: "deny", list: "deny" });
   });
 
   test("an ask rule still holds a call whose deny was lifted", () => {

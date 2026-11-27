@@ -20,6 +20,8 @@
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
+import { broadRoot, canonicalCommands, readFiles, shellSegments } from "./shell.js";
+
 export const PERMISSION_LISTS = ["deny", "ask", "allow"] as const;
 export type PermissionList = (typeof PERMISSION_LISTS)[number];
 
@@ -213,11 +215,11 @@ export function matchPermissionRules(
   scopes: readonly PermissionRuleScope[],
   call: PermissionCall,
 ): PermissionRuleMatch | null {
+  const subjects = ruleSubjects(call);
   const covers = (list: PermissionList, rule: string): boolean => {
     // An allow rule never reads a command it cannot split safely.
     if (list === "allow" && call.tool === "Bash" && unsplittable(call.command)) return false;
-    const subjects = list === "allow" ? [call] : bashSegments(call);
-    return subjects.some((subject) => permissionRuleMatches(rule, subject));
+    return (list === "allow" ? [call] : subjects).some((subject) => permissionRuleMatches(rule, subject));
   };
   const matches = (list: PermissionList): PermissionRuleMatch[] => scopes.flatMap((scope) => scope.rules[list]
     .filter((rule) => covers(list, rule))
@@ -230,7 +232,8 @@ export function matchPermissionRules(
   // A built-in deny gives way only to an allow the operator wrote that names
   // every denied command family (see `namesDeniedFamily`).
   const lifted = denies.length
-    ? matches("allow").find((allow) => !allow.builtin && denies.every((deny) => namesDeniedFamily(allow.rule, deny.rule)))
+    ? matches("allow").find((allow) => !allow.builtin && liftCovers(allow.rule, call)
+      && denies.every((deny) => namesDeniedFamily(allow.rule, deny.rule)))
     : undefined;
   if (denies.length && !lifted) return denies[0]!;
   const ask = matches("ask")[0];
@@ -261,8 +264,10 @@ export function namesDeniedFamily(allowRule: string, denyRule: string): boolean 
   if (!sameTool) return false;
   if (deny.tool === "Bash") {
     const fixed = (pattern: string) => pattern.replace(/:\*$/, "").split(/\s+/).filter(Boolean);
-    const allowWords = fixedPrefix(allow.pattern.replace(/:\*$/, "")).split(/\s+/).filter(Boolean);
+    let allowWords = fixedPrefix(allow.pattern.replace(/:\*$/, "")).split(/\s+/).filter(Boolean);
     const denyWords = fixed(deny.pattern).map((word) => word.split(/[*?]/)[0]!).filter(Boolean);
+    // `sudo rm -rf ./dist` names the rm family too: a wrapper runs the words after it.
+    while (allowWords.length > 1 && allowWords[0] !== denyWords[0] && /^(?:sudo|doas|env|nohup|time|exec|command)$/.test(allowWords[0]!)) allowWords = allowWords.slice(1);
     if (!denyWords.length || allowWords[0] !== denyWords[0]) return false;
     let at = 0;
     for (const word of denyWords) {
@@ -279,6 +284,31 @@ export function namesDeniedFamily(allowRule: string, denyRule: string): boolean 
     return denyName.length > 0 && fixedPrefix(allowName).startsWith(denyName);
   }
   return false;
+}
+
+/**
+ * A lift reads its allow rule word for word: the call has exactly the rule's
+ * words, a `*` stands for part of one word and never a space or a `/`, and
+ * a trailing `:*` adds nothing. A lift never covers `/`, `~` or the home
+ * folder, whatever the rule says.
+ */
+export function liftCovers(allowRule: string, call: PermissionCall): boolean {
+  const parsed = parsePermissionRule(allowRule);
+  if (!parsed || parsed.pattern === null) return false;
+  if (parsed.tool !== "Bash") return permissionRuleMatches(allowRule, call);
+  if (call.tool !== "Bash" || typeof call.command !== "string") return false;
+  const segments = shellSegments(call.command);
+  if (segments.length !== 1) return false;
+  const want = parsed.pattern.replace(/:\*$/, "").trim().split(/\s+/);
+  const forms = canonicalCommands(segments[0]!).map((form) => form.split(" "));
+  return forms.some((words) => words.length === want.length
+    && words.every((word, index) => wordGlob(want[index]!).test(word))
+    && !words.slice(1).some((word) => !word.startsWith("-") && broadRoot(word.replace(/\/\*+$/, "") || "/", call.root)));
+}
+
+function wordGlob(pattern: string): RegExp {
+  const source = pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join("[^\\s/]*");
+  return new RegExp(`^${source}$`);
 }
 
 /** The text before a pattern's first wildcard. */
@@ -318,23 +348,26 @@ function mcpMatches(ruleTool: string, tool: string): boolean {
   return server.split("__").length === 2 && tool.startsWith(`${server}__`);
 }
 
-/** Shell operators that run a second command. Deny and ask read every part. */
-const COMMAND_SEPARATOR = /&&|\|\||[;|&\n]|\$\(|[()`]/;
-const UNSPLITTABLE = /[;&|<>`\n\\$"'#*?{}[\]!]/;
+/** Characters an allow rule never reads past. */const UNSPLITTABLE = /[;&|<>`\n\\$"'#*?{}[\]!]/;
 
 function unsplittable(command: string | null | undefined): boolean {
   return typeof command !== "string" || UNSPLITTABLE.test(command);
 }
 
-function bashSegments(call: PermissionCall): PermissionCall[] {
+/**
+ * What deny and ask rules read: the call, then each simple command in it
+ * (split with quotes honoured, wrappers like `env`, `nohup`, `bash -c`
+ * unwrapped, flags in a fixed spelling), and the files a command reads as a
+ * Read, so `cat .env` meets `Read(//**\/.env)`.
+ */
+function ruleSubjects(call: PermissionCall): PermissionCall[] {
   if (call.tool !== "Bash" || typeof call.command !== "string") return [call];
-  const parts = call.command.split(COMMAND_SEPARATOR).map((part) => stripLeadingAssignments(part.trim())).filter(Boolean);
-  return [call, ...parts.map((command) => ({ ...call, command }))];
-}
-
-/** `FOO=1 BAR=2 cmd` runs `cmd`. */
-function stripLeadingAssignments(command: string): string {
-  return command.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, "");
+  const subjects: PermissionCall[] = [call];
+  for (const segment of shellSegments(call.command)) {
+    for (const command of canonicalCommands(segment)) subjects.push({ ...call, command });
+    for (const path of readFiles(segment)) subjects.push({ tool: "Read", path, root: call.root });
+  }
+  return subjects;
 }
 
 function bashMatches(pattern: string, rawCommand: string): boolean {

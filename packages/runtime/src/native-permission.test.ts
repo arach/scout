@@ -400,7 +400,8 @@ test("a deny rule refuses a native call straight back, with no card, for both ha
       { harness: "antigravity" as const, sessionId: "agy-session-1", cwd: "/tmp/project", toolName: "run_command", toolInput: { CommandLine: "sudo ls" }, escalate: false },
       ask,
     ]) {
-      expect(await h.native.open(call)).toMatchObject({ decision: "deny", rule: expect.stringMatching(/^Bash\((sudo|rm -rf):\*\)$/) });
+      // The agent hears a generic refusal; the rule goes to the record only.
+      expect(await h.native.open(call)).toEqual({ decision: "deny", reason: "The operator's Scout permission rules deny this call.", grant: "project:/tmp/project" });
     }
     expect(h.notified).toEqual([]);
     expect(h.records.size).toBe(0);

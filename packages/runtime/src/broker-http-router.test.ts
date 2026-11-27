@@ -1942,7 +1942,7 @@ test("answering an operator ask requires operator proof", async () => {
   expect(answers).toEqual([body]);
 });
 
-test("permission rules: reads are local, and only the operator writes a rule", async () => {
+test("permission rules: only the operator reads the record or writes a rule", async () => {
   const dir = mkdtempSync(join(tmpdir(), "scout-permission-routes-"));
   try {
     const permissionFiles = { policyPath: join(dir, "continuation-policy.json"), auditPath: join(dir, "continuation-audit.jsonl") };
@@ -1963,14 +1963,25 @@ test("permission rules: reads are local, and only the operator writes a rule", a
     expect(remoteWrite.response.status).toBe(403);
     expect(JSON.parse(readFileSync(permissionFiles.policyPath, "utf8")).permissions).toBeUndefined();
 
-    const log = await requestRouter(harness, "GET", "/v1/permissions/log?decision=asked", { transportContext: { transport: "loopback" } as never });
+    // An agent on this machine reads neither the record nor its stats, nor dry-runs a rule against it.
+    for (const path of ["/v1/permissions/log", "/v1/permissions/stats", `/v1/permissions/rules/dry-run?list=allow&rule=${encodeURIComponent("Bash(x)")}`]) {
+      for (const transportContext of [{ transport: "loopback" }, { transport: "unix-socket" }]) {
+        const agent = await requestRouter(harness, "GET", path, { transportContext: transportContext as never });
+        expect(agent.response.status).toBe(403);
+        expect(agent.body).toEqual({ error: "operator_attribution_required" });
+      }
+    }
+    // The rule view (no commands in it) stays readable locally.
+    expect((await requestRouter(harness, "GET", "/v1/permissions/rules", { transportContext: { transport: "loopback" } as never })).response.status).toBe(200);
+    const operatorRead = { transportContext: { transport: "loopback", operator: true } as never };
+    const log = await requestRouter(harness, "GET", "/v1/permissions/log?decision=asked", operatorRead);
     expect(log.response.status).toBe(200);
     expect((log.body as { records: Array<{ rule: string }> }).records.map((row) => row.rule)).toEqual(["Bash(git push:*)"]);
-    const stats = await requestRouter(harness, "GET", "/v1/permissions/stats", { transportContext: { transport: "loopback" } as never });
+    const stats = await requestRouter(harness, "GET", "/v1/permissions/stats", operatorRead);
     expect((stats.body as { byDecision: Record<string, number> }).byDecision.asked).toBe(1);
-    const dryRun = await requestRouter(harness, "GET", `/v1/permissions/rules/dry-run?list=allow&rule=${encodeURIComponent("Bash(git push:*)")}`, { transportContext: { transport: "loopback" } as never });
+    const dryRun = await requestRouter(harness, "GET", `/v1/permissions/rules/dry-run?list=allow&rule=${encodeURIComponent("Bash(git push:*)")}`, operatorRead);
     expect((dryRun.body as { matches: Array<{ shadowedBy?: { rule: string } }> }).matches[0]?.shadowedBy?.rule).toBe("Bash(git push:*)");
-    const bad = await requestRouter(harness, "GET", "/v1/permissions/log?decision=maybe", { transportContext: { transport: "loopback" } as never });
+    const bad = await requestRouter(harness, "GET", "/v1/permissions/log?decision=maybe", operatorRead);
     expect(bad.response.status).toBe(400);
 
     const operator = await requestRouter(harness, "POST", "/v1/permissions/rules", { body, transportContext: { transport: "loopback", operator: true } as never });

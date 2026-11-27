@@ -819,6 +819,10 @@ export function createBrokerHttpRouter(
     if (request.transportContext?.transport === "remote" || request.transportContext?.guest) {
       json(response, 403, { error: "forbidden", detail: "route is machine-local" }); return;
     }
+    // The record holds every session's commands: only the operator reads it, as only the operator writes rules.
+    if (url.pathname !== "/v1/permissions/rules" && !brokerAttributionRequiresOperator(request.transportContext)) {
+      json(response, 403, { error: "operator_attribution_required" }); return;
+    }
     const files = deps.permissionFiles ?? { policyPath: continuationPolicyPath(), auditPath: continuationAuditPath() };
     const number = (name: string) => {
       const value = Number(url.searchParams.get(name) ?? "");
