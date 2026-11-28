@@ -7,6 +7,16 @@ import {
 
 describe("broker runtime profiles", () => {
   test("owns the reserved profile execution definitions", () => {
+    expect(resolveBrokerRuntimeProfile("Neon")?.execution).toEqual({
+      harness: "antigravity",
+      model: "gemini-4-neon",
+      session: "new",
+    });
+    expect(resolveBrokerRuntimeProfile("carbon")?.execution).toEqual({
+      harness: "antigravity",
+      model: "gemini-4-carbon",
+      session: "new",
+    });
     expect(resolveBrokerRuntimeProfile("Fable")?.execution).toEqual({
       harness: "claude",
       model: "fable",
@@ -57,6 +67,15 @@ describe("broker runtime profiles", () => {
       profileId: "grok",
       reasoningEffort: "high",
     })).toBeNull();
+    expect(executionForBrokerRuntimeProfile({
+      profileId: "neon",
+      reasoningEffort: "high",
+    })).toEqual({
+      harness: "antigravity",
+      model: "gemini-4-neon",
+      reasoningEffort: "high",
+      session: "new",
+    });
     expect(resolveBrokerRuntimeProfile("composer-review")).toBeNull();
   });
 });

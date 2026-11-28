@@ -19,6 +19,18 @@ const BROKER_RUNTIME_PROFILES: Record<ScoutReservedRuntimeProfileId, BrokerRunti
     supportsReasoningEffort: true,
     execution: { harness: "antigravity", session: "new" },
   },
+  neon: {
+    id: "neon",
+    displayName: "Neon",
+    supportsReasoningEffort: true,
+    execution: { harness: "antigravity", model: "gemini-4-neon", session: "new" },
+  },
+  carbon: {
+    id: "carbon",
+    displayName: "Carbon",
+    supportsReasoningEffort: true,
+    execution: { harness: "antigravity", model: "gemini-4-carbon", session: "new" },
+  },
   fable: {
     id: "fable",
     displayName: "Fable",
