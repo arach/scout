@@ -3567,6 +3567,7 @@ const permissionService = new BrokerPermissionService({
     view = withSignalLine(view, record.metadata?.permissionVerdict as Record<string, unknown> | undefined);
     operatorAttentionService.queuePermissionRequest({
       view,
+      ...(prompt.decisions.includes("project") ? { canAlwaysAllow: true } : {}),
       requestId: record.id, text: prompt.text, agentId: invocation.targetAgentId, requesterNodeId: nodeId,
       projectRoot: prompt.projectRoot, sessionId: prompt.sessionId, createdAt: record.createdAt,
       ...(invocation.conversationId ? { conversationId: invocation.conversationId } : {}),
@@ -3604,6 +3605,8 @@ const nativePermissions = new NativePermissionRequests({
     const verdict = runtime.collaborationRecord(requestId)?.metadata?.permissionVerdict as Record<string, unknown> | undefined;
     operatorAttentionService.queuePermissionRequest({
       requestId, text: prompt.text, view: withSignalLine(view, verdict), agentId: actorId, requesterNodeId: nodeId,
+      // A call an escalation signal held gets no always-allow: the next one should reach the operator too.
+      ...(prompt.decisions.includes("project") && typeof verdict?.signal !== "string" ? { canAlwaysAllow: true } : {}),
       projectRoot: prompt.projectRoot, sessionId: prompt.sessionId, createdAt: Date.now(),
     });
   },
