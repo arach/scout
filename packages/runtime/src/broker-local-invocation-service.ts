@@ -1,3 +1,4 @@
+import { admitAgentWorkspaceDispatch } from "./agent-workspace.js";
 import { hasLiveAcpWorker } from "./acp-agent-invocation.js";
 import { warmWorkerContinuation, HostLaunchDeferred, type HostLaunchAdmission } from "./host-launch-admission.js";
 import { deferredDispatchCheckedAt } from "./broker-dispatch-recovery-service.js";
@@ -441,6 +442,32 @@ export class BrokerLocalInvocationService {
   }
 
   private async executeOnEndpoint(
+    invocation: InvocationRequest,
+    endpoint: AgentEndpoint | undefined,
+    previousEndpoint: AgentEndpoint | undefined,
+  ): Promise<void> {
+    if (this.currentFlightIsTerminal(invocation.id)) return;
+    const current = endpoint && this.options.runtime.snapshot().endpoints[endpoint.id];
+    const workspace = endpoint?.cwd && endpoint.metadata?.workspaceOwnership ? endpoint.cwd : undefined;
+    const release = workspace ? admitAgentWorkspaceDispatch(workspace) : undefined;
+    if (workspace && (!release || !current || current.cwd !== workspace || current.metadata?.worktreeRetiredAt)) {
+      release?.();
+      await this.handlePreparationError(
+        invocation,
+        localInvocationTargetIdentity(invocation.targetAgentId,
+          this.options.runtime.agent(invocation.targetAgentId), this.options.runtime.actor(invocation.targetAgentId)),
+        new Error("The agent workspace is retiring or retired. Start a fresh session to continue."),
+      );
+      return;
+    }
+    try {
+      await this.executeOnLeasedEndpoint(invocation, endpoint, previousEndpoint);
+    } finally {
+      release?.();
+    }
+  }
+
+  private async executeOnLeasedEndpoint(
     invocation: InvocationRequest,
     resolvedEndpoint: AgentEndpoint | undefined,
     previousEndpoint: AgentEndpoint | undefined,

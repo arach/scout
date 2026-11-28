@@ -1773,6 +1773,10 @@ const flightLifecycleService = new BrokerFlightLifecycleService({
     operatorActorId, nodeId, now: Date.now(),
   }),
   onFlightRecorded: async (previous, flight, invocation) => {
+    if (isTerminalFlightState(flight.state) && (!previous || !isTerminalFlightState(previous.state))) {
+      // Leave the flight writer and the dispatch lease before checking liveness.
+      scheduleOwnedWorktreeRetirement(flight.targetAgentId);
+    }
     if (!taskReadyEntered(previous, flight)) return;
     taskReadyNotifier.noteFlight(previous, flight, invocation);
     await workItemStore.landReadyWorkItem(flight, invocation);
@@ -2823,6 +2827,7 @@ async function createCardlessProjectSessionForDelivery(input: {
       projectRoot,
       agentName: provisionalName,
       workspace: input.workspace,
+      ownerSessionId: sessionId,
     });
   } catch (error) {
     throw new RetryablePreEffectFailure(error instanceof Error ? error.message : String(error));
@@ -2836,6 +2841,7 @@ async function createCardlessProjectSessionForDelivery(input: {
     transport,
     harness,
     cwd: sessionWorkspace.cwd,
+    workspaceOwnership: sessionWorkspace.ownership,
     projectRoot,
     nodeId,
     ...(input.execution?.model?.trim() ? { model: input.execution.model.trim() } : {}),
@@ -4056,6 +4062,27 @@ const worktreeRetirement = new WorktreeRetirementService({
   log: (line) => console.log(line),
 });
 
+const ownedWorktreeRetirementTimers = new Map<string, ReturnType<typeof setTimeout>>();
+function scheduleOwnedWorktreeRetirement(sessionId: string): void {
+  if (shuttingDown || ownedWorktreeRetirementTimers.has(sessionId)
+      || !runtime.endpointsForAgent(sessionId, { nodeId, includeOffline: true })
+        .some((endpoint) => endpoint.metadata?.workspaceOwnership)) return;
+  const attempt = (remaining: number): void => {
+    const timer = setTimeout(() => {
+      void worktreeRetirement.retireOwned(sessionId).then((retired) => {
+        if (!shuttingDown && !retired && remaining > 0) attempt(remaining - 1);
+        else ownedWorktreeRetirementTimers.delete(sessionId);
+      }, (error) => {
+        ownedWorktreeRetirementTimers.delete(sessionId);
+        console.warn("[openscout-runtime] owned worktree retirement kept the workspace:", error);
+      });
+    }, remaining === 2 ? 1_000 : 30_000);
+    timer.unref?.();
+    ownedWorktreeRetirementTimers.set(sessionId, timer);
+  };
+  attempt(2);
+}
+
 const routeRequest = createBrokerHttpRouter({
   workLifecycles,
   boards,
@@ -4932,6 +4959,8 @@ async function shutdownBroker(exitCode = 0): Promise<void> {
   clearTimeout(projectionRetryTimer);
   routineRunner.stop();
   worktreeRetirement.stop();
+  for (const timer of ownedWorktreeRetirementTimers.values()) clearTimeout(timer);
+  ownedWorktreeRetirementTimers.clear();
   hostKeepAwake?.stop();
   capabilityMatrixService.stop();
   tailscaleListenerGuard.stop();

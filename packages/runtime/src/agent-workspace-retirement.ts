@@ -27,6 +27,10 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import {
   agentWorkspaceClaimedAt,
+  agentWorkspaceDispatchCount,
+  captureAgentWorktree,
+  matchesAgentWorktreeOwnership,
+  type AgentWorktreeOwnership,
   SCOUT_WORKSPACES_DIRNAME,
   withAgentWorkspaceRetirement,
 } from "./agent-workspace.js";
@@ -35,6 +39,7 @@ import {
   activeFlightForAgent,
   lastSessionActivity,
 } from "./broker-cardless-session-reaper.js";
+import { isTerminalFlightState } from "./broker-local-invocation-helpers.js";
 import { isCardlessSessionEndpoint } from "./broker-cardless-session.js";
 import { isStaleLocalEndpoint } from "./broker-endpoint-selection.js";
 import type { RuntimeRegistrySnapshot } from "./registry.js";
@@ -375,6 +380,7 @@ async function keepReasons(
   baseRefs: readonly string[],
 ): Promise<{ reasons: string[]; usage: WorktreeUsage; lastActivityAt: number }> {
   const reasons: string[] = [];
+  if (agentWorkspaceDispatchCount(candidate.path) > 0) reasons.push("local dispatch holds this worktree");
   if (candidate.locked) reasons.push("locked with git worktree lock");
   const usage = await input.usage(candidate.path);
   reasons.push(...usage.holds);
@@ -615,11 +621,81 @@ export class WorktreeRetirementService {
     return { settings: this.settings(), intervalMs: this.intervalMs, running: this.running, lastSweep: this.lastSweep };
   }
 
+  /** Capture and remove only a dedicated workspace with a settled, quiescent owner. */
+  async retireOwned(sessionId: string): Promise<boolean> {
+    if (!this.settings().enabled || (this.options.ready && !this.options.ready())) return false;
+    const { nodeId } = this.options;
+    const snapshot = this.options.snapshot();
+    if (!Object.values(snapshot.flights).some((flight) =>
+      flight.targetAgentId === sessionId && isTerminalFlightState(flight.state))) return false;
+    const endpoint = Object.values(snapshot.endpoints).find((entry) =>
+      entry.agentId === sessionId && entry.nodeId === nodeId && isCardlessSessionEndpoint(entry)
+      && entry.metadata?.workspaceOwnership && entry.metadata?.placement === "background");
+    const raw = endpoint?.metadata?.workspaceOwnership;
+    if (!endpoint?.projectRoot || !endpoint.cwd || !raw || typeof raw !== "object") return false;
+    const ownership = raw as Partial<AgentWorktreeOwnership>;
+    if (ownership.sessionId !== sessionId || ownership.path !== endpoint.cwd
+        || typeof ownership.branch !== "string" || typeof ownership.directoryIdentity !== "string"
+        || typeof ownership.gitfileIdentity !== "string") return false;
+    const claim = ownership as AgentWorktreeOwnership;
+    const projectRoot = endpoint.projectRoot;
+    const path = endpoint.cwd;
+    return withAgentWorkspaceRetirement(path, async () => {
+      const quiet = async () => {
+        if (agentWorkspaceDispatchCount(path)) return false;
+        const current = this.options.snapshot();
+        const latest = current.endpoints[endpoint.id];
+        if (!latest || latest.cwd !== path || latest.agentId !== sessionId
+            || await this.options.isEndpointAlive(latest)) return false;
+        const usage = await scoutWorktreeUsage(this.options.snapshot(), path, {
+          nodeId, isEndpointAlive: this.options.isEndpointAlive,
+        });
+        return usage.holds.length === 0 && usage.referencedBy.length === 1
+          && usage.referencedBy[0] === endpoint.id;
+      };
+      if (!await quiet() || !await matchesAgentWorktreeOwnership(projectRoot, claim)) return false;
+      const { candidates } = await listScoutWorktrees(projectRoot);
+      const candidate = candidates.find((entry) => entry.path === path && entry.branch === claim.branch && !entry.locked);
+      if (!candidate || !await quiet()) return false;
+      await captureAgentWorktree(projectRoot, claim);
+      if (!await quiet() || !await matchesAgentWorktreeOwnership(projectRoot, claim)) return false;
+      const latest = this.options.snapshot().endpoints[endpoint.id];
+      if (!latest) return false;
+      await this.options.releaseEndpoints([latest], candidate);
+      if (!await quiet() || !await matchesAgentWorktreeOwnership(projectRoot, claim)) return false;
+      await defaultGit(["worktree", "remove", "--", path], { cwd: projectRoot, timeoutMs: 120_000 });
+      return true;
+    });
+  }
+
+  /** Retry from replayed endpoint and flight records, without relying on a terminal-event timer. */
+  async recoverOwned(): Promise<number> {
+    if (!this.settings().enabled || (this.options.ready && !this.options.ready())) return 0;
+    const snapshot = this.options.snapshot();
+    const sessions = new Set(Object.values(snapshot.endpoints).filter((entry) =>
+      entry.nodeId === this.options.nodeId && entry.metadata?.workspaceOwnership
+      && entry.metadata?.placement === "background" && entry.cwd && realpathOrNull(entry.cwd))
+      .map((entry) => entry.agentId));
+    let retired = 0;
+    for (const session of sessions) {
+      try {
+        if (await this.retireOwned(session)) retired++;
+      } catch (error) {
+        this.options.log?.(`[openscout-runtime] owned worktree retirement retained ${session}: ${errorText(error)}`);
+      }
+    }
+    return retired;
+  }
+
   sweep(input: { trigger: WorktreeRetirementReport["trigger"]; dryRun?: boolean; projectRoots?: readonly string[] }): Promise<WorktreeRetirementReport> {
     const run = async (): Promise<WorktreeRetirementReport> => {
       this.running = true;
       try {
         const { nodeId } = this.options;
+        if (input.trigger === "periodic" && !input.dryRun) {
+          const recovered = await this.recoverOwned();
+          if (recovered) this.options.log?.(`[openscout-runtime] recovered retirement of ${recovered} owned worktree(s)`);
+        }
         const projectRoots = input.projectRoots?.length
           ? input.projectRoots
           : scoutWorktreeProjectRoots(this.options.snapshot(), nodeId);
@@ -628,7 +704,14 @@ export class WorktreeRetirementService {
           dryRun: input.dryRun ?? false,
           trigger: input.trigger,
           settings: this.settings(),
-          usage: (path) => scoutWorktreeUsage(this.options.snapshot(), path, { nodeId, isEndpointAlive: this.options.isEndpointAlive }),
+          usage: async (path) => {
+            const snapshot = this.options.snapshot();
+            const usage = await scoutWorktreeUsage(snapshot, path, { nodeId, isEndpointAlive: this.options.isEndpointAlive });
+            if (usage.referencedBy.some((id) => snapshot.endpoints[id]?.metadata?.workspaceOwnership)) {
+              usage.holds.push("owned worktree uses capture-before-retirement");
+            }
+            return usage;
+          },
           releaseEndpoints: this.options.releaseEndpoints,
         });
         if (!report.dryRun) this.lastSweep = report;

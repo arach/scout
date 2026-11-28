@@ -1,3 +1,5 @@
+import type { AgentWorktreeOwnership } from "./agent-workspace.js";
+
 import { basename, resolve } from "node:path";
 
 import type {
@@ -98,6 +100,7 @@ function isCardlessSessionSpawnTransport(value: string): value is CardlessSessio
 }
 
 export interface CardlessSessionInput {
+  workspaceOwnership?: AgentWorktreeOwnership;
   /** Scout's broker-local session marker. Provider ids are attached later. */
   sessionId: string;
   /** Human-addressable handle for this session actor. */
@@ -288,6 +291,7 @@ export function buildCardlessSessionEndpoint(input: CardlessSessionInput): Agent
       ...(input.model?.trim() ? { model: input.model.trim() } : {}),
       ...(input.reasoningEffort?.trim() ? { reasoningEffort: input.reasoningEffort.trim() } : {}),
       ...(launchArgs && launchArgs.length > 0 ? { launchArgs } : {}),
+      ...(input.workspaceOwnership?.sessionId === input.sessionId ? { workspaceOwnership: { ...input.workspaceOwnership } } : {}),
       ...(input.crewRole?.trim() ? { crewRole: input.crewRole.trim() } : {}),
       ...(input.viaCard ? { viaCard: input.viaCard } : {}),
       startedAt: String(startedAt),

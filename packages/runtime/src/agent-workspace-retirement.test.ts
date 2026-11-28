@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createAgentWorkspace, SCOUT_WORKSPACES_DIRNAME } from "./agent-workspace.js";
+import { admitAgentWorkspaceDispatch, createAgentWorkspace, SCOUT_WORKSPACES_DIRNAME, withAgentWorkspaceRetirement } from "./agent-workspace.js";
 import {
+  WorktreeRetirementService,
   listScoutWorktrees,
   resolveWorktreeRetirementSettings,
   scoutWorktreeProjectRoots,
@@ -110,6 +111,66 @@ describe("sweepScoutWorktrees", () => {
     expect(await git(root, "worktree", "list", "--porcelain")).not.toContain(SCOUT_WORKSPACES_DIRNAME);
     // The merged commit stays reachable from main.
     expect(await git(root, "log", "--format=%s", "main")).toContain("add feature.txt");
+  });
+
+  test("captures and retires only after every flight and the worker have stopped", async () => {
+    const root = await makeRepo();
+    const owned = (await createAgentWorkspace(root, "quill", undefined, { ownerSessionId: "session-a" }))!;
+    const entry = endpoint({
+      cwd: owned.path, projectRoot: root,
+      metadata: { cardless: true, placement: "background", workspaceOwnership: owned.ownership },
+    });
+    const finished = { id: "finished", invocationId: "first", requesterId: "op", targetAgentId: "session-a", state: "completed" as const };
+    const second = { ...finished, id: "second", invocationId: "second", state: "running" as const };
+    let active = true;
+    let alive = true;
+    let released = false;
+    const makeService = () => new WorktreeRetirementService({
+      nodeId: NODE,
+      settings: () => ({ enabled: true, idleHours: 24 }),
+      snapshot: () => createRuntimeRegistrySnapshot({
+        endpoints: { [entry.id]: entry },
+        flights: { finished, ...(active ? { second } : {}) },
+      }),
+      isEndpointAlive: () => alive,
+      releaseEndpoints: async () => {
+        expect(await git(root, "show", "scout/quill:result.txt")).toBe("captured");
+        released = true;
+      },
+    });
+    const service = makeService();
+    writeFileSync(join(owned.path, "result.txt"), "captured");
+    expect(await service.retireOwned("session-a")).toBe(false);
+    alive = false;
+    expect(await service.retireOwned("session-a")).toBe(false);
+    expect(existsSync(owned.path)).toBe(true);
+    active = false;
+    // A fresh service can recover from records even without a terminal-event timer.
+    expect(await makeService().recoverOwned()).toBe(1);
+    expect(released).toBe(true);
+    expect(existsSync(owned.path)).toBe(false);
+    expect(await git(root, "show", "scout/quill:result.txt")).toBe("captured");
+  }, 20_000);
+
+  test("a second dispatch keeps the worktree after the first releases its lease", async () => {
+    const root = await makeRepo();
+    const worktree = await agentWorktree(root, "quill");
+    const releaseFirst = admitAgentWorkspaceDispatch(worktree)!;
+    const releaseSecond = admitAgentWorkspaceDispatch(worktree)!;
+    try {
+      releaseFirst();
+      expect((await sweepScoutWorktrees(sweepInput(root))).worktrees[0]).toMatchObject({
+        action: "kept", reasons: ["local dispatch holds this worktree"],
+      });
+    } finally {
+      releaseFirst();
+      releaseSecond();
+    }
+
+    await withAgentWorkspaceRetirement(worktree, async () => {
+      expect(admitAgentWorkspaceDispatch(worktree)).toBeUndefined();
+    });
+    expect((await sweepScoutWorktrees(sweepInput(root))).retired).toBe(1);
   });
 
   test("a dry run reports what it would retire and changes nothing", async () => {

@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createAgentWorkspace, resolveSessionWorkspace, SCOUT_WORKSPACES_DIRNAME } from "./agent-workspace.js";
+import { stageAgentWorkspaceClone } from "./agent-workspace-clone.js";
+import { captureAgentWorktree, createAgentWorkspace, matchesAgentWorktreeOwnership, resolveSessionWorkspace, SCOUT_WORKSPACES_DIRNAME } from "./agent-workspace.js";
 import { setExecSystemSpawnForTests } from "./system-probes/exec.js";
 
 const tempRoots: string[] = [];
@@ -64,7 +65,7 @@ describe("createAgentWorkspace", () => {
     const result = await createAgentWorkspace(root, "explorer");
 
     expect(result).not.toBeNull();
-    expect(result!.path).toBe(join(root, SCOUT_WORKSPACES_DIRNAME, "explorer"));
+    expect(result!.path).toBe(join(realpathSync(root), SCOUT_WORKSPACES_DIRNAME, "explorer"));
     expect(result!.branch).toBe("scout/explorer");
     expect(statSync(result!.path).isDirectory()).toBe(true);
 
@@ -118,6 +119,24 @@ describe("createAgentWorkspace", () => {
       .rejects.toThrow('could not create branch "scout/explorer" at baseRef');
     expect(existsSync(join(root, SCOUT_WORKSPACES_DIRNAME, "explorer"))).toBe(false);
   });
+
+  test("refuses unmanaged paths, mismatched branches, and symlinked workspace roots", async () => {
+    const root = makeGitRepo();
+    const otherRoot = makeGitRepo();
+    const container = join(root, SCOUT_WORKSPACES_DIRNAME);
+    symlinkSync(otherRoot, container, "dir");
+    await expect(createAgentWorkspace(root, "explorer")).rejects.toThrow("must be a real directory");
+    await expect(createAgentWorkspace(root, "../escape")).rejects.toThrow("single path component");
+    expect(existsSync(join(otherRoot, "explorer"))).toBe(false);
+    rmSync(container);
+
+    const unmanaged = join(container, "unmanaged");
+    mkdirSync(unmanaged, { recursive: true });
+    expect(await createAgentWorkspace(root, "unmanaged")).toBeNull();
+    expect(existsSync(unmanaged)).toBe(true);
+    expect(await createAgentWorkspace(root, "explorer")).not.toBeNull();
+    expect(await createAgentWorkspace(root, "explorer", "wrong")).toBeNull();
+  }, 20000);
 
   test("reuses an existing workspace at the same path", async () => {
     const root = makeGitRepo();
@@ -190,6 +209,75 @@ describe("createAgentWorkspace", () => {
   }, 20_000);
 });
 
+test("publishes a clean clone-backed worktree with isolated dependencies", async () => {
+  if (process.platform !== "darwin") return;
+  const root = makeGitRepo();
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  writeFileSync(join(root, ".gitignore"), "node_modules/\n");
+  writeFileSync(join(root, "tracked"), "selected base");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  mkdirSync(join(root, "node_modules"));
+  writeFileSync(join(root, "node_modules", "dependency"), "initial");
+  const probe = await stageAgentWorkspaceClone(root);
+  if (!probe) return; // This volume does not support force-only cloning.
+  await probe.dispose();
+  const owned = await createAgentWorkspace(root, "cow", undefined, { ownerSessionId: "owner", fetchBase: false });
+  expect(owned?.ownership).toBeDefined();
+  const dependency = join(owned!.path, "node_modules", "dependency");
+  expect(readFileSync(dependency, "utf8")).toBe("initial");
+  writeFileSync(dependency, "isolated edit");
+  expect(readFileSync(join(root, "node_modules", "dependency"), "utf8")).toBe("initial");
+  expect(await matchesAgentWorktreeOwnership(root, owned!.ownership!)).toBe(true);
+
+  writeFileSync(join(root, "tracked"), "uncommitted source edit");
+  const fallback = await createAgentWorkspace(root, "fallback", undefined, { ownerSessionId: "other", fetchBase: false });
+  expect(readFileSync(join(fallback!.path, "tracked"), "utf8")).toBe("selected base");
+  expect(existsSync(join(fallback!.path, "node_modules"))).toBe(false);
+}, 20_000);
+
+test("claims only a fresh workspace and detects replacement of its Git file", async () => {
+  const root = makeGitRepo();
+  const workspace = await resolveSessionWorkspace({
+    projectRoot: root, agentName: "owned", workspace: "new_worktree", ownerSessionId: "owner",
+  });
+  expect(workspace.ownership?.sessionId).toBe("owner");
+  expect(await matchesAgentWorktreeOwnership(root, workspace.ownership!)).toBe(true);
+  expect(await createAgentWorkspace(root, "owned", undefined, { ownerSessionId: "other" })).toBeNull();
+  const gitfile = join(workspace.cwd, ".git");
+  const replacement = join(workspace.cwd, ".replacement");
+  writeFileSync(replacement, readFileSync(gitfile));
+  renameSync(replacement, gitfile);
+  expect(await matchesAgentWorktreeOwnership(root, workspace.ownership!)).toBe(false);
+}, 20_000);
+
+test("captures changes on the owning branch and keeps the workspace", async () => {
+  const root = makeGitRepo();
+  const workspace = (await createAgentWorkspace(root, "capture"))!;
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const original = git("rev-parse", "HEAD");
+  writeFileSync(join(workspace.path, "result.txt"), "agent work");
+  await expect(captureAgentWorktree(root, { ...workspace, branch: "scout/wrong" })).rejects.toThrow("expected branch");
+  const commit = await captureAgentWorktree(root, workspace);
+  expect(commit).toBe(git("rev-parse", workspace.branch));
+  expect(git("show", `${commit}:result.txt`)).toBe("agent work");
+  expect(git("rev-parse", "HEAD")).toBe(original);
+  expect(existsSync(join(workspace.path, "result.txt"))).toBe(true);
+  expect(await captureAgentWorktree(root, workspace)).toBe(commit);
+  execFileSync("git", ["update-index", "--assume-unchanged", "result.txt"], { cwd: workspace.path });
+  writeFileSync(join(workspace.path, "result.txt"), "hidden edit");
+  await expect(captureAgentWorktree(root, workspace)).rejects.toThrow("index flags");
+  expect(readFileSync(join(workspace.path, "result.txt"), "utf8")).toBe("hidden edit");
+  execFileSync("git", ["update-index", "--no-assume-unchanged", "result.txt"], { cwd: workspace.path });
+  writeFileSync(join(workspace.path, "result.txt"), "agent work");
+  const nested = join(workspace.path, "nested");
+  git("clone", "-q", root, nested);
+  writeFileSync(join(nested, "untracked.txt"), "nested work");
+  await expect(captureAgentWorktree(root, workspace)).rejects.toThrow("nested repository contents");
+  expect(git("rev-parse", workspace.branch)).toBe(commit);
+  expect(existsSync(join(nested, "untracked.txt"))).toBe(true);
+}, 20_000);
+
 describe("resolveSessionWorkspace", () => {
   test("runs in the project root when no worktree is requested", async () => {
     const root = makeGitRepo();
@@ -203,7 +291,7 @@ describe("resolveSessionWorkspace", () => {
     const head = git(root, "rev-parse", "HEAD");
     const workspace = await resolveSessionWorkspace({ projectRoot: root, agentName: "quill", workspace: "new_worktree" });
 
-    expect(workspace).toEqual({ cwd: join(root, SCOUT_WORKSPACES_DIRNAME, "quill"), branch: "scout/quill", baseRef: head });
+    expect(workspace).toEqual({ cwd: join(realpathSync(root), SCOUT_WORKSPACES_DIRNAME, "quill"), branch: "scout/quill", baseRef: head });
     expect(git(workspace.cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe("scout/quill");
     expect(git(workspace.cwd, "rev-parse", "HEAD")).toBe(head);
   });

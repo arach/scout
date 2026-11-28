@@ -1,0 +1,8 @@
+{
+  "path": "packages/runtime/src/agent-workspace-clone.ts",
+  "symbol": "dlopen",
+  "category": "dlopen",
+  "libraryPaths": ["/usr/lib/libSystem.B.dylib"],
+  "reason": "Call Darwin clonefile for force-only workspace staging into a private sibling directory. No regular-copy fallback.",
+  "owner": "runtime"
+}
