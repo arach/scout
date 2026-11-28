@@ -303,7 +303,24 @@ export function liftCovers(allowRule: string, call: PermissionCall): boolean {
   const forms = canonicalCommands(segments[0]!).map((form) => form.split(" "));
   return forms.some((words) => words.length === want.length
     && words.every((word, index) => wordGlob(want[index]!).test(word))
-    && !words.slice(1).some((word) => !word.startsWith("-") && broadRoot(word.replace(/\/\*+$/, "") || "/", call.root)));
+    && !words.slice(1).some((word) => !word.startsWith("-") && !liftableOperand(word, call.root)));
+}
+
+/**
+ * An operand a lift may cover: no `.` or `..` segment past a leading `./`,
+ * not `/`, `~`, `$HOME` or the home folder, and not the project root or a
+ * folder above it. `./dist/..`, `.`, `..` and `../x` are never lifted.
+ */
+function liftableOperand(word: string, root: string): boolean {
+  const trimmed = word.replace(/\/\*+$/, "") || "/";
+  const segments = trimmed.replace(/^\.\//, "").split("/");
+  if (segments.some((segment) => segment === "." || segment === "..")) return false;
+  if (broadRoot(trimmed, root)) return false;
+  const absolute = trimmed === "~" || trimmed.startsWith("~/") || /^\$\{?HOME\}?/.test(trimmed)
+    ? resolve(homedir(), trimmed.replace(/^(?:~|\$\{?HOME\}?)\/?/, ""))
+    : isAbsolute(trimmed) ? resolve(trimmed) : resolve(root, trimmed);
+  const base = resolve(root);
+  return absolute !== base && !base.startsWith(`${absolute}/`);
 }
 
 function wordGlob(pattern: string): RegExp {

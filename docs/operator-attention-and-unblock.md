@@ -285,8 +285,10 @@ rule copies between it and `~/.claude/settings.json`:
   any scope wins over an allow rule in any scope.
 - The mode is `auto` inside a grant above `ask`, where the risk classes above
   decide what no rule covers. Elsewhere it is `default`, which asks. Only an
-  explicit `"defaultMode": "auto"` judges calls outside every grant. It never takes
-  `/`, the home folder or an ancestor of it as the project.
+  explicit `"defaultMode": "auto"` judges calls outside every grant, and only in a
+  folder under the home folder that is not inside a dot folder or `~/Library`.
+  Anywhere else (`/`, `/etc`, `/tmp`, the home folder, `~/.config`,
+  `~/Library/LaunchAgents`) the call is asked.
 - A project grant's `permissions` lists apply to calls inside that project.
 - Deny and ask rules read every part of a chained command, split with quotes
   honoured, including `$(…)`, backtick, `sh -c` and `eval` bodies. They match each
@@ -313,7 +315,8 @@ rule copies between it and `~/.claude/settings.json`:
   `.codex/`, `.cursor/`, `.gemini/`, `.agents/`, `.vscode/`, `.mcp.json`,
   `.git/hooks`, `.git/config`, venv interpreters, shell rc files, git global
   config) and reads of secrets (`~/.ssh`, `~/.aws`, cloud and registry
-  credentials, keychains, key files), unless an allow rule the operator wrote
+  credentials, keychains, key files; as any command's operand, not only a
+  reader's), unless an allow rule the operator wrote
   names that exact path or command, with no wildcard.
 - A watcher that throws holds the call for the operator with the reason
   `watcher error`. It never approves.
@@ -326,7 +329,8 @@ rule copies between it and `~/.claude/settings.json`:
   the denied command and spells every fixed word of the deny in order. It lifts
   only a single command whose words match the allow's one for one: an extra
   argument means no lift, a `*` stands for part of one word and never crosses a
-  space or a `/`, and an operand of `/`, `~`, `$HOME` or the home folder is never
+  space or a `/`, and an operand of `/`, `~`, `$HOME` or the home folder, one with
+  a `.` or `..` segment, or one that is the project root or above it is never
   lifted. `Bash(rm -rf ./dist:*)` lifts `rm -rf ./dist` and not
   `rm -rf ./dist /home`. `Bash(*)`, `Bash`, and `Bash(rm:*)` lift nothing. A path allow names a path
   deny when its last segment starts with the deny's file name
@@ -343,7 +347,8 @@ the operator dismissed it). Each line names the `rule` and `list` (or
 `mode:auto` / `mode:default`), the agent's `agentId` and `agentName`, the
 project, the tool, the command and the time. The live file rolls over at 1 MiB
 into gzipped segments beside it, which are kept for 45 days. Tokens in the
-command and reason (`*_TOKEN=` and similar assignments, `--password` flags,
+command and reason (`*_TOKEN=` and similar assignments, a secret-named word and
+the value after it, `--password` flags, mysql's `-p<value>`, `-u user:pass`,
 `Authorization` headers, URL credentials, and GitHub, OpenAI, Anthropic, Slack,
 AWS, Google, GitLab and npm key shapes) are redacted when the line is written,
 and again when older lines are read.

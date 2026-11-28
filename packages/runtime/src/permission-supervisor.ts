@@ -23,7 +23,7 @@ import {
   type PermissionMode,
   parsePermissionRule,
 } from "./continuation/rules.js";
-import { absolutePath, agentConfigTarget, broadRoot, readFiles, scoutPolicyTarget, secretTarget, shellSegments, writtenFiles } from "./continuation/shell.js";
+import { absolutePath, agentConfigTarget, autoProjectRoot, readFiles, scoutPolicyTarget, secretTarget, shellSegments, writtenFiles } from "./continuation/shell.js";
 
 export const PERMISSION_SUPERVISOR_ACTOR_ID = "permission-supervisor";
 
@@ -68,7 +68,7 @@ function withRules(
 ): PermissionSupervisorVerdict {
   // Only an explicit `defaultMode: "auto"` judges calls outside every grant,
   // and never with `/`, the home folder or a folder above it as the project.
-  const outside = resolved.level === "ask" && resolved.source === "default" && policy.defaultMode === "auto" && !broadRoot(root);
+  const outside = resolved.level === "ask" && resolved.source === "default" && policy.defaultMode === "auto" && autoProjectRoot(root);
   const grant: Grant = outside ? { ...resolved, level: "workspace" } : resolved;
   const mode: PermissionMode = grant.level === "ask" ? "default" : "auto";
   const match = call ? matchPermissionRules(continuationPermissionScopes(policy, resolved.source, mode), { ...call, root }) : null;
@@ -119,6 +119,12 @@ export function guardedCall(call: Omit<PermissionCall, "root">, root: string): G
     for (const segment of shellSegments(call.command)) {
       writes.push(...writtenFiles(segment, root));
       reads.push(...readFiles(segment).map((file) => absolutePath(file, root)));
+      // Any command can carry a secret as an operand (`git add ~/.ssh/id_ed25519`,
+      // `scp ~/.aws/credentials host:`), so every plain word and `--flag=value` is checked.
+      for (const word of [...segment.words.slice(1), ...segment.redirects]) {
+        const value = word.startsWith("-") ? (word.includes("=") ? word.slice(word.indexOf("=") + 1) : "") : word;
+        if (value && !/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) reads.push(absolutePath(value, root));
+      }
     }
     if (SECRET_PATH.test(call.command) && !reads.some((file) => secretTarget(file, root))) reads.push(call.command);
   }
@@ -231,7 +237,7 @@ const OUTSIDE_PROJECT_PATH = /(?:^|\s|=|@)(?:~|\/)|\.\./;
 const ATTACHED_ABSOLUTE_PATH = /^--?[A-Za-z][A-Za-z0-9-]*=?(?:\/|~)/;
 const HTTP_URL = /^https?:\/\/\S+$/i;
 const FILE_URL = /\bfile:/i;
-const SECRET_PATH = /\.env\b|\bid_rsa\b|\.npmrc\b|\baws_secret|\bcredentials\b/i;
+const SECRET_PATH = /\.env\b|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\.npmrc\b|\baws_secret|\bcredentials\b|(?:^|[\s/'"=])\.(?:ssh|aws|gnupg|kube|azure)(?:\/|\b)/i;
 
 function stringField(input: unknown, keys: readonly string[]): string | null {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;

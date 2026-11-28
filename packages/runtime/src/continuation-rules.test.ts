@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { parseContinuationPolicy, type ContinuationPolicyFile } from "./continuation/grants.js";
 import {
@@ -165,8 +166,10 @@ describe("policy file", () => {
 
   test("defaultMode auto judges calls outside every grant by the risk classes", () => {
     const policy = parseContinuationPolicy({ version: 1, grants: [], permissions: { defaultMode: "auto" } });
+    // Outside a grant, auto takes only an ordinary folder under home as the project.
+    const root = join(homedir(), "dev", "x");
     const call = (command: string) => decideNativeToolSupervisor({
-      projectRoot: "/work/x", cwd: "/work/x", toolName: "run_command", toolInput: { CommandLine: command },
+      projectRoot: root, cwd: root, toolName: "run_command", toolInput: { CommandLine: command },
     }, policy);
     expect(call("bun test")).toMatchObject({ act: "continue", rule: "Bash(bun test:*)", list: "allow" });
     expect(call("make")).toMatchObject({ act: "continue", rule: "mode:auto", list: "mode" });

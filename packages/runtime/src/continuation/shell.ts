@@ -327,6 +327,20 @@ export function secretTarget(path: string, cwd: string): string | null {
   return null;
 }
 
+/**
+ * A folder `defaultMode: "auto"` may take as a project when no grant covers it:
+ * somewhere under the home folder, and not inside a dot folder (`~/.ssh`,
+ * `~/.config`…) or `~/Library`. `/etc`, `/usr`, `~/Library/LaunchAgents` and
+ * the home folder itself are never one.
+ */
+export function autoProjectRoot(path: string, cwd = "/"): boolean {
+  const absolute = absolutePath(path, cwd);
+  const home = resolve(homedir());
+  if (!absolute.startsWith(`${home}${sep}`)) return false;
+  const parts = absolute.slice(home.length + 1).split(sep).filter(Boolean);
+  return parts.length > 0 && parts[0] !== "Library" && !parts.some((part) => part.startsWith("."));
+}
+
 /** `/`, the home folder, and the folders above it: never a project root, never a target a lift covers. */
 export function broadRoot(path: string, cwd = "/"): boolean {
   const absolute = absolutePath(path, cwd);
